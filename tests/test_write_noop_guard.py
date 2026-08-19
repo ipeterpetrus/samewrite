@@ -7,9 +7,11 @@ G = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "h
 PASS = FAIL = 0
 
 
-def run(payload):
+def run(payload, env=None):
+    e = dict(os.environ); e.pop("CARRYTAX_ALLOW_NOOP", None)
+    if env: e.update(env)
     p = subprocess.run(["/usr/bin/python3", G], input=json.dumps(payload),
-                       capture_output=True, text=True, timeout=20)
+                       capture_output=True, text=True, timeout=20, env=e)
     denied = '"deny"' in p.stdout
     return denied, p.stdout, p.returncode
 
@@ -87,6 +89,26 @@ with tempfile.TemporaryDirectory() as d:
     check("164 baris, 1 baris diubah -> allow",
           run({"tool_name": "Write", "tool_input": {"file_path": p164,
                "content": big.replace("baris ke-100", "baris ke-100 DIUBAH")}})[0], False)
+
+    # 14: escape hatch — penulisan identik yang DISENGAJA harus lolos
+    check("CARRYTAX_ALLOW_NOOP=1 -> allow",
+          run({"tool_name": "Write", "tool_input": {"file_path": same, "content": "line1\nline2\n"}},
+              env={"CARRYTAX_ALLOW_NOOP": "1"})[0], False)
+    check("CARRYTAX_ALLOW_NOOP=0 -> tetap DENY",
+          run({"tool_name": "Write", "tool_input": {"file_path": same, "content": "line1\nline2\n"}},
+              env={"CARRYTAX_ALLOW_NOOP": "0"})[0], True)
+    # 15: FIFO tidak boleh membuat guard menggantung
+    fifo = os.path.join(d, "pipa")
+    os.mkfifo(fifo)
+    check("FIFO -> allow tanpa menggantung",
+          run({"tool_name": "Write", "tool_input": {"file_path": fifo, "content": "x"}})[0], False)
+    # 16: symlink ke berkas identik tetap terdeteksi
+    ln = os.path.join(d, "tautan.txt"); os.symlink(same, ln)
+    check("symlink ke isi identik -> DENY",
+          run({"tool_name": "Write", "tool_input": {"file_path": ln, "content": "line1\nline2\n"}})[0], True)
+    # 17: alasan deny menyebut escape hatch
+    _, out17, _ = run({"tool_name": "Write", "tool_input": {"file_path": same, "content": "line1\nline2\n"}})
+    check("alasan deny menyebut CARRYTAX_ALLOW_NOOP", "CARRYTAX_ALLOW_NOOP" in out17, True)
 
 print(f"\n{PASS} PASS / {FAIL} FAIL")
 sys.exit(1 if FAIL else 0)

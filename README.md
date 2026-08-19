@@ -37,7 +37,7 @@ so `carrytax` ships a hook that fixes it.
 hooks/write_noop_guard.py   PreToolUse(Write) — deny writes identical to disk
 hooks/install.sh            one command, idempotent, backs up settings.json
 skills/edit-discipline/     when to anchor-edit vs rewrite whole (Claude Code skill)
-tools/extract.py            pull carry data out of transcripts (no paths, no prompts)
+tools/extract.py            pull carry data out of transcripts (redacted by default)
 tools/simulate.py           50-simulation robustness suite: jackknife, bootstrap, holdout
 tests/                      18 assertions, mutation-tested
 docs/FINDINGS.md            full numbers, method, and the limits of both
@@ -60,8 +60,34 @@ python3 tools/extract.py mine.pkl ~/.claude/projects/*/*.jsonl
 python3 tools/simulate.py mine.pkl
 ```
 
-`extract.py` keeps only turn indices, item sizes, and the before/after pairs of
-overwritten files. No paths, no prompts, no tool output.
+`extract.py` is **redacted by default**: every line of every file is replaced with an
+8-byte hash plus its token count, computed during extraction. That is enough for
+`difflib` to find the same change blocks and enough to price them, while storing not
+one character of your code. Paths, prompts, and tool output are never stored at all.
+
+Redaction was not free to discover — the first version of this repo stored raw file
+contents while the README claimed it did not. Re-running all 50 simulations on
+redacted data moved the headline number by 0.001 pp (0.076% → 0.077%), so the
+privacy-preserving path costs nothing in fidelity.
+
+`--keep-content` turns redaction off for deeper analysis. Output then contains your
+file contents verbatim. Do not share it.
+
+## Security and support
+
+The hook is code that runs on every `Write` in your session. Read it before installing
+— it is 60 lines. It is **fail-open** on every error path, never writes, never sends
+anything anywhere, and reads only the file the agent was about to overwrite.
+
+Set `CARRYTAX_ALLOW_NOOP=1` when an identical write is deliberate — refreshing mtime,
+triggering a file watcher, testing idempotency.
+
+Do not wire `git pull` into an auto-update for this hook. A hook that updates itself
+from a remote repository is a code-execution path into your machine. Pin a commit,
+read the diff, then update on purpose.
+
+**Support: none promised.** This is a measurement result with tooling attached, published
+because the negative findings are useful, not because it is a maintained product.
 
 ## Honest limits
 

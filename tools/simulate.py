@@ -7,22 +7,16 @@ pakai: python3 tools/simulate.py DATA.pkl [--mode grid|robust]
 """
 import argparse, difflib, math, pickle, random, statistics as st, sys
 
-try:
-    import tiktoken
-    _ENC = tiktoken.get_encoding("o200k_base")
-    _memo = {}
+# Data masuk sudah ter-redaksi oleh tools/extract.py: tiap berkas = (hash tiap baris,
+# token tiap baris). Tak ada isi berkas di sini — difflib bekerja pada hash, biaya
+# dihitung dari token per baris. Format lama (string mentah) tetap diterima.
+def as_pair(x):
+    """-> (baris, token_per_baris). Terima bentuk ter-redaksi maupun string mentah."""
+    if isinstance(x, tuple) and len(x) == 2:
+        return x[0], x[1]
+    lines = x.splitlines(True)
+    return lines, [max(1, round(len(l) / 3.14)) for l in lines]
 
-    def T(s):
-        h = hash(s)
-        v = _memo.get(h)
-        if v is None:
-            v = len(_ENC.encode(s)); _memo[h] = v
-        return v
-    TOKENIZER = "o200k_base"
-except Exception:                                   # ponytail: fallback, bukan dependency keras
-    def T(s):
-        return len(s) / 3.14
-    TOKENIZER = "perkiraan chars/3.14"
 
 CTX, OVH, KMAX = 3, 30, 3
 
@@ -41,10 +35,10 @@ def hunks(a, b, ctx=CTX, merge=True):
     return h
 
 
-def edit_cost(a, b, ctx=CTX, ovh=OVH):
-    H = hunks(a, b, ctx)
-    return sum(T("".join(a[max(0, i1 - ctx):min(len(a), i2 + ctx)]))
-               + T("".join(b[max(0, j1 - ctx):min(len(b), j2 + ctx)])) + ovh
+def edit_cost(a_lines, a_tok, b_lines, b_tok, ctx=CTX, ovh=OVH):
+    H = hunks(a_lines, b_lines, ctx)
+    return sum(sum(a_tok[max(0, i1 - ctx):min(len(a_tok), i2 + ctx)])
+               + sum(b_tok[max(0, j1 - ctx):min(len(b_tok), j2 + ctx)]) + ovh
                for i1, i2, j1, j2 in H), len(H)
 
 
@@ -57,13 +51,14 @@ def measure(sessions, K=KMAX, ctx=CTX, ovh=OVH, fail=0.0, retry=0.0):
         carry += d["carry"] / 3.14
         for (turn, old, new) in d["rew"]:
             nrew += 1
-            if old == new:                          # nol-perubahan: hemat penuh, nol risiko
+            al, at = as_pair(old)
+            bl, bt = as_pair(new)
+            if al == bl:                            # nol-perubahan: hemat penuh, nol risiko
                 nnoop += 1
-                noop += T(new) * (N - turn)
+                noop += sum(bt) * (N - turn)
                 continue
-            a, b = old.splitlines(True), new.splitlines(True)
-            te, nh = edit_cost(a, b, ctx, ovh)
-            tw = T(new)
+            te, nh = edit_cost(al, at, bl, bt, ctx, ovh)
+            tw = sum(bt)
             te *= (1 + fail * retry)
             if nh <= K and te < tw:
                 kena += 1
@@ -139,7 +134,7 @@ def main():
     ap.add_argument("data"); ap.add_argument("--mode", default="robust")
     a = ap.parse_args()
     D = pickle.load(open(a.data, "rb"))
-    print(f"# tokenizer: {TOKENIZER} · {len(D)} sesi · {sum(d['N'] for d in D):,} turn "
+    print(f"# redaksi: {'aktif' if D and D[0].get('redacted') else 'MATI'} · {len(D)} sesi · {sum(d['N'] for d in D):,} turn "
           f"· {sum(len(d['rew']) for d in D)} rewrite\n")
     rows, jk, bs, base = robust(D)
     seen = set()

@@ -9,9 +9,11 @@ FAIL-OPEN by design: guard ini menghemat token, bukan mencegah kerusakan.
 Bug di sini tidak boleh memblok kerja -> error apa pun = allow.
 Perbandingan BYTE-EXACT: beda whitespace/newline = perubahan nyata, dibiarkan lewat.
 """
-import json, os, sys
+import json, os, stat, sys
 
 MAX_BYTES = 8 * 1024 * 1024   # ponytail: berkas raksasa dilewati, bukan dibaca ke memori
+ESCAPE = "CARRYTAX_ALLOW_NOOP"  # =1 -> guard mati; utk penulisan identik yang DISENGAJA
+                                # (memicu file-watcher, menyegarkan mtime, uji idempotensi)
 
 
 def allow():
@@ -28,6 +30,8 @@ def deny(reason):
 
 
 def main():
+    if os.environ.get(ESCAPE) == "1":
+        allow()
     try:
         data = json.loads(sys.stdin.read() or "{}")
     except Exception:
@@ -42,12 +46,15 @@ def main():
     if not path or not isinstance(path, str) or not isinstance(new, str):
         allow()
     try:
-        if not os.path.isfile(path):
-            allow()                      # berkas baru = Write sah
-        if os.path.getsize(path) > MAX_BYTES:
+        st_ = os.stat(path)
+        if not stat.S_ISREG(st_.st_mode):
+            allow()                      # berkas baru, FIFO, device, direktori: bukan urusan kita
+        if st_.st_size > MAX_BYTES:
             allow()
         with open(path, "r", encoding="utf-8", errors="strict") as fh:
-            cur = fh.read()
+            cur = fh.read(MAX_BYTES + 1)  # /proc & sejenisnya lapor size 0 tapi mengalir terus
+        if len(cur) > MAX_BYTES:
+            allow()
     except Exception:
         allow()                          # tak terbaca / biner / izin -> jangan halangi
     if cur == new:
@@ -56,7 +63,8 @@ def main():
             f"Write DITOLAK: isi identik dengan {path} yang sudah di disk "
             f"({len(new)} byte, {n} baris) — nol perubahan, token output terbuang. "
             f"Berkas sudah dalam keadaan yang kamu inginkan; lanjut ke langkah berikutnya. "
-            f"Kalau memang perlu mengubah, kirim isi yang berbeda atau pakai Edit."
+            f"Kalau memang perlu mengubah, kirim isi yang berbeda atau pakai Edit. "
+            f"Penulisan identik yang disengaja: jalankan dengan {ESCAPE}=1."
         )
     allow()
 
