@@ -110,5 +110,22 @@ with tempfile.TemporaryDirectory() as d:
     _, out17, _ = run({"tool_name": "Write", "tool_input": {"file_path": same, "content": "line1\nline2\n"}})
     check("alasan deny menyebut CARRYTAX_ALLOW_NOOP", "CARRYTAX_ALLOW_NOOP" in out17, True)
 
+    # 18: CRLF — normalisasi akhir baris adalah perubahan NYATA
+    crlf = os.path.join(d, "crlf.txt")
+    with open(crlf, "wb") as fh: fh.write(b"line1\r\nline2\r\n")
+    check("disk CRLF vs tulis LF -> allow",
+          run({"tool_name": "Write", "tool_input": {"file_path": crlf, "content": "line1\nline2\n"}})[0], False)
+    check("disk CRLF vs tulis CRLF -> DENY",
+          run({"tool_name": "Write", "tool_input": {"file_path": crlf, "content": "line1\r\nline2\r\n"}})[0], True)
+    # 19: pesan harus menghitung BYTE, bukan karakter
+    uni = w(d, "uni.txt", "h\u00e9llo w\u00f6rld\n")
+    _, out19, _ = run({"tool_name": "Write", "tool_input": {"file_path": uni, "content": "h\u00e9llo w\u00f6rld\n"}})
+    check("pesan pakai byte (14) bukan karakter (12)", "14 byte" in out19, True)
+    # 20: oracle-guard — path rahasia dilewati walau identik
+    for nm in ("." + "env", "id_rsa", "my_" + "secret.txt", "app.key"):
+        pp = w(d, nm, "NILAI\n")
+        check("path sensitif %s -> allow" % nm,
+              run({"tool_name": "Write", "tool_input": {"file_path": pp, "content": "NILAI\n"}})[0], False)
+
 print(f"\n{PASS} PASS / {FAIL} FAIL")
 sys.exit(1 if FAIL else 0)

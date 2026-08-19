@@ -97,7 +97,12 @@ because the negative findings are useful, not because it is a maintained product
   A bug in it must never block real work.
 - `PreToolUse` cannot see `@file` references (they enter context without a tool call),
   nor `cat > f` heredocs, `tee`, or `sed -i`. The skill covers those by instruction only.
-- Byte-exact comparison. Whitespace and newline differences are real changes and pass.
+- Byte-exact comparison on **raw bytes**. An earlier version read in text mode, which
+  silently folds CRLF into LF — it would have blocked a legitimate line-ending
+  normalisation. Found by cross-family audit, not by the test suite.
+- Files whose path looks secret-bearing are skipped entirely. Not because the guard
+  leaks contents — it never reads them out — but because deny/allow is an **equality
+  oracle**: a caller could guess a file's contents and read the answer off the verdict.
 - Session length dominates everything here. Literature puts compaction at −62.8…−85.9%.
   This repo is worth ~0.1%. Do not mistake it for the lever.
 
