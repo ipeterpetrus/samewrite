@@ -43,6 +43,14 @@ tests/                      18 assertions, mutation-tested
 docs/FINDINGS.md            full numbers, method, and the limits of both
 ```
 
+## Status: experiment, not a default
+
+An adversarial review panel held this back until the security boundaries and the
+reproduction artifacts existed. They now do — but the honest framing survived the
+review: this is an **optional experiment**, not a hook anyone should adopt by default.
+Its single load-bearing finding comes from one author's sessions on one model version
+(August 2026). Measure your own before trusting it.
+
 ## Install the hook
 
 ```bash
