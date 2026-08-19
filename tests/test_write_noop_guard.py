@@ -5,10 +5,12 @@ import json, os, subprocess, sys, tempfile
 
 G = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks", "write_noop_guard.py")
 PASS = FAIL = 0
+ROOT = [os.getcwd()]                          # diisi tempdir saat tes berjalan
 
 
 def run(payload, env=None):
     e = dict(os.environ); e.pop("CARRYTAX_ALLOW_NOOP", None)
+    e["CARRYTAX_ROOT"] = ROOT[0]              # guard dibatasi ke pohon kerja; tes menyetelnya
     if env: e.update(env)
     p = subprocess.run(["/usr/bin/python3", G], input=json.dumps(payload),
                        capture_output=True, text=True, timeout=20, env=e)
@@ -31,6 +33,7 @@ def w(d, name, body):
 
 
 with tempfile.TemporaryDirectory() as d:
+    ROOT[0] = d
     same = w(d, "same.txt", "line1\nline2\n")
     empty = w(d, "empty.txt", "")
     missing = os.path.join(d, "tidak_ada.txt")
@@ -126,6 +129,14 @@ with tempfile.TemporaryDirectory() as d:
         pp = w(d, nm, "NILAI\n")
         check("path sensitif %s -> allow" % nm,
               run({"tool_name": "Write", "tool_input": {"file_path": pp, "content": "NILAI\n"}})[0], False)
+
+    # 21: confinement — berkas identik DI LUAR workspace tidak diurus
+    import tempfile as _tf
+    with _tf.TemporaryDirectory() as outside:
+        po = os.path.join(outside, "luar.txt")
+        with open(po, "w") as fh: fh.write("sama\n")
+        check("di luar CARRYTAX_ROOT -> allow",
+              run({"tool_name": "Write", "tool_input": {"file_path": po, "content": "sama\n"}})[0], False)
 
 print(f"\n{PASS} PASS / {FAIL} FAIL")
 sys.exit(1 if FAIL else 0)

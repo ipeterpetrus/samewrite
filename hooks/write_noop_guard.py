@@ -36,7 +36,8 @@ def sensitive(path):
             or any(dd in p for dd in SENS_DIRS))
 
 
-ESCAPE = "CARRYTAX_ALLOW_NOOP"  # =1 -> guard mati; utk penulisan identik yang DISENGAJA
+ESCAPE = "CARRYTAX_ALLOW_NOOP"
+ROOT_ENV = "CARRYTAX_ROOT"      # batasi guard ke satu pohon direktori; kosong = cwd  # =1 -> guard mati; utk penulisan identik yang DISENGAJA
                                 # (memicu file-watcher, menyegarkan mtime, uji idempotensi)
 
 
@@ -77,6 +78,13 @@ def main():
         allow()
     if sensitive(path):
         allow()                          # jangan jadi oracle atas berkas rahasia
+    try:                                 # confinement: di luar workspace, bukan urusan kita
+        root = os.path.realpath(os.environ.get(ROOT_ENV) or os.getcwd())
+        real = os.path.realpath(path)    # realpath menyelesaikan symlink SEBELUM keputusan
+        if os.path.commonpath([root, real]) != root:
+            allow()
+    except Exception:
+        allow()
     try:
         st_ = os.stat(path)
         if not stat.S_ISREG(st_.st_mode):

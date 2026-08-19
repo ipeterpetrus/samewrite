@@ -1,0 +1,30 @@
+name: test
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: guard suite
+        run: python3 tests/test_write_noop_guard.py
+      - name: end-to-end on synthetic fixture
+        run: |
+          python3 tools/make_fixture.py /tmp/fx.jsonl --seed 7 --turns 400
+          python3 tools/extract.py /tmp/fx.pkl /tmp/fx.jsonl
+          python3 tools/simulate.py /tmp/fx.pkl
+      - name: redaction holds
+        run: |
+          python3 - <<'EOF'
+          import pickle
+          d = pickle.load(open("/tmp/fx.pkl", "rb"))
+          blob = pickle.dumps(d)
+          for probe in (b"def f", b"# ubah", b"/w/mod"):
+              assert probe not in blob, f"isi berkas bocor ke keluaran: {probe!r}"
+          print("redaksi terverifikasi: nol isi berkas di keluaran")
+          EOF

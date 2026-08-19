@@ -45,6 +45,11 @@ Robustness across 50 unique simulations:
 | holdout (random half) | 6 | 0.021–0.411% |
 | drop top-k contributors | 5 | 0.067% (k=2) → 0.018% (k=6) |
 
+**These are 50 unique configurations, not 50 independent observations.** Jackknife,
+bootstrap and holdout all resample the *same* 24 sessions, so the spread describes
+sensitivity to sample composition — not a sampling distribution. No confidence interval
+is claimed here, and none should be read into it.
+
 **The estimate is not stable.** One session (`dfd5d8d3`) supplies half the effect:
 removing it takes 0.176% → 0.089%. Twelve of 24 sessions contribute nothing at all.
 
@@ -93,3 +98,15 @@ data, splitting a session in two cuts carry to **46.5–59.3%** (uniform-split p
 50%); into four, **23.8–39.1%**. Published work on compact memory reports −62.8…−85.9%.
 
 Everything in this repo is worth ~0.1%. Session length is worth 50–88%.
+
+
+## 6. What would falsify this
+
+- Re-run `tools/extract.py` + `tools/simulate.py` on your own transcripts. If no-op
+  overwrites are under 2% of overwrites, the one finding this repo rests on does not
+  generalise beyond the author's sessions and model version (August 2026).
+- Install the hook and count denials. Zero denials over a month of real work means the
+  behaviour was model-version-specific and the hook is dead weight — remove it.
+- The guard is advisory and racy by construction: it reads the file, then the host
+  performs the write. Anything that mutates the file in between is outside its
+  knowledge. It cannot be made race-free without owning the write itself.
