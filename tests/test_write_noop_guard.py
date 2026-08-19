@@ -9,8 +9,8 @@ ROOT = [os.getcwd()]                          # diisi tempdir saat tes berjalan
 
 
 def run(payload, env=None):
-    e = dict(os.environ); e.pop("CARRYTAX_ALLOW_NOOP", None)
-    e["CARRYTAX_ROOT"] = ROOT[0]              # guard dibatasi ke pohon kerja; tes menyetelnya
+    e = dict(os.environ); e.pop("SAMEWRITE_ALLOW_NOOP", None)
+    e["SAMEWRITE_ROOT"] = ROOT[0]              # guard dibatasi ke pohon kerja; tes menyetelnya
     if env: e.update(env)
     p = subprocess.run(["/usr/bin/python3", G], input=json.dumps(payload),
                        capture_output=True, text=True, timeout=20, env=e)
@@ -94,12 +94,12 @@ with tempfile.TemporaryDirectory() as d:
                "content": big.replace("baris ke-100", "baris ke-100 DIUBAH")}})[0], False)
 
     # 14: escape hatch — penulisan identik yang DISENGAJA harus lolos
-    check("CARRYTAX_ALLOW_NOOP=1 -> allow",
+    check("SAMEWRITE_ALLOW_NOOP=1 -> allow",
           run({"tool_name": "Write", "tool_input": {"file_path": same, "content": "line1\nline2\n"}},
-              env={"CARRYTAX_ALLOW_NOOP": "1"})[0], False)
-    check("CARRYTAX_ALLOW_NOOP=0 -> tetap DENY",
+              env={"SAMEWRITE_ALLOW_NOOP": "1"})[0], False)
+    check("SAMEWRITE_ALLOW_NOOP=0 -> tetap DENY",
           run({"tool_name": "Write", "tool_input": {"file_path": same, "content": "line1\nline2\n"}},
-              env={"CARRYTAX_ALLOW_NOOP": "0"})[0], True)
+              env={"SAMEWRITE_ALLOW_NOOP": "0"})[0], True)
     # 15: FIFO tidak boleh membuat guard menggantung
     fifo = os.path.join(d, "pipa")
     os.mkfifo(fifo)
@@ -111,7 +111,7 @@ with tempfile.TemporaryDirectory() as d:
           run({"tool_name": "Write", "tool_input": {"file_path": ln, "content": "line1\nline2\n"}})[0], True)
     # 17: alasan deny menyebut escape hatch
     _, out17, _ = run({"tool_name": "Write", "tool_input": {"file_path": same, "content": "line1\nline2\n"}})
-    check("alasan deny menyebut CARRYTAX_ALLOW_NOOP", "CARRYTAX_ALLOW_NOOP" in out17, True)
+    check("alasan deny menyebut SAMEWRITE_ALLOW_NOOP", "SAMEWRITE_ALLOW_NOOP" in out17, True)
 
     # 18: CRLF — normalisasi akhir baris adalah perubahan NYATA
     crlf = os.path.join(d, "crlf.txt")
@@ -135,7 +135,7 @@ with tempfile.TemporaryDirectory() as d:
     with _tf.TemporaryDirectory() as outside:
         po = os.path.join(outside, "luar.txt")
         with open(po, "w") as fh: fh.write("sama\n")
-        check("di luar CARRYTAX_ROOT -> allow",
+        check("di luar SAMEWRITE_ROOT -> allow",
               run({"tool_name": "Write", "tool_input": {"file_path": po, "content": "sama\n"}})[0], False)
 
 print(f"\n{PASS} PASS / {FAIL} FAIL")

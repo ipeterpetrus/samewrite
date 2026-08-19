@@ -1,9 +1,9 @@
-# carrytax
+# samewrite
 
 Measure what a coding-agent session actually spends, then enforce the one rule that
 is free to enforce.
 
-`carrytax` came out of auditing 24 real Claude Code transcripts (29,838 assistant
+`samewrite` came out of auditing 24 real Claude Code transcripts (29,838 assistant
 turns). The headline finding is not the one people expect.
 
 ## The finding
@@ -29,7 +29,7 @@ on average) each carry their own anchor context.
 
 One thing did survive scrutiny: **15% of overwrites wrote content byte-identical to
 what was already on disk.** Zero changes, full token cost. That one is free to fix,
-so `carrytax` ships a hook that fixes it.
+so `samewrite` ships a hook that fixes it.
 
 ## What's here
 
@@ -54,7 +54,7 @@ Its single load-bearing finding comes from one author's sessions on one model ve
 ## Install the hook
 
 ```bash
-git clone https://github.com/<you>/carrytax && cd carrytax
+git clone https://github.com/<you>/samewrite && cd samewrite
 python3 tests/test_write_noop_guard.py     # 18 PASS expected
 bash hooks/install.sh
 ```
@@ -87,7 +87,7 @@ The hook is code that runs on every `Write` in your session. Read it before inst
 — it is 60 lines. It is **fail-open** on every error path, never writes, never sends
 anything anywhere, and reads only the file the agent was about to overwrite.
 
-Set `CARRYTAX_ALLOW_NOOP=1` when an identical write is deliberate — refreshing mtime,
+Set `SAMEWRITE_ALLOW_NOOP=1` when an identical write is deliberate — refreshing mtime,
 triggering a file watcher, testing idempotency.
 
 Do not wire `git pull` into an auto-update for this hook. A hook that updates itself

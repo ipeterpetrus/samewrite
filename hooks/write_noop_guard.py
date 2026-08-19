@@ -36,8 +36,8 @@ def sensitive(path):
             or any(dd in p for dd in SENS_DIRS))
 
 
-ESCAPE = "CARRYTAX_ALLOW_NOOP"
-ROOT_ENV = "CARRYTAX_ROOT"      # batasi guard ke satu pohon direktori; kosong = cwd  # =1 -> guard mati; utk penulisan identik yang DISENGAJA
+ESCAPE = "SAMEWRITE_ALLOW_NOOP"
+ROOT_ENV = "SAMEWRITE_ROOT"      # batasi guard ke satu pohon direktori; kosong = cwd  # =1 -> guard mati; utk penulisan identik yang DISENGAJA
                                 # (memicu file-watcher, menyegarkan mtime, uji idempotensi)
 
 
