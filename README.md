@@ -39,6 +39,8 @@ hooks/install.sh            one command, idempotent, backs up settings.json
 skills/edit-discipline/     when to anchor-edit vs rewrite whole (Claude Code skill)
 tools/extract.py            pull carry data out of transcripts (redacted by default)
 tools/simulate.py           50-simulation robustness suite: jackknife, bootstrap, holdout
+tools/report.py             read the field ledger: how often the guard actually fires
+tools/feed.sh               regenerate docs/FIELD_DATA.md from the ledger, commit if changed
 tests/                      18 assertions, mutation-tested
 docs/FINDINGS.md            full numbers, method, and the limits of both
 ```
@@ -60,6 +62,20 @@ bash hooks/install.sh
 ```
 
 Takes effect in the next session — `settings.json` is read at startup.
+
+The installer wires an optional field ledger (`SAMEWRITE_LEDGER`, default
+`~/logs/samewrite.jsonl`). It records **size and outcome only** — never a path, a
+filename, or file content — so the claim in this README can be checked against what
+actually happens rather than re-argued:
+
+```bash
+python3 tools/report.py ~/logs/samewrite.jsonl
+python3 tools/report.py ~/logs/samewrite.jsonl --markdown > docs/FIELD_DATA.md
+```
+
+The retrospective number is 15% of overwrites. If your field rate lands under 2% over a
+few hundred writes, the finding did not generalise — `report.py` says so itself, and the
+right move is to remove the hook.
 
 ## Measure your own sessions
 

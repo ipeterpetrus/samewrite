@@ -11,7 +11,7 @@ Perbandingan BYTE-EXACT pada byte MENTAH (mode biner): beda whitespace, newline,
 CRLF/LF = perubahan nyata dan lewat. Path bernilai-rahasia dilewati agar jawaban
 deny/allow tak menjadi oracle kesetaraan atas isinya.
 """
-import json, os, stat, sys
+import json, os, stat, sys, time
 
 MAX_BYTES = 8 * 1024 * 1024   # ponytail: berkas raksasa dilewati, bukan dibaca ke memori
 MAX_STDIN = 64 * 1024 * 1024  # payload lebih besar dari ini: jangan dimuat, langsung allow
@@ -37,12 +37,29 @@ def sensitive(path):
 
 
 ESCAPE = "SAMEWRITE_ALLOW_NOOP"
+LEDGER_ENV = "SAMEWRITE_LEDGER"  # opsional: path JSONL. Yang dicatat hanya UKURAN dan
+                                 # hasil — tak pernah path, isi, atau nama berkas.
 ROOT_ENV = "SAMEWRITE_ROOT"      # batasi guard ke satu pohon direktori; kosong = cwd  # =1 -> guard mati; utk penulisan identik yang DISENGAJA
                                 # (memicu file-watcher, menyegarkan mtime, uji idempotensi)
 
 
 def allow():
     sys.exit(0)
+
+
+def note(event, **fields):
+    """Catat satu baris JSONL bila SAMEWRITE_LEDGER diset. Sengaja bebas-identitas:
+    tanpa path, tanpa isi, tanpa nama berkas. Gagal menulis tak pernah menghalangi kerja."""
+    p = os.environ.get(LEDGER_ENV)
+    if not p:
+        return
+    try:
+        rec = {"ts": int(time.time()), "host": os.uname().nodename, "event": event}
+        rec.update(fields)
+        with open(p, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def deny(reason):
@@ -101,8 +118,10 @@ def main():
         new_b = new.encode("utf-8")
     except Exception:
         allow()                          # tak terbaca / biner / izin -> jangan halangi
+    note("checked", bytes=len(new_b), same=(cur == new_b))
     if cur == new_b:
         n = new.count("\n") + (0 if new.endswith("\n") or not new else 1)
+        note("denied", bytes=len(new_b), lines=n)
         deny(
             f"Write DITOLAK: isi identik dengan {path} yang sudah di disk "
             f"({len(new_b)} byte, {n} baris) — nol perubahan, token output terbuang. "

@@ -4,8 +4,8 @@
 set -euo pipefail
 PKG="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$PKG/.." && pwd)"
-DST=/home/ubuntu/scripts/write_noop_guard.py
-SET=/home/ubuntu/.claude/settings.json
+DST="${SAMEWRITE_DST:-$HOME/scripts/write_noop_guard.py}"
+SET="${SAMEWRITE_SETTINGS:-$HOME/.claude/settings.json}"
 
 echo "[1/4] suite regresi…"
 /usr/bin/python3 "$ROOT/tests/test_write_noop_guard.py" >/tmp/wng_test.out 2>&1 || {
@@ -17,10 +17,14 @@ install -m 0755 "$PKG/write_noop_guard.py" "$DST"
 
 echo "[3/4] daftarkan hook PreToolUse(Write) di settings.json"
 cp -a "$SET" "$SET.bak.wng.$(date -u +%Y%m%d_%H%M%S)"
-/usr/bin/python3 - "$SET" <<'PY'
+LEDGER="${SAMEWRITE_LEDGER:-$HOME/logs/samewrite.jsonl}"
+mkdir -p "$(dirname "$LEDGER")"
+HOOKCMD="bash -c 'SAMEWRITE_LEDGER=$LEDGER exec python3 $DST'"
+echo "   ledger: $LEDGER"
+/usr/bin/python3 - "$SET" "$HOOKCMD" <<'PY'
 import json,sys
-p=sys.argv[1]; d=json.load(open(p))
-CMD="bash /home/ubuntu/scripts/hook_logwrap.sh PreToolUse:write_noop_guard.py 'python3 /home/ubuntu/scripts/write_noop_guard.py'"
+p, CMD = sys.argv[1], sys.argv[2]
+d = json.load(open(p))
 pre=d.setdefault("hooks",{}).setdefault("PreToolUse",[])
 if any(CMD in h.get("command","") for m in pre for h in m.get("hooks",[])):
     print("   sudah terpasang — tak ada perubahan"); sys.exit(0)
@@ -30,6 +34,7 @@ print("   entri ditambahkan")
 PY
 
 echo "[4/4] verifikasi konsumen — guard dijalankan lewat jalur nyata"
+export SAMEWRITE_ROOT="$(dirname "$DST")"
 printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"'"$DST"'","content":"x"}}' \
   | /usr/bin/python3 "$DST" | grep -q deny && echo "   ANEH: isi beda kok ditolak" || echo "   allow utk isi beda: OK"
 printf '{"tool_name":"Write","tool_input":{"file_path":%s,"content":%s}}' \

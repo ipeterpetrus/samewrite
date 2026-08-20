@@ -138,5 +138,28 @@ with tempfile.TemporaryDirectory() as d:
         check("di luar SAMEWRITE_ROOT -> allow",
               run({"tool_name": "Write", "tool_input": {"file_path": po, "content": "sama\n"}})[0], False)
 
+    # 22: ledger — mencatat, dan yang dicatat bebas-identitas
+    led = os.path.join(d, "led.jsonl")
+    run({"tool_name": "Write", "tool_input": {"file_path": same, "content": "line1\nline2\n"}},
+        env={"SAMEWRITE_LEDGER": led})
+    run({"tool_name": "Write", "tool_input": {"file_path": same, "content": "beda\n"}},
+        env={"SAMEWRITE_LEDGER": led})
+    recs = [json.loads(x) for x in open(led)] if os.path.exists(led) else []
+    check("ledger mencatat denied", any(r["event"] == "denied" for r in recs), True)
+    check("ledger mencatat checked", any(r["event"] == "checked" for r in recs), True)
+    blob = json.dumps(recs)
+    check("ledger TIDAK memuat path", same not in blob, True)
+    check("ledger TIDAK memuat nama berkas", "same.txt" not in blob, True)
+    check("ledger TIDAK memuat isi", "line1" not in blob and "beda" not in blob, True)
+    check("ledger punya ukuran byte", all("bytes" in r for r in recs), True)
+    # 23: tanpa env, tak ada berkas ledger yang dibuat
+    led2 = os.path.join(d, "tak_diminta.jsonl")
+    run({"tool_name": "Write", "tool_input": {"file_path": same, "content": "line1\nline2\n"}})
+    check("tanpa SAMEWRITE_LEDGER -> tak menulis apa pun", os.path.exists(led2), False)
+    # 24: ledger tak bisa ditulis -> jangan halangi kerja
+    check("ledger path mustahil -> tetap DENY normal",
+          run({"tool_name": "Write", "tool_input": {"file_path": same, "content": "line1\nline2\n"}},
+              env={"SAMEWRITE_LEDGER": "/proc/mustahil/led.jsonl"})[0], True)
+
 print(f"\n{PASS} PASS / {FAIL} FAIL")
 sys.exit(1 if FAIL else 0)
