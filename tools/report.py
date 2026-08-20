@@ -9,6 +9,7 @@ pakai: python3 tools/report.py LEDGER.jsonl [LEDGER2.jsonl ...] [--markdown] [--
 """
 import argparse, collections, json, os, sys, time
 
+SMALL_BLOCKS = 3          # batas skill edit-discipline: <=3 blok -> Edit
 TOK_PER_BYTE = 1 / 3.14   # dari pengukuran o200k pada korpus kode; lihat docs/FINDINGS.md
 
 
@@ -30,14 +31,21 @@ def load(paths, days=None):
 
 
 def summarize(recs):
-    s = collections.defaultdict(lambda: dict(checked=0, denied=0, bytes_saved=0))
-    days = collections.defaultdict(lambda: dict(checked=0, denied=0, bytes_saved=0))
+    zero = lambda: dict(checked=0, denied=0, bytes_saved=0, rewrites=0, small=0, small_bytes=0)
+    s = collections.defaultdict(zero)
+    days = collections.defaultdict(zero)
     for r in recs:
         h = r.get("host", "?")
         d = time.strftime("%Y-%m-%d", time.gmtime(r.get("ts", 0)))
         for bucket in (s[h], days[d]):
             if r.get("event") == "checked":
                 bucket["checked"] += 1
+                blk = r.get("blocks")
+                if r.get("same") is False and isinstance(blk, int):
+                    bucket["rewrites"] += 1
+                    if blk <= SMALL_BLOCKS:          # muat di Edit, ditulis ulang penuh
+                        bucket["small"] += 1
+                        bucket["small_bytes"] += r.get("bytes", 0)
             elif r.get("event") == "denied":
                 bucket["denied"] += 1
                 bucket["bytes_saved"] += r.get("bytes", 0)
@@ -59,6 +67,15 @@ def main():
     tot_d = sum(v["denied"] for v in per_host.values())
     tot_b = sum(v["bytes_saved"] for v in per_host.values())
     rate = 100 * tot_d / tot_c if tot_c else 0
+    tot_rw = sum(v["rewrites"] for v in per_host.values())
+    tot_sm = sum(v["small"] for v in per_host.values())
+    tot_sb = sum(v["small_bytes"] for v in per_host.values())
+    edit_line = ""
+    if tot_rw:
+        edit_line = (f"Tulis-ulang dengan <={SMALL_BLOCKS} blok berubah: {tot_sm:,} dari {tot_rw:,} "
+                     f"({100 * tot_sm / tot_rw:.1f}%) — {tot_sb:,} byte "
+                     f"(~{tot_sb * TOK_PER_BYTE:,.0f} token) dikirim ulang untuk perubahan yang "
+                     f"muat di Edit. Guard tak memblokirnya; ini ukuran, bukan vonis.")
     if a.markdown:
         print("<!-- dihasilkan tools/report.py — jangan disunting tangan -->")
         print(f"\n## Field data\n")
@@ -73,6 +90,8 @@ def main():
               f"**{tot_b:,}** | **{tot_b*TOK_PER_BYTE:,.0f}** |")
         print(f"\nRetrospektif pada 24 transcript memberi 15% (18/122). Lapangan: "
               f"**{rate:.1f}%** dari {tot_c:,} penulisan.")
+        if edit_line:
+            print(f"\n{edit_line}")
         if tot_c >= 100 and rate < 2:
             print(f"\n> **Falsifier menyala.** README menyatakan: di bawah 2% pada sampel "
                   f"memadai, temuan ini tidak menggeneralisasi dan hook sebaiknya dicabut.")
@@ -82,6 +101,8 @@ def main():
         for h, v in sorted(per_host.items()):
             r = 100 * v["denied"] / v["checked"] if v["checked"] else 0
             print(f"  {h:<20} periksa {v['checked']:>6,} · tolak {v['denied']:>5,} ({r:>5.1f}%)")
+        if edit_line:
+            print(f"  {edit_line}")
         for d in sorted(per_day)[-7:]:
             v = per_day[d]
             print(f"  {d}  periksa {v['checked']:>6,} · tolak {v['denied']:>5,}")

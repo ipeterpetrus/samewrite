@@ -15,6 +15,8 @@ import json, os, stat, sys, time
 
 MAX_BYTES = 8 * 1024 * 1024   # ponytail: berkas raksasa dilewati, bukan dibaca ke memori
 MAX_STDIN = 64 * 1024 * 1024  # payload lebih besar dari ini: jangan dimuat, langsung allow
+MAX_DIFF_LINES = 5000         # ponytail: di atas ini blok tak dihitung (difflib O(n*m));
+                              # telemetri hilang, keputusan deny/allow TIDAK berubah
 # Path bernilai-rahasia dilewati. Bukan karena guard membocorkan isi — ia tidak — tapi
 # karena jawaban deny/allow adalah ORACLE KESETARAAN: pemanggil bisa menebak isi berkas
 # lalu membaca hasilnya. Untuk berkas yang hook lain sengaja larang dibaca, itu bypass.
@@ -45,6 +47,25 @@ ROOT_ENV = "SAMEWRITE_ROOT"      # batasi guard ke satu pohon direktori; kosong 
 
 def allow():
     sys.exit(0)
+
+
+def hunks(cur_b, new_b):
+    """Berapa BLOK baris yang berubah antara isi lama dan isi baru.
+
+    Telemetri murni: tak pernah menyentuh keputusan deny/allow. Alasannya, aturan
+    skill edit-discipline ("perubahan <=3 blok -> pakai Edit, bukan tulis ulang")
+    selama ini nol data lapangan — angka ini yang membuatnya bisa diuji.
+    None = tak dihitung (terlalu besar, atau gagal)."""
+    try:
+        a = cur_b.decode("utf-8", "replace").splitlines()
+        b = new_b.decode("utf-8", "replace").splitlines()
+        if max(len(a), len(b)) > MAX_DIFF_LINES:
+            return None
+        import difflib   # impor lokal: jalur deny tak perlu membayarnya
+        return sum(1 for op in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes()
+                   if op[0] != "equal")
+    except Exception:
+        return None
 
 
 def note(event, **fields):
@@ -118,8 +139,8 @@ def main():
         new_b = new.encode("utf-8")
     except Exception:
         allow()                          # tak terbaca / biner / izin -> jangan halangi
-    note("checked", bytes=len(new_b), same=(cur == new_b))
     if cur == new_b:
+        note("checked", bytes=len(new_b), same=True)
         n = new.count("\n") + (0 if new.endswith("\n") or not new else 1)
         note("denied", bytes=len(new_b), lines=n)
         deny(
@@ -129,6 +150,9 @@ def main():
             f"Kalau memang perlu mengubah, kirim isi yang berbeda atau pakai Edit. "
             f"Penulisan identik yang disengaja: jalankan dengan {ESCAPE}=1."
         )
+    h = hunks(cur, new_b)                # sampai di sini = isi BEDA
+    note("checked", bytes=len(new_b), same=False, cur_bytes=len(cur),
+         **({"blocks": h} if h is not None else {}))
     allow()
 
 

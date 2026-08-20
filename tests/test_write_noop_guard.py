@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Suite mandiri utk write_noop_guard.py — pola ~/scripts: nol runner agregat,
    skrip ini sendiri menghitung PASS/FAIL dan mengembalikan exit bukan-nol."""
-import json, os, subprocess, sys, tempfile
+import json, os, subprocess, sys, tempfile, time
 
+REP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "report.py")
 G = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks", "write_noop_guard.py")
 PASS = FAIL = 0
 ROOT = [os.getcwd()]                          # diisi tempdir saat tes berjalan
@@ -160,6 +161,57 @@ with tempfile.TemporaryDirectory() as d:
     check("ledger path mustahil -> tetap DENY normal",
           run({"tool_name": "Write", "tool_input": {"file_path": same, "content": "line1\nline2\n"}},
               env={"SAMEWRITE_LEDGER": "/proc/mustahil/led.jsonl"})[0], True)
+
+# --- telemetri blok (aturan skill "<=3 blok -> Edit" baru bisa diukur kalau direkam) ---
+with tempfile.TemporaryDirectory() as d:
+    ROOT[0] = d
+    led = os.path.join(d, "blk.jsonl")
+    f = w(d, "src.py", "".join(f"baris {i}\n" for i in range(40)))
+    ubah = open(f).read().replace("baris 5\n", "baris 5 diubah\n")
+    lama = os.path.getsize(f)
+    run({"tool_name": "Write", "tool_input": {"file_path": f, "content": ubah}},
+        env={"SAMEWRITE_LEDGER": led})
+    recs = [json.loads(x) for x in open(led)]
+    chk = [r for r in recs if r["event"] == "checked"][-1]
+    check("1 hunk -> blocks=1", chk.get("blocks"), 1)
+    check("ukuran berkas lama ikut tercatat", chk.get("cur_bytes"), lama)
+    check("telemetri blok tak membocorkan isi", "diubah" in json.dumps(recs), False)
+    check("isi beda tetap allow", chk.get("same"), False)
+
+    # 3 hunk terpisah -> blocks=3 (batas skill, harus terhitung tepat)
+    tiga = open(f).read().split("\n")
+    for i in (2, 20, 38):
+        tiga[i] = tiga[i] + " X"
+    led3 = os.path.join(d, "blk3.jsonl")
+    run({"tool_name": "Write", "tool_input": {"file_path": f, "content": "\n".join(tiga)}},
+        env={"SAMEWRITE_LEDGER": led3})
+    check("3 hunk terpisah -> blocks=3",
+          [json.loads(x) for x in open(led3)][-1].get("blocks"), 3)
+
+    # berkas kelewat panjang: telemetri dilewati, keputusan TIDAK berubah
+    big = w(d, "big.txt", "".join(f"x{i}\n" for i in range(6000)))
+    led4 = os.path.join(d, "big.jsonl")
+    denied, _, _ = run({"tool_name": "Write",
+                        "tool_input": {"file_path": big, "content": "y\n" + open(big).read()}},
+                       env={"SAMEWRITE_LEDGER": led4})
+    r4 = [json.loads(x) for x in open(led4)][-1]
+    check(">5000 baris -> blok tak dihitung", "blocks" in r4, False)
+    check(">5000 baris -> tetap allow", denied, False)
+
+    # report.py mengangkatnya jadi angka yang bisa ditindak
+    rl = os.path.join(d, "rep.jsonl")
+    with open(rl, "w") as fh:
+        for blk, by in ((1, 900), (2, 800), (9, 5000)):
+            fh.write(json.dumps({"ts": int(time.time()), "host": "t", "event": "checked",
+                                 "same": False, "blocks": blk, "bytes": by}) + "\n")
+    out = subprocess.run(["/usr/bin/python3", REP, rl], capture_output=True, text=True).stdout
+    check("report: 2 dari 3 tulis-ulang muat di Edit", "2 dari 3" in out, True)
+    rl2 = os.path.join(d, "rep2.jsonl")
+    with open(rl2, "w") as fh:
+        fh.write(json.dumps({"ts": int(time.time()), "host": "t", "event": "checked",
+                             "same": True, "bytes": 10}) + "\n")
+    out2 = subprocess.run(["/usr/bin/python3", REP, rl2], capture_output=True, text=True).stdout
+    check("tanpa data blok -> baris Edit tak dicetak", "Tulis-ulang" in out2, False)
 
 print(f"\n{PASS} PASS / {FAIL} FAIL")
 sys.exit(1 if FAIL else 0)
