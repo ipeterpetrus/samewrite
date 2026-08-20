@@ -39,9 +39,12 @@ hooks/install.sh            one command, idempotent, backs up settings.json
 skills/edit-discipline/     when to anchor-edit vs rewrite whole (Claude Code skill)
 tools/extract.py            pull carry data out of transcripts (redacted by default)
 tools/simulate.py           50-simulation robustness suite: jackknife, bootstrap, holdout
-tools/report.py             read the field ledger: how often the guard actually fires
+tools/report.py             read the field ledger: how often it fires, and how many
+                            rewrites changed <=3 blocks and would have fit in an Edit
 tools/feed.sh               regenerate docs/FIELD_DATA.md from the ledger, commit if changed
-tests/                      18 assertions, mutation-tested
+tools/health.py             is the guard still installed? ledger silence proves nothing on
+                            its own, so compare it against session activity; writes a run record
+tests/                      57 assertions in two suites, mutation-tested
 docs/FINDINGS.md            full numbers, method, and the limits of both
 ```
 
