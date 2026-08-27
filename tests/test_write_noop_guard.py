@@ -196,6 +196,7 @@ with tempfile.TemporaryDirectory() as d:
                        env={"SAMEWRITE_LEDGER": led4})
     r4 = [json.loads(x) for x in open(led4)][-1]
     check(">5000 baris -> blok tak dihitung", "blocks" in r4, False)
+    check(">5000 baris -> frac tak dihitung", "frac" in r4, False)
     check(">5000 baris -> tetap allow", denied, False)
 
     # report.py mengangkatnya jadi angka yang bisa ditindak
@@ -205,13 +206,27 @@ with tempfile.TemporaryDirectory() as d:
             fh.write(json.dumps({"ts": int(time.time()), "host": "t", "event": "checked",
                                  "same": False, "blocks": blk, "bytes": by}) + "\n")
     out = subprocess.run(["/usr/bin/python3", REP, rl], capture_output=True, text=True).stdout
-    check("report: 2 dari 3 tulis-ulang muat di Edit", "2 dari 3" in out, True)
+    check("report: ledger lama tanpa frac -> aturan blok lama", "2 of 3" in out, True)
+
+    # frac menang atas blocks: 9 blok tapi hanya 5% berkas berubah = tetap muat di Edit.
+    # Aturan lama menghitungnya 0 dari 1; aturan baru 1 dari 1.
+    rlf = os.path.join(d, "rep_frac.jsonl")
+    with open(rlf, "w") as fh:
+        fh.write(json.dumps({"ts": int(time.time()), "host": "t", "event": "checked",
+                             "same": False, "blocks": 9, "frac": 0.05, "bytes": 900}) + "\n")
+        fh.write(json.dumps({"ts": int(time.time()), "host": "t", "event": "checked",
+                             "same": False, "blocks": 1, "frac": 0.90, "bytes": 900}) + "\n")
+    outf = subprocess.run(["/usr/bin/python3", REP, rlf], capture_output=True, text=True).stdout
+    check("report: frac mengalahkan blocks", "1 of 2" in outf, True)
+    outm = subprocess.run(["/usr/bin/python3", REP, rlf, "--markdown"],
+                          capture_output=True, text=True).stdout
+    check("markdown: host di-hash, bukan nama mesin", ("host-" in outm and "| `t` |" not in outm), True)
     rl2 = os.path.join(d, "rep2.jsonl")
     with open(rl2, "w") as fh:
         fh.write(json.dumps({"ts": int(time.time()), "host": "t", "event": "checked",
                              "same": True, "bytes": 10}) + "\n")
     out2 = subprocess.run(["/usr/bin/python3", REP, rl2], capture_output=True, text=True).stdout
-    check("tanpa data blok -> baris Edit tak dicetak", "Tulis-ulang" in out2, False)
+    check("tanpa data blok -> baris Edit tak dicetak", "Rewrites that changed" in out2, False)
 
 print(f"\n{PASS} PASS / {FAIL} FAIL")
 sys.exit(1 if FAIL else 0)

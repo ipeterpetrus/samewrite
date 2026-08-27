@@ -1,41 +1,46 @@
 ---
 name: edit-discipline
-description: Pilih Edit vs tulis-ulang-penuh saat menyunting berkas yang sudah ada; hindari penulisan nol-perubahan.
+description: Choose between an anchored Edit and a full rewrite when overwriting a file that already exists, and spend token discipline where a long session actually spends. Use before overwriting an existing file, or when session cost matters.
 ---
 
-# Disiplin penyuntingan berkas
+# Edit discipline
 
-Dari ukuran, bukan selera: 24 transcript · 29.838 turn · 122 Write yang menimpa
-berkas yang ditulis sendiri.
+Measured on 1,316 Claude Code transcripts, 237,541 assistant turns (Aug 2026).
+Cost is **carry** = size x turns remaining: the transcript is replayed as
+cache-read input on every turn, so session input grows O(N^2). Producing a thing
+is cheap. Leaving it resident is not.
 
-## Keputusan
+## Overwriting a file that already exists
 
-| kondisi | pilih |
+| condition | do |
 |---|---|
-| berkas belum ada | Write |
-| isi sama persis dengan yang di disk | **jangan tulis** — lanjut saja |
-| perubahan terlokalisasi (≲3 blok) | **Edit / patch berjangkar** |
-| perubahan tersebar, atau mayoritas isi berubah | **tulis ulang penuh** — sebut alasannya |
+| byte-identical to what is on disk | **do not write** — say it is already correct |
+| under ~25% of the file changes | **anchored Edit** |
+| over ~40% changes | **full rewrite**, and say why |
+| 25-40% | either — take the one less likely to misapply |
 
-## Kenapa batas 3 blok, bukan "selalu Edit"
+**Changed fraction, not block count.** "<=3 change blocks -> Edit" is the rule
+this repo shipped first; on the full corpus it *loses* ~79% of the available
+saving, because one merged block can span most of a file. Held out across 20
+session-level splits the fraction rule keeps 84% of the oracle saving (worst
+split 75%) and was never negative. Edit is cheaper in 100% of cases under 5%
+changed (n=31, 95% CI 89-100), 82% under 20%, 11% above 40%, 0% above 80%.
 
-Rewrite di sampel rata-rata **6,9 blok perubahan**. Memaksa Edit untuk semuanya =
-**+70% token** vs satu Write, karena tiap Edit membawa `old_string` berkonteks.
-Hanya **43%** rewrite yang Edit-nya lebih murah.
+**20.8% of overwrites (154/741) were byte-identical to disk.** Free to skip.
+Edit calls failed 6.2% of the time against Write's 12.2%, so anchoring is not
+the riskier path.
 
-Benchmark aider, model sama diuji dua format: `whole` mengungguli `diff` pada
-**4 dari 6** pasangan — well-formed 100% vs 71,6–92,5%, malformed 0 vs 68–148.
-Diff bukan kemenangan gratis; ia menukar token dengan risiko gagal-apply.
+## Where the tokens actually are
 
-## Nol-perubahan
+| source | share of carry |
+|---|---|
+| Bash call + result | 42.5% |
+| Read results | 21.3% |
+| injected banners (skill list, hooks, reminders) | 15.3% |
+| Write + Edit calls | 9.5% |
+| assistant prose | 5.6% |
 
-18 dari 122 penulisan (15%) isinya persis sama dengan yang sudah di disk —
-terbesar 133 baris untuk nol perubahan. Hook `write_noop_guard.py` menegakkan ini
-bila terpasang; aturan tetap berlaku untuk jalur di luar hook: `cat >` heredoc,
-`tee`, `sed -i` yang menulis isi utuh.
-
-## Proporsi
-
-Seluruh halaman ini bernilai **~0,1% token sesi**. Input tumbuh **O(N²)** karena
-transcript diputar ulang tiap turn; memotong panjang sesi memotong 50–88%.
-Jangan mengira ini penggantinya.
+Everything above the line is worth ~0.1% of a session. This half is worth more:
+read a range, not a whole file (mean Read result 22.8 kB, 25x a Bash result);
+ask Bash for the answer, not the log; and end the session — halving N halves
+carry, which no rule on this page can do.

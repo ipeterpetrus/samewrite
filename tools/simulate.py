@@ -73,7 +73,7 @@ def pct(x, c):
 def robust(D, seed=20260819):
     rows = []
     base = measure(D)
-    rows.append(("BASE semua 24 sesi", base))
+    rows.append((f"BASE semua {len(D)} sesi", base))
 
     # 1) JACKKNIFE — buang satu sesi. HANYA sesi yang punya rewrite: membuang sesi
     #    tanpa rewrite menghasilkan komponen hemat yang identik (nol informasi baru).
@@ -167,7 +167,7 @@ def main():
     print(f"TOTAL simulasi = {len(rows)} · unik = {n_uni} · duplikat = {len(rows)-n_uni}")
     if len(rows) - n_uni:
         print(f"# CATATAN: {len(rows)-n_uni} konfigurasi memberi hasil identik "
-              f"(lazim pada dataset kecil; pada 24 sesi nyata: 0)")
+              f"(lazim pada dataset kecil; pada korpus nyata 1.316 sesi: 0)")
 
 
 if __name__ == "__main__":

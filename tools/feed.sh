@@ -18,7 +18,7 @@ printf '%s\n' "$NEW" > "$OUT"
 cd "$REPO"
 git add docs/FIELD_DATA.md
 git diff --cached --quiet && { echo "nol perubahan ter-stage"; exit 0; }
-git -c user.email="${GIT_EMAIL:-ipeterpetrus@gmail.com}" -c user.name="${GIT_NAME:-Peter Jackson}" \
+git ${GIT_EMAIL:+-c user.email="$GIT_EMAIL"} ${GIT_NAME:+-c user.name="$GIT_NAME"} \
     commit -q -m "field data: $(date -u +%Y-%m-%d)"
 if [ "${SAMEWRITE_PUSH:-1}" = "1" ]; then
   git push -q origin HEAD && echo "field data ter-push"

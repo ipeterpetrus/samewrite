@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """PreToolUse(Write) — tolak Write yang isinya IDENTIK dengan berkas di disk.
 
-Dasar ukur: 24 transcript / 29.838 turn / 122 Write-menimpa -> 18 (15%) isinya
-persis sama dengan versi sebelumnya. 11.923 token output terbuang, 10.083.748
-token carry (0,076%). Nol trade-off: operasinya memang tak perlu dilakukan.
+Dasar ukur: 1.316 transcript / 237.541 turn / 741 Write-menimpa -> 154 (20,8%)
+isinya persis sama dengan versi sebelumnya; 0,077% carry. Nyaris nol trade-off:
+operasinya memang tak perlu dilakukan (biayanya satu stat + satu baca).
 
 FAIL-OPEN by design: guard ini menghemat token, bukan mencegah kerusakan.
 Bug di sini tidak boleh memblok kerja -> error apa pun = allow.
@@ -49,12 +49,13 @@ def allow():
     sys.exit(0)
 
 
-def hunks(cur_b, new_b):
-    """Berapa BLOK baris yang berubah antara isi lama dan isi baru.
+def diffstat(cur_b, new_b):
+    """-> (blok baris berubah, fraksi byte berubah) atau None.
 
-    Telemetri murni: tak pernah menyentuh keputusan deny/allow. Alasannya, aturan
-    skill edit-discipline ("perubahan <=3 blok -> pakai Edit, bukan tulis ulang")
-    selama ini nol data lapangan — angka ini yang membuatnya bisa diuji.
+    Telemetri murni: tak pernah menyentuh keputusan deny/allow. `frac` adalah fitur
+    yang dipakai skill edit-discipline sejak korpus 1.316-transcript menunjukkan
+    jumlah blok memilih kasus yang salah; `blocks` tetap dicatat supaya aturan lama
+    bisa terus diuji terhadap aturan baru pada data yang sama.
     None = tak dihitung (terlalu besar, atau gagal)."""
     try:
         a = cur_b.decode("utf-8", "replace").splitlines()
@@ -62,8 +63,14 @@ def hunks(cur_b, new_b):
         if max(len(a), len(b)) > MAX_DIFF_LINES:
             return None
         import difflib   # impor lokal: jalur deny tak perlu membayarnya
-        return sum(1 for op in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes()
-                   if op[0] != "equal")
+        blocks = changed = 0
+        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b,
+                                                           autojunk=False).get_opcodes():
+            if tag == "equal":
+                continue
+            blocks += 1
+            changed += sum(len(x) + 1 for x in a[i1:i2]) + sum(len(x) + 1 for x in b[j1:j2])
+        return blocks, changed / max(1, len(new_b))
     except Exception:
         return None
 
@@ -150,9 +157,9 @@ def main():
             f"Kalau memang perlu mengubah, kirim isi yang berbeda atau pakai Edit. "
             f"Penulisan identik yang disengaja: jalankan dengan {ESCAPE}=1."
         )
-    h = hunks(cur, new_b)                # sampai di sini = isi BEDA
+    d = diffstat(cur, new_b)             # sampai di sini = isi BEDA
     note("checked", bytes=len(new_b), same=False, cur_bytes=len(cur),
-         **({"blocks": h} if h is not None else {}))
+         **({"blocks": d[0], "frac": round(d[1], 4)} if d is not None else {}))
     allow()
 
 
