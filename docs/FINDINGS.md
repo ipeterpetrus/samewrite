@@ -10,7 +10,7 @@ three headline numbers did not survive the larger sample. Both corrections are b
 and the old numbers are named so they can be checked against.
 
 Reproduce: `tools/extract.py` + `tools/simulate.py` for the overwrite analysis,
-`tools/carry.py` for the carry table.
+`tools/carry.py` for the carry table, `tools/skills.py` for the skill-listing audit.
 
 ## 1. Where the tokens actually go
 
@@ -56,6 +56,33 @@ Reading a range instead of a file is the single largest per-call lever here.
 against assistant prose at 5.6%. The list of skills alone (median 22.8 kB, injected at
 turn 0, so it is carried by every later turn) is worth 3.22% — more than half of all
 prose. Uninstalling an unused plugin is a certain saving; being terser is a capped one.
+
+**The skill listing is the largest single prunable item, and most of it is dead.**
+`tools/skills.py` parses the listing out of the transcripts and counts every invocation
+of every entry. On this setup, across 1,409 transcripts:
+
+| | entries | bytes | share of listing |
+|---|---|---|---|
+| listing total | 82 | 30,009 | 100% |
+| **never invoked once** | **66** | **21,891** | **72.9%** |
+| — plugin A's skills | 21 | 6,781 | 22.6% |
+| — plugin B's skills | 19 | 5,345 | 17.8% |
+| — CLI built-ins | 14 | 6,174 | 20.6% |
+| — the author's own skills | 10 | 3,358 | 11.2% |
+| invoked at least once | 16 | 8,118 | 27.1% |
+
+Total invocations behind that: 82 `Skill` tool calls and 572 slash invocations, spread
+over 16 entries; the top one accounts for 157. The 21,891 never-invoked bytes are
+**~6,972 tokens re-sent on every turn of every session** — ~3% of session carry, an
+order of magnitude more than anything else this repo measures, and removable through a
+supported setting (`skillOverrides`: `on` | `name-only` | `user-invocable-only` | `off`)
+rather than through better behaviour.
+
+Two limits worth stating. "Never invoked" means the skill's *body* never loaded; its
+one-line description sat in context regardless and may still have steered something.
+And both plugins whose skills score zero are genuinely in use — through `SessionStart`
+hooks and MCP tools, not through the Skill tool — so the finding argues for pruning the
+listing, not for uninstalling the plugin.
 
 **Write is not where the fat is.** The first edition, measured on one long session,
 put Write calls at 25.4% of carry and called them "2.5x over-represented". Across

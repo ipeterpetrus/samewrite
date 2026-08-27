@@ -55,6 +55,34 @@ Three consequences, each of which contradicts a popular piece of advice:
   does not clear its cost on its edit rule alone; it clears it only by redirecting
   attention to Bash and Read.
 
+## What one run finds
+
+The hook is the small half of this repo. The measurement is the large half. Point
+`tools/carry.py` and `tools/skills.py` at your own transcripts and you get a ranked
+budget instead of folklore. Here is what one real setup returned — 421 sessions,
+median 484 turns:
+
+| what you are usually told | what was measured | what it is worth |
+|---|---|---|
+| "never rewrite a whole file, emit only the changed block" | Write+Edit calls are **9.5%** of carry — and the ≤3-block version of that rule is **net negative** | +0.072% once the rule is fixed |
+| "be terse, output tokens are expensive" | assistant prose is **5.6%** of carry | ≤5.6%, paid for in clarity |
+| *nobody mentions this one* | the skill listing is **30,009 bytes injected at turn 0**, and **66 of its 82 entries (72.9%) had never been invoked once** across 1,409 sessions | **~6,972 tokens re-sent on every single turn** — ~3% of session carry, recoverable with a settings flag |
+| *nor this one* | `Read` results are **21.3%** of carry at a mean of **22.8 kB per call**, 25x a Bash result | read a range, not a file |
+| "start a fresh session now and then" | correct — and it dominates everything else here | splitting a session in two measures **−41…−54%** |
+
+Three of those five rows contradict the advice. The no-op guard this repo ships is the
+smallest of them (0.077%) and the only one that needs no judgement — which is why it is
+the only thing here that runs by itself.
+
+```bash
+git clone https://github.com/ipeterpetrus/samewrite && cd samewrite
+python3 tools/carry.py  ~/.claude/projects/*/*.jsonl   # where your tokens actually are
+python3 tools/skills.py ~/.claude/projects/*/*.jsonl   # what you carry and never invoke
+```
+
+Both read sizes, tool names and skill names only. No path, prompt, file content or tool
+output is printed — and nothing is sent anywhere.
+
 One thing survived every robustness cut: **20.8% of overwrites (154/741) wrote content
 byte-identical to what was already on disk.** Zero changes, full token cost. That one
 is free to fix, so `samewrite` ships a hook that fixes it.
@@ -66,6 +94,7 @@ hooks/write_noop_guard.py   PreToolUse(Write) — deny writes identical to disk
 hooks/install.sh            one command, idempotent, backs up settings.json
 skills/edit-discipline/     when to anchor-edit vs rewrite whole (Claude Code skill)
 tools/carry.py              carry by source over your own transcripts — the table above
+tools/skills.py             price your skill listing: which entries you have never invoked
 tools/extract.py            pull carry data out of transcripts (redacted by default)
 tools/simulate.py           robustness suite: jackknife, bootstrap, holdout, drop-top-k
 tools/report.py             read the field ledger: how often the guard fires, and how
@@ -73,7 +102,7 @@ tools/report.py             read the field ledger: how often the guard fires, an
 tools/feed.sh               regenerate docs/FIELD_DATA.md from the ledger, commit if changed
 tools/health.py             is the guard still installed? ledger silence proves nothing on
                             its own, so compare it against session activity
-tests/                      78 assertions in three suites, mutation-tested
+tests/                      92 assertions in four suites, mutation-tested
 docs/FINDINGS.md            full numbers, method, the corrections, and what an
                             adversarial panel broke before publication
 ```
@@ -116,12 +145,13 @@ the right move is to remove the hook.
 
 ```bash
 python3 tools/carry.py ~/.claude/projects/*/*.jsonl --markdown
+python3 tools/skills.py ~/.claude/projects/*/*.jsonl --markdown
 python3 tools/extract.py mine.pkl ~/.claude/projects/*/*.jsonl
 python3 tools/simulate.py mine.pkl
 ```
 
-`carry.py` reads sizes and tool names only — no path, prompt, file content, or tool
-output is stored or printed.
+`carry.py` and `skills.py` read sizes, tool names and skill names only — no path,
+prompt, file content, or tool output is stored or printed.
 
 `extract.py` is **redacted by default**: every line of every file is replaced with an
 8-byte hash plus its token count, computed during extraction. That is enough for
