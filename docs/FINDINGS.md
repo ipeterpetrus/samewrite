@@ -712,14 +712,25 @@ of different lengths. On every equal-length horizon the paired sign count falls 
 coin flip. At the horizon every pair reaches (6 turns), the difference is **+0.9%: no
 compression at all.**
 
-The mechanism is visible in the earlier turn-index table: late turns are the expensive ones
-(plain averages 529 output tokens at turn 9+ against ~200 early), and the mode arm ran 9.2
-turns against plain's 9.6. Summing whole runs therefore credits the mode arm for **turns it did
-not take**, not for turns it made shorter.
+**That mechanism was wrong, and the retraction went too far.** The next thing to check was
+whether turn counts actually differ, and they do not: paired differences run from −6 to +6,
+mean −0.42, mode shorter in 6 of 11 non-tied pairs, **two-sided p = 1.000**. There is no
+turn-count difference to credit the mode arm for. In several pairs the mode arm took *more*
+turns and still produced less total output, which strengthens the effect rather than explaining
+it away.
 
-**So the claim is withdrawn.** What the data supports now: on equal horizons this benchmark
-shows no measurable output reduction from the terse-mode banner, and the long-horizon cells
-(k = 8, 9) have four to eight pairs — too few to say anything either way. The `input_tokens`
+So the correct reading is narrower than either the original claim or the retraction. The
+total-run effect — −22.4%, 11 of 12 pairs, p = 0.0063 — **stands, and is not a turn-count
+artifact.** What fails is the description of it as a uniform per-turn compression: through turn
+6 there is none (+0.9%, 5/12), and the point estimates only turn large at k = 7 and k = 8
+(−17.9%, −29.3%) where the pair count drops to 10 and 8 and significance is lost to sample
+size, not to absence of effect. **Truncating at six turns tests precisely the region where the
+effect does not live**, so it is not a refutation of a late-onset effect.
+
+**What is withdrawn**, then, is the mechanism and the framing, not the measurement: what the data supports is a **late-onset total-run
+reduction** of 22.4% (11/12, p = 0.0063) whose per-turn profile is flat early and steep late,
+measured on four explain-only tasks with 12 pairs, where the long-horizon cells are too small
+(8 and 4 pairs) to pin the onset point. The `input_tokens`
 delta of −5 still shows the banner is served from cache rather than re-billed, and the
 cache-write reduction is still unexplained; neither rescues an output saving that is not there.
 

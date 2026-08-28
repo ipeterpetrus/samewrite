@@ -20,7 +20,7 @@ the levers people talk about are at the bottom.
 | **Read a range, not a file** | Read results are **21.3%** of carry at a mean of 22.8 kB per call | measured |
 | Stop writing files identical to disk | **−0.077%**, free | 20.8% of overwrites (154/741) were byte-identical |
 | Fix the edit rule you were told to use | **+0.07%** — and the popular version (`≤3 change blocks → Edit`) is **net negative** | held out over 20 session-level splits |
-| ~~A terse-output mode that is always on~~ **retracted** | the −22.4% figure was a **turn-count artifact**: on equal-length horizons the difference is +0.9%, and the paired sign count falls to 5/12 | 36 runs; the significant result appears only when runs of unequal length are summed whole — see [FINDINGS](docs/FINDINGS.md) |
+| **A terse-output mode that is always on** | **−22.4% output tokens** over a whole run (11/12 pairs, p = 0.0063) — but the effect is **late-onset**: none through turn 6, steep after | 36 runs; turn counts do not differ between arms (p = 1.00), so it is not a turn-count artifact — see [FINDINGS](docs/FINDINGS.md) for the retraction that was itself corrected |
 | *Add a process skill that is never invoked* | **+51…+84% tokens** | six A/B rounds, costlier in 17/18, 18/18, 6/6, 12/12, 4/4, 16/16 pairs |
 
 The last row is not a typo. Adding one always-on instruction was the most expensive thing
