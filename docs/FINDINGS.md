@@ -620,6 +620,29 @@ unrequested abstraction") produced a significant reduction; 5,228 bytes of rules
 did not beat the sentence. Identical def and import counts across all three arms say the
 remaining headroom is still small: nobody over-engineered these either.
 
+### Does the terse mode still pay in a long session? (the panel's best objection, tested)
+
+An adversarial panel's sharpest point about round 7 was not about the statistics: a
+`SessionStart` banner rides in the context of **every turn**, while the output saving is
+counted once. If real sessions are long, the one positive result in this whole program could
+flip sign. That is checkable with the runs already recorded.
+
+The runs were not short. Median **9 turns** (mean 9.2, max 14), so the measured input delta of
+**+2,337 tokens already contains nine turns of banner replay** — about **255 billed input
+tokens per turn**, far under the 4,664 bytes ≈ 1,485 tokens a naive reading suggests, because
+what is billed after the first turn is cache-read.
+
+Per turn, then: **−69 output tokens, +255 input tokens.** At published rates (output 5x input,
+cache-read 0.1x) that is 345 units saved against 25.5 units spent — **a factor of ~13, and
+scale-invariant**: both sides grow with turn count, so a longer session does not erode it.
+
+The objection was still worth raising, and one framing of it is genuinely fatal: if you hold
+the output saving fixed while letting the banner replay grow, break-even lands near 124 turns.
+That model only applies if the assistant stops producing prose after the first task, which is
+not what a session looks like. Stated correctly, the terse mode's return does not depend on
+session length — but it does depend on the 5:1 output-to-input price ratio and on cache-read
+actually being hit, and both are assumptions rather than measurements here.
+
 ### What eight rounds actually say about always-on skills
 
 Three skills, one rig, the same question each time — **does the full block beat one sentence?**
