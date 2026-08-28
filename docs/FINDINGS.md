@@ -279,3 +279,11 @@ What it broke, and what was done about it:
 - The guard is advisory and racy by construction: it reads the file, then the host
   performs the write. Anything mutating the file in between is outside its knowledge, and
   it cannot be made race-free without owning the write itself.
+- **The field rate and the retrospective rate do not measure the same population.** On
+  Claude Code 2.1.245 an identical `Write` is denied as designed, but the same write after
+  an in-session `Read` of that file bypasses `PreToolUse` entirely — allowed, file mtime
+  updated, nothing in the ledger (n=2, one file, one version; mechanism unverified).
+  Read-then-overwrite is the common path, so a near-zero field rate is evidence about hook
+  reach, not about how often no-op writes happen. Check both: the retrospective number
+  comes from transcripts, which record the call regardless. This is the same failure class
+  `tools/health.py` exists for — ledger silence is not proof the guard is alive.

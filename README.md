@@ -190,6 +190,16 @@ because the negative findings are useful, not because it is a maintained product
   A bug in it must never block real work.
 - `PreToolUse` cannot see `@file` references (they enter context without a tool call),
   nor `cat > f` heredocs, `tee`, or `sed -i`. The skill covers those by instruction only.
+- **The guard has a blind spot over its own target case.** On Claude Code 2.1.245, a
+  `Write` of byte-identical content is denied normally — but if the agent has `Read` that
+  file earlier in the session, the same identical `Write` executes with the hook never
+  running at all. Reproduced twice on one file: no `Read` → denied, ledger records the
+  check; after a `Read` → allowed, file mtime updates, ledger records nothing. The
+  mechanism is unverified (it looks like a fast path taken when the tool already holds
+  current file state), but the consequence is not: read-then-overwrite is the ordinary
+  workflow, so a low field-denial rate is partly this, not partly absence of no-ops.
+  Transcript analysis (`tools/extract.py`) is unaffected — it counts the tool call either
+  way, which is why the retrospective rate is 20.8% while the field rate is far lower.
 - The changed-fraction rule is computed from the finished replacement, so an agent
   applies it as an estimate, not a measurement. Its sample is also 587 cases where the
   model had already chosen to Write.
