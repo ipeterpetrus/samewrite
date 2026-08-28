@@ -93,8 +93,17 @@ adds to the system prompt every turn". Run those against this table — a number
 independent instruments agree on is worth more than either alone. What this tool adds is
 the archive: it counts every invocation ever made, not the live session's.
 
-Two limits worth stating. "Never invoked" means the skill's *body* never loaded; its
-one-line description sat in context regardless and may still have steered something.
+Two limits worth stating, the first of them serious. **"Never invoked" prices an entry;
+it does not show the entry is inert.** The body never loaded, but the one-line
+description sat in the model's context on every turn, and a description phrased as an
+instruction ("use this before proposing a fix") can shape behaviour with no tool call at
+all. An adversarial panel returned `PREMISE-BROKEN` on exactly this inference. The
+measurement above survives that — the bytes are real and independently cross-priced — but
+the conclusion "therefore free to remove" does not: removing a description is a behaviour
+change of unknown sign. It may sharpen attention by shrinking an 82-item blob, or it may
+delete a nudge that was working. Neither direction is measured here. The falsifying
+experiment is behavioural, not accounting: take N tasks of the kind a skill claims to
+serve, invoke it explicitly on half, and compare outcomes.
 And both plugins whose skills score zero are genuinely in use — through `SessionStart`
 hooks and MCP tools, not through the Skill tool — so the finding argues for pruning the
 listing, not for uninstalling the plugin.

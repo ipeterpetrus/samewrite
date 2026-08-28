@@ -7,9 +7,14 @@ reads the listing out of your own transcripts, counts every invocation of every 
 and prices the ones that never fired.
 
 Invocation = a `Skill` tool call, or a `<command-name>` slash invocation. That measures
-whether the skill's *body* was ever loaded. A never-invoked skill still had its
-one-line description in context, so this is a floor on its usefulness, not proof of
-none.
+whether the skill's *body* was ever loaded — nothing more. A never-invoked skill still
+had its one-line description sitting in the model's context every turn, and a
+description like "use this before proposing a fix" can steer behaviour with no tool call
+at all. So this tool prices an entry; it does not tell you whether the entry is doing
+something. Removing one is a behaviour change of **unknown sign**: it may free attention
+as well as tokens, or it may quietly remove a nudge you were relying on. An adversarial
+panel ruled the inference "never invoked, therefore free to remove" PREMISE-BROKEN, and
+it was right to.
 
 Claude Code ships its own version of this question: `/skills` lists every entry with
 its live token cost and writes the per-skill `skillOverrides` setting for you, and
