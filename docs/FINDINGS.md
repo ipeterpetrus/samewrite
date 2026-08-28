@@ -713,8 +713,11 @@ coin flip. At the horizon every pair reaches (6 turns), the difference is **+0.9
 compression at all.**
 
 **That mechanism was wrong, and the retraction went too far.** The next thing to check was
-whether turn counts actually differ, and they do not: paired differences run from −6 to +6,
-mean −0.42, mode shorter in 6 of 11 non-tied pairs, **two-sided p = 1.000**. There is no
+whether turn counts actually differ. No directional difference is detectable: paired differences
+run from −6 to +6, mean −0.42, mode shorter in 6 of 11 non-tied pairs, **two-sided p = 1.000**.
+That is absence of evidence for a difference, **not evidence of equivalence** — it does not
+exclude informative stopping or a difference in trajectory composition, and a later panel was
+right to say so. There is no
 turn-count difference to credit the mode arm for. In several pairs the mode arm took *more*
 turns and still produced less total output, which strengthens the effect rather than explaining
 it away.
@@ -739,6 +742,39 @@ before this one: 255, then 760, then 1,608 tokens per turn, then a −22.4% savi
 turn-count artifact. Three were caught by adversarial review and the fourth by following
 review's advice further than review did. A single-arm summary statistic over variable-length
 sessions is the trap; the fix is to fix the horizon before comparing anything.
+
+### Both contrasts, every horizon — and the status this result is entitled to
+
+The decision-relevant comparison is not banner-versus-nothing, it is **banner versus a single
+sentence**. Both, over full runs and over equal horizons:
+
+| horizon | plain vs mode | | mode vs one-sentence placebo | |
+|---|---|---|---|---|
+| | delta | p | delta | p |
+| full run | **−22.4%** | **0.006** | **−9.2%** | **0.039** |
+| 5 turns | −1.9% | 0.77 | −5.5% | 0.77 |
+| 6 turns | +0.9% | 0.77 | −7.2% | 0.77 |
+| 7 turns | −17.9% | 1.00 | −18.5% | 0.75 |
+| 8 turns | −29.3% | 0.29 | −5.5% | 1.00 |
+
+Only the full-run sums reach significance. Every truncated horizon is underpowered — the pair
+count falls from 12 to 10 to 8 to 6 as runs are excluded for being too short. The placebo
+contrast at least points the same way at every horizon; the plain contrast changes sign at
+k = 6. Neither pattern is strong enough to carry a mechanism.
+
+**The status this result is entitled to.** An adversarial panel put it plainly and it is
+correct: after six changes of analysis on one dataset, the confirmatory status of this endpoint
+is forfeit. What remains is an **exploratory directional finding** — a whole-run output
+reduction that reproduces in 11 of 12 pairs against plain and 10 of 12 against the one-sentence
+placebo. The **late-onset explanation is a hypothesis chosen after seeing the horizon cells**,
+not a demonstrated mechanism, and at least three others fit the same numbers: tail composition,
+informative stopping, and leverage from one or two long runs.
+
+To be worth more than that it needs what it does not have: a pre-registered endpoint (paired
+total billed output tokens, exact paired permutation test, horizons declared exploratory), a
+published per-request ledger with request id, arm, turn index, prompt hash and all four billing
+fields, and a rerun on fresh tasks. Until then, treat the direction as suggestive and the
+magnitude as unpinned.
 
 ### What eight rounds actually say about always-on skills
 
