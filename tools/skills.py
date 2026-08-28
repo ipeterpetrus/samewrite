@@ -11,12 +11,19 @@ whether the skill's *body* was ever loaded. A never-invoked skill still had its
 one-line description in context, so this is a floor on its usefulness, not proof of
 none.
 
-Claude Code ships its own version of this question: `/skill-doctor` ("show which
-loaded skills are unused and costing context"), and `/skills` writes the per-skill
-`skillOverrides` setting (`on` | `name-only` | `user-invocable-only` | `off`) for you.
-Use those first. This tool exists because it works over the transcript archive rather
-than the live session, so it counts every invocation you have ever made, prices each
-entry in bytes, and can be checked against a number the CLI produces independently.
+Claude Code ships its own version of this question: `/skills` lists every entry with
+its live token cost and writes the per-skill `skillOverrides` setting for you, and
+`/skill-doctor` reports the unused ones where it is enabled. Use those first. This tool
+exists because it works over the transcript archive rather than the live session, so it
+counts every invocation you have ever made and can be checked against a number the CLI
+produces independently — on the author's setup the two agreed within 1.5%.
+
+The settings values, per the CLI's own schema: `name-only` lists the skill without its
+description, `user-invocable-only` hides it from the model but keeps `/name` working,
+`off` hides it from both, absent means on. For cold skills `user-invocable-only` is
+usually the right one: it recovers the whole entry rather than only its description, and
+you keep the slash command. Note that a plugin can lock its skills — locked entries can
+still be set to `off` or `user-invocable-only`, but not to `name-only`.
 
 Privacy: prints skill names, sizes and counts. No path, prompt, file content, or tool
 output is read out.

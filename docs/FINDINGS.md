@@ -75,8 +75,16 @@ Total invocations behind that: 82 `Skill` tool calls and 572 slash invocations, 
 over 16 entries; the top one accounts for 157. The 21,891 never-invoked bytes are
 **~6,972 tokens re-sent on every turn of every session** — ~3% of session carry, an
 order of magnitude more than anything else this repo measures, and removable through a
-supported setting (`skillOverrides`: `on` | `name-only` | `user-invocable-only` | `off`)
-rather than through better behaviour.
+supported setting rather than through better behaviour. Per the CLI's own settings
+schema, `skillOverrides` is "keyed by skill name": `name-only` drops the description,
+`user-invocable-only` hides the entry from the model but keeps `/name`, `off` hides it
+from both. For a cold skill `user-invocable-only` recovers the whole entry and still
+leaves it typeable — but a plugin may lock its skills, and a locked entry accepts only
+`off` or `user-invocable-only`.
+
+Cross-check: the CLI's `/skills` screen prints a live token cost per entry. Its figures
+for one plugin's 20 skills summed to ~2,190 tokens against this tool's 6,781 bytes
+(~2,159 tokens) — two independent instruments, 1.5% apart.
 
 Claude Code ships the same question first-party: `/skill-doctor` reports "which loaded
 skills are unused and costing context", `/skills` writes the `skillOverrides` setting,
