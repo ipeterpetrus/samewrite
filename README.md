@@ -20,13 +20,14 @@ the levers people talk about are at the bottom.
 | **Read a range, not a file** | Read results are **21.3%** of carry at a mean of 22.8 kB per call | measured |
 | Stop writing files identical to disk | **−0.077%**, free | 20.8% of overwrites (154/741) were byte-identical |
 | Fix the edit rule you were told to use | **+0.07%** — and the popular version (`≤3 change blocks → Edit`) is **net negative** | held out over 20 session-level splits |
-| *Add a process skill* | **+51…+80% tokens** | four A/B rounds, costlier in 17/18, 18/18, 6/6, 12/12 pairs |
+| *Add a process skill* | **+51…+84% tokens** | six A/B rounds, costlier in 17/18, 18/18, 6/6, 12/12, 4/4, 16/16 pairs |
 
 The last row is not a typo. Adding one always-on instruction was the most expensive thing
 measured here, and across five rounds of A/B its benefit appeared on exactly one fixture out
 of the five that had any room to show it. In round 5 a **placebo arm** — one sentence urging
 care and planning, no mention of root causes — matched the skill's outcome exactly while
-costing **63% fewer tokens** than it.
+costing **63% fewer tokens** than it. Round 6 ran the same three arms over 48 runs: the skill
+never beat that sentence, and cost **56% more** than it.
 
 ## The finding
 

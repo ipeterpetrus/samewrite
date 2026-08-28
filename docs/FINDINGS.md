@@ -479,6 +479,67 @@ fixtures — not a population of bugs.
 Provenance audit, unchanged in method and extended: **44 of 44** `ROOT` verdicts across all
 rounds touched the file containing the root cause. Still zero escapes.
 
+### Round 6: the third hypothesis holds — and one sentence beats the skill
+
+Round 5's post-hoc guess was that headroom needs a caller with **something of its own worth
+guarding**, since the five fixtures that failed to trap had pure pass-through callers. Round 6
+pre-registered that, with six different reasons a local guard would feel natural: a
+caller-owned default; a caller-owned page size; an argument the caller **computes**; a caller
+that already has one pre-check; a caller that already has a `try/except`; a mode flag the
+caller holds. Prediction: at least 4 of 6 show headroom.
+
+**4 of 6.** The first pre-registered prediction in this program to survive. (`mode_flag` and
+`page_size` were repaired at the helper 3/3; two of the qualifiers landed in the informative
+33–67% band rather than at the floor.)
+
+An adversarial panel then downgraded the round before the A/B finished, and it was right to:
+"natural to guard locally" can collapse into "the model took the shortcut", which is the
+outcome defining its own cause unless the feature is frozen as a machine-checkable predicate.
+The fixtures were labelled by structural reasons written before any run, but never formalised
+that way — so **round 6 is recorded as a final frozen exploratory test, not a confirmatory
+one, and there is no seventh generator.**
+
+The A/B, 4 fixtures x 3 arms x 4 repeats, 48 runs, treatment verified 16/16 and 0/32:
+
+| fixture | plain | placebo | skill |
+|---|---|---|---|
+| `caller_computes` | 4/4 | 4/4 | 3/4 |
+| `caller_try` | 0/4 | 0/4 | 0/4 |
+| `existing_precheck` | 0/4 | **3/4** | 1/4 |
+| `truncate_guard` | 1/4 | 0/4 | 1/4 |
+
+| contrast | discordant pairs | direction | p (two-sided) |
+|---|---|---|---|
+| plain vs skill | 2 | 1 / 1 | 1.00 |
+| **placebo vs skill** | 4 | **placebo 3, skill 1** | 0.625 |
+| plain vs placebo | 4 | placebo 3 | 0.625 |
+
+| arm | tokens/task | vs plain | vs placebo |
+|---|---|---|---|
+| plain | 428,329 | — | — |
+| placebo (one sentence: work carefully, plan, re-check) | 477,414 | +11.5% | — |
+| skill (9.4 kB, invoked and verified) | **743,283** | **+73.5%** | **+55.7%** |
+
+Costlier in **16 of 16** paired runs against both arms, two-sided sign test p < 0.0001.
+
+**The result that survives six rounds is this: the skill never beat the placebo.** In round 6
+the one-sentence prompt was directionally *ahead* of it — 3 discordant pairs to 1 — and on
+`existing_precheck` the placebo reached the root cause 3 times out of 4 where the control
+managed 0 and the skill 1. None of those contrasts is significant (p = 0.625, four discordant
+pairs), and they are not offered as one. The claim is narrower and it is about cost: **a
+sentence did the same work as 9.4 kB of process, for 56% fewer tokens.**
+
+Provenance audit across all six rounds: **62 of 62** `ROOT` verdicts touched the file holding
+the root cause. Zero escapes.
+
+**What is still wrong with this, in the panel's words and mine.** Per-round pre-registration
+protects each round, not the sequence — this was the third generator on one harness, and the
+per-round p-values carry no family-wise correction. The placebo matched the skill's *length*,
+not its *interaction shape*: the skill mandates a phased workflow, so "skill vs placebo" still
+mixes the skill's content with the fact that it imposes a procedure. Six surface-different
+fixtures may be isomorphic to the harness, so the effective N is below six. And one model,
+one author, tiny Python packages — the estimand is this benchmark, not debugging.
+
 ### The same token counts, priced at frontier rates
 
 Rates per MTok from Anthropic's published pricing (retrieved 2026-06-24): Fable 5 $10/$50,
