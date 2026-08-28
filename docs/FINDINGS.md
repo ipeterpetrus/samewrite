@@ -646,11 +646,31 @@ per-turn billing fields already recorded — so that is what was done.
 | `cache_read_input_tokens` | **+6,970** | ≈ **+760 per turn**, the banner's real recurring cost |
 | `output_tokens` | −634 | ≈ −69 per turn |
 
-So the mechanism is confirmed and the arithmetic is corrected: the recurring cost is **760
-cache-read tokens per turn, not 255**. At published rates that is 76 units spent against 345
-saved on output — still positive by a factor of about 4.5, and the cache-write reduction is a
-further saving on top. The panel's fatal case required the banner to be re-billed at full
-input rate on most turns; the `input_tokens` delta of −5 says it was not.
+The mechanism is confirmed: the banner is served from cache, not re-billed. The per-turn
+figure needed fixing **twice**, and the second fix matters. Dividing a total delta by one arm's
+turn count (6,970 / 9.2 = 758) silently compares arms that ran different numbers of turns.
+The defensible form is rate against rate:
+
+| per turn | plain | mode | delta | at published rates |
+|---|---|---|---|---|
+| `cache_read` | 19,566 | 21,174 | **+1,608** | +161 units |
+| `cache_creation` | 2,750 | 2,367 | −383 | −479 units |
+| `output` | 295 | 239 | **−56** | −280 units |
+
+**Net ≈ −598 units per turn — a saving.** Ignore the cache-write term entirely and it is still
+−119. So the conclusion survives the stricter comparison, but three different per-turn numbers
+came out of the same data (255, 760, 1,608) purely from how the denominator was chosen. Every
+one of the first two was wrong, and both were caught by review rather than by me. Treat any
+per-turn figure in this document as a rate-vs-rate comparison or not at all.
+
+The panel's fatal case required the banner to be re-billed at full input rate on most turns;
+the `input_tokens` delta of −5 says it was not.
+
+Two things this still does not explain. The mode arm **writes less cache** (−383/turn), which
+is plausible — terser output means less new context to cache — but it is inferred, not shown.
+And it used **0.4 fewer turns** (9.6 → 9.2), so about 3 of the 22 percentage points of output
+saving come from ending sooner rather than from being terser; the remaining 19 points are a
+genuine per-turn compression.
 
 **And the savings do not saturate — they grow.** Output delta by turn index (mode minus plain):
 
