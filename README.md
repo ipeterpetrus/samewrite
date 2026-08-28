@@ -8,6 +8,26 @@ free to enforce.
 first edition of this repo got two of its three numbers wrong on a 24-transcript
 sample. Those corrections are kept in the open in [docs/FINDINGS.md](docs/FINDINGS.md).
 
+## The numbers, largest first
+
+Everything here is measured on this author's own transcripts, and the ranking is the point —
+the levers people talk about are at the bottom.
+
+| do this | measured effect | how sure |
+|---|---|---|
+| **End the session sooner** | **−41…−54%** of carry when one session becomes two | measured on 1,316 transcripts; published work on compaction reports −63…−86% |
+| **Prune the skill listing** | **≈ −3%** — 72.9% of it (21,891 of 30,009 bytes) had never been invoked once | invocation counted over 1,409 transcripts; cross-checked against the CLI's own token figures, 1.5% apart |
+| **Read a range, not a file** | Read results are **21.3%** of carry at a mean of 22.8 kB per call | measured |
+| Stop writing files identical to disk | **−0.077%**, free | 20.8% of overwrites (154/741) were byte-identical |
+| Fix the edit rule you were told to use | **+0.07%** — and the popular version (`≤3 change blocks → Edit`) is **net negative** | held out over 20 session-level splits |
+| *Add a process skill* | **+51…+80% tokens** | four A/B rounds, costlier in 17/18, 18/18, 6/6, 12/12 pairs |
+
+The last row is not a typo. Adding one always-on instruction was the most expensive thing
+measured here, and across five rounds of A/B its benefit appeared on exactly one fixture out
+of the five that had any room to show it. In round 5 a **placebo arm** — one sentence urging
+care and planning, no mention of root causes — matched the skill's outcome exactly while
+costing **63% fewer tokens** than it.
+
 ## The finding
 
 Token volume across those transcripts:

@@ -423,6 +423,62 @@ meant editing N data rows or N duplicated functions — where there is no single
 Cost, meanwhile, replicated a fourth time: **+51.1% tokens, costlier in 12 of 12 pairs,
 two-sided sign test p = 0.0005.** Across four rounds: +79.9%, +67.6%, +67.1%, +51.1%.
 
+### Round 5: a second hypothesis falsified, and a placebo that changes the question
+
+Round 4's one positive signal came from a fixture whose root fix lived in a single shared
+helper. Round 5 pre-registered that as the class and tested six of them — a helper missing a
+guard (negative limit, leading slash, missing dict key, zero denominator, trailing separator,
+tab whitespace), each with four or more callers in separate files, target test naming one
+caller. Prediction, written first: **at least 4 of 6 show headroom; if fewer, the claim is
+wrong.**
+
+Result: **1 of 6.** `truncate_guard` trapped the control 3/3; the other five were repaired at
+the helper 3/3. The threshold fired again. Two pre-registered generator hypotheses, two
+falsifications, both by conditions written before the data existed.
+
+**The methodological lesson is the more useful half.** Every one of those five fixtures had a
+valid shortcut — the mechanical negative control proved it, because I wrote the shortcut
+myself and watched it turn the target green and the neighbour red. The agent simply never
+took it. So the negative control proves a shortcut **exists**, not that it is **attractive**,
+and only a control-arm pilot measures attractiveness. In the five that failed to trap, the
+caller was a pure pass-through with nothing local to guard; in `truncate_guard` the caller
+owned its own `n` parameter, so guarding it there felt natural. That is a hypothesis for a
+later round, not a finding here.
+
+**A third oracle and a third arm.** ROOT now also requires a **holdout caller** — a new
+consumer of the helper written only *after* the agent's patch lands, which a call-site repair
+cannot satisfy and the agent cannot anticipate. And a **placebo arm** was added: a
+length-matched prompt urging care, planning and re-checking, with no mention of root causes,
+because the strongest non-causal story for rounds 1–4 was budget rather than reasoning.
+
+On the single fixture with headroom, 4 pairs per arm, treatment verified 4/4 and 0/8:
+
+| arm | reached root cause | took the shortcut | tokens/task |
+|---|---|---|---|
+| plain | **1 of 4** | 3 of 4 | 424,557 |
+| placebo (care + planning) | 0 of 4 | 4 of 4 | 478,447 (+12.7%) |
+| skill | 0 of 4 | 4 of 4 | **780,209 (+83.8%)** |
+
+`placebo` and `skill` produced **zero discordant pairs** — identical outcomes. The
+pre-registered gate said a skill effect counts only if it beats the placebo; it did not.
+What it did do is cost **+63.1% more tokens than the one-sentence deliberation prompt for the
+same result** (costlier in 4 of 4 pairs). Four pairs prove nothing on their own; the direction
+is what is worth carrying forward.
+
+**What an adversarial panel broke in this design, and what stands.** Two proposed escapes
+from the holdout oracle were killed on inspection — an agent cannot guard a file that does
+not exist yet, and the call-site repair does fail the holdout, exactly as the shortcut control
+shows. Three objections stand and are recorded as limits: the holdout **leaks in both
+directions** (a helper-level patch that hard-codes the tested values would satisfy it; a
+legitimate class repair with a different contract could fail it); the **placebo is not inert**
+— urging care is itself a treatment, so this compares two treatments rather than treatment
+against nothing; and prompt-matching does **not** bound the budget confound, which needs hard
+caps on tokens, tool calls and retries. The estimand is six fixed, correlated, single-author
+fixtures — not a population of bugs.
+
+Provenance audit, unchanged in method and extended: **44 of 44** `ROOT` verdicts across all
+rounds touched the file containing the root cause. Still zero escapes.
+
 ### The same token counts, priced at frontier rates
 
 Rates per MTok from Anthropic's published pricing (retrieved 2026-06-24): Fable 5 $10/$50,
