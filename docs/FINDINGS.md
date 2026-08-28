@@ -743,6 +743,44 @@ turn-count artifact. Three were caught by adversarial review and the fourth by f
 review's advice further than review did. A single-arm summary statistic over variable-length
 sessions is the trap; the fix is to fix the horizon before comparing anything.
 
+### The confirmatory run: the banner adds nothing over one sentence
+
+Everything above is exploratory. This is the run that was pre-registered before the data
+existed, on **four tasks never used before**, with one endpoint, one test, and exclusion rules
+fixed in advance: paired total billed `output_tokens`, contrast **mode versus the one-sentence
+placebo**, exact paired permutation test, two-sided. The prediction on record was that the
+banner would win at p < 0.05, and that failing to win would mean the benefit is **not
+replicated, with no rescue round**.
+
+48 runs, **zero exclusions** — no run errored, and treatment verification was perfect: the
+banner appeared in all 16 mode runs and none of the other 32.
+
+| contrast | pairs | tokens | delta | mode lower in | exact p |
+|---|---|---|---|---|---|
+| **mode vs one-sentence placebo** (primary) | 16 | 2,388 → 2,369 | **−0.8%** | 6/16 | **0.855** |
+| mode vs plain (secondary) | 16 | 3,091 → 2,369 | **−23.4%** | **15/16** | **0.0001** |
+
+Substance gate: **100% of required facts in all three arms.**
+
+**The pre-registered prediction failed, and that is the finding.** The earlier −9.2% at
+p = 0.039 does not replicate; on fresh tasks the 4,664-byte banner and a single sentence are
+indistinguishable (−0.8%, p = 0.86). What *does* replicate, and hard, is terseness itself:
+either instruction cuts output by roughly a quarter against no instruction, 15 of 16 pairs,
+p = 0.0001 — closely matching the −22.4% measured on the earlier task set.
+
+Per task the two treated arms track each other everywhere:
+
+| task | plain | one sentence | banner |
+|---|---|---|---|
+| `identity_cmp` | 2,958 | 2,195 | 2,405 |
+| `late_binding` | 3,460 | 2,504 | 2,473 |
+| `set_order` | 3,148 | 2,899 | 2,652 |
+| `shallow_copy` | 2,798 | 1,955 | 1,947 |
+
+**So the eight-round arc closes here.** Three always-on instruction blocks were tested against
+one-sentence versions of their own intent. None of them beat the sentence on a pre-registered
+test. The instruction is worth having; the kilobytes are not.
+
 ### Both contrasts, every horizon — and the status this result is entitled to
 
 The decision-relevant comparison is not banner-versus-nothing, it is **banner versus a single

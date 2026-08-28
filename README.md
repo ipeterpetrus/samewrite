@@ -20,7 +20,7 @@ the levers people talk about are at the bottom.
 | **Read a range, not a file** | Read results are **21.3%** of carry at a mean of 22.8 kB per call | measured |
 | Stop writing files identical to disk | **−0.077%**, free | 20.8% of overwrites (154/741) were byte-identical |
 | Fix the edit rule you were told to use | **+0.07%** — and the popular version (`≤3 change blocks → Edit`) is **net negative** | held out over 20 session-level splits |
-| **A terse-output mode that is always on** | **−22.4%** output tokens over a whole run (11/12 pairs, p = 0.006; −9.2% against a one-sentence placebo, 10/12, p = 0.039) — **exploratory only** | every equal-length horizon is non-significant; six changes of analysis on one dataset forfeit confirmatory status. [FINDINGS](docs/FINDINGS.md) carries the full sequence, including a retraction that was itself wrong |
+| **Tell the model to be terse** — one sentence is enough | **−23.4%** output tokens against no instruction (15/16 pairs, exact p = 0.0001), with 100% of required facts kept | pre-registered, fresh tasks, 48 runs, zero exclusions. The 4,664-byte skill that says the same thing beat that sentence by **−0.8%, p = 0.86** — [FINDINGS](docs/FINDINGS.md) |
 | *Add a process skill that is never invoked* | **+51…+84% tokens** | six A/B rounds, costlier in 17/18, 18/18, 6/6, 12/12, 4/4, 16/16 pairs |
 
 The last row is not a typo. Adding one always-on instruction was the most expensive thing
