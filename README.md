@@ -112,11 +112,20 @@ arm reached the root cause in **35 of 36 runs** — a ceiling, so the benefit co
 measured at all.
 
 Round 3 built the headroom on purpose, with the protocol written down first and two
-mechanical controls (a root fix must pass everything; a shortcut patch must pass the target
-and fail the hidden neighbour). One fixture qualified. In it, **the control arm reached the
-root cause 2 times out of 6 — and the arm told to invoke the root-cause skill reached it 0
-out of 6**, at +67.1% tokens. Two discordant pairs is not significance (p = 0.50), and it is
-not a verdict. It is the first time the question was even answerable. Full method, both rounds, and the
+mechanical controls (a root fix must satisfy everything; a shortcut patch must satisfy the
+target and break the hidden neighbour). Round 4 turned the difference into a pre-registered
+generator hypothesis with a kill condition — and **the kill condition fired**: two of five
+fixtures came back at the ceiling, so the hypothesis is published as wrong.
+
+The same round found the first thing the skill demonstrably does. On the one fixture whose
+root fix lives in **a single shared helper**, the control arm reached the root cause **0 of
+4** times — it guarded the call site the failing test named and left three sibling callers
+broken — while the skill arm reached it **4 of 4**, guarding the helper. On the two fixtures
+whose "root" was N data rows or N copy-pasted functions, the skill did nothing. Pooled, that
+is p = 0.375: not significant, and reported as not significant.
+
+And before any of it was believed, the oracle was audited: for every `ROOT` verdict ever
+scored, did the file containing the root cause actually change? **28 of 28 did.** Full method, both rounds, and the
 reasons the dollar column is a rate-card translation rather than a prediction:
 [§9 of FINDINGS](docs/FINDINGS.md#9-what-an-always-on-skill-costs-measured-twice).
 

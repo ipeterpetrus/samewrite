@@ -372,6 +372,57 @@ more useful: **the first time a fixture left room to find a root cause, the arm 
 to find root causes did not find one, and paid 67% more to not find it.** One fixture, one
 model, six pairs. That is a signal worth a bigger experiment, not a verdict.
 
+### Round 4: a generator hypothesis, falsified — and the first sign the skill does something
+
+Round 3 left one fixture with headroom and four at the ceiling. The difference looked
+structural, so it was written as a generator and **pre-registered with a kill condition**:
+the defect has N *sibling instances* in a homogeneous collection, the target test names
+exactly one, the neighbour tests the siblings. Prediction: all five new fixtures (five
+different substrates — data-table rows, mis-parsed config values, a shared helper missing a
+guard across four call sites, a base-class defect inherited by four subclasses, a
+copy-pasted bug in 3 of 12 registry handlers) would show headroom; **if two or more came
+back at the ceiling, the hypothesis was wrong and would be published as wrong.**
+
+Control-arm pilot, 3 runs each: `scale_table`, `handler_registry`, `sibling_callers` all at
+`SYMPTOM` 3/3 — and `config_keys` and `subclass_family` at `ROOT` 3/3. **Two of five. The
+kill condition fired.** Sibling structure is necessary but not sufficient.
+
+**Before trusting any of it, the oracle was audited.** An adversarial panel's sharpest point
+was that the hidden neighbour test is escapable — an agent could hard-code the three tested
+values and satisfy both tests without repairing anything, which would mean earlier `ROOT`
+verdicts were oracle weakness rather than control strength. That is checkable without
+running anything: for every `ROOT` verdict, did the file containing the root cause actually
+change? **28 of 28 did. Zero escapes.** The ceiling in rounds 1–3 was real.
+
+The A/B on the three qualifying fixtures, 4 repeats each, treatment verified 12/12 and 0/12:
+
+| fixture | root fix lives in | control reached root | skill arm reached root |
+|---|---|---|---|
+| `handler_registry` | 3 of 12 copy-pasted functions | 0 of 4 | 0 of 4 |
+| `scale_table` | 3 rows of a 40-row data table | 1 of 4 | 0 of 4 |
+| `sibling_callers` | **one shared helper** | **0 of 4** | **4 of 4** |
+
+Pooled McNemar — the pre-registered primary — is 5 discordant pairs, 1 favouring control and
+4 favouring the skill: **p = 0.375, not significant.** It is also exactly the sign split the
+panel warned pooling would hide, which is why the per-fixture rows above matter more than the
+pooled number.
+
+On `sibling_callers` the separation is complete and the mechanism is visible in the diffs.
+The control arm put the guard in `routes/posts.py` — the one call site the failing test names
+— leaving three sibling callers broken. The skill arm put it in `util/text.py`, the shared
+helper, fixing all four. That is precisely what the skill claims to do, and the first time in
+four rounds it did it.
+
+**What this is and is not.** It is hypothesis-generating: one fixture, four pairs, p = 0.125
+on its own discordant cells, from a design whose pre-registered primary analysis came back
+non-significant. It is not a demonstration that the skill works. The reading it supports is
+narrower and testable: the skill may help when repairing the class means choosing **one
+shared code site** over the named call site, and did nothing at all when repairing the class
+meant editing N data rows or N duplicated functions — where there is no single root to find.
+
+Cost, meanwhile, replicated a fourth time: **+51.1% tokens, costlier in 12 of 12 pairs,
+two-sided sign test p = 0.0005.** Across four rounds: +79.9%, +67.6%, +67.1%, +51.1%.
+
 ### The same token counts, priced at frontier rates
 
 Rates per MTok from Anthropic's published pricing (retrieved 2026-06-24): Fable 5 $10/$50,
