@@ -591,6 +591,50 @@ over-engineered, so there was nothing to prevent. Pre-registered prediction — 
 plain on 3 of 4 fixtures — came back 1 of 4 and is written up as failed. On tasks this small the
 experiment cannot measure the claim; that is a fixture problem, exactly like rounds 1–3.
 
+### Round 8: bigger tasks for the lazy-engineer mode — and one sentence wins again
+
+Round 7's lazy-engineer result was a ceiling: four 3-line tasks, nothing to over-engineer.
+Round 8 replaced them with four tasks where over-building is genuinely common — parse and
+group-sum a CSV, a sliding-window rate limiter, retry with exponential backoff and give-up, a
+decorator-based plugin registry with dispatch. Minimal solutions are 8–15 lines; the obvious
+over-built versions bring classes, strategy objects and dataclasses. Tests pin behaviour only.
+
+36 runs, every arm 12/12 green:
+
+| metric | plain | one-sentence placebo | full banner (5,228 B) |
+|---|---|---|---|
+| non-blank lines | 10.33 | **9.42** | 9.92 |
+| new defs/classes | 1.50 | 1.50 | 1.50 |
+| new imports | 0.25 | 0.25 | 0.25 |
+| new files | 0.08 | 0.08 | 0.00 |
+
+| contrast | pairs | result |
+|---|---|---|
+| one-sentence vs plain | 7 | fewer lines **7 of 7**, p = 0.016 |
+| banner vs plain | 7 | 5 of 7, p = 0.45 |
+| banner vs one-sentence | 6 | 2 of 6, p = 0.69 |
+
+The pre-registered prediction — the banner beats plain on 3 of 4 fixtures — came back **2 of 4
+and is written up as failed.** A single sentence ("make the smallest possible change, add no
+unrequested abstraction") produced a significant reduction; 5,228 bytes of rules did not, and
+did not beat the sentence. Identical def and import counts across all three arms say the
+remaining headroom is still small: nobody over-engineered these either.
+
+### What eight rounds actually say about always-on skills
+
+Three skills, one rig, the same question each time — **does the full block beat one sentence?**
+
+| skill | always on? | verdict |
+|---|---|---|
+| terse output (4,664 B) | yes, every session | **beats the sentence**: −9.2% output tokens, 10/12, p = 0.039; net **+$14.68**/1k tasks on Opus 5. Its own claim of −65% measured at −22.4%. |
+| lazy engineer (5,228 B) | yes, every session | no measurable effect; the sentence beat plain 7/7 and the banner did not beat the sentence |
+| systematic debugging (9.4 kB) | no — **0 invocations in 1,409 transcripts** | never beat the sentence in six rounds; costs +51…+84% tokens |
+
+The one sentence of practical advice this supports, and no more than this: **before installing
+an always-on instruction block, try writing its intent as one sentence and measure the
+difference — on this benchmark the sentence matched or beat two of three blocks, and cost
+between 4 and 9 kB less.**
+
 ### The same token counts, priced at frontier rates
 
 Rates per MTok from Anthropic's published pricing (retrieved 2026-06-24): Fable 5 $10/$50,
