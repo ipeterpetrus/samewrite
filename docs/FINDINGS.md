@@ -689,6 +689,46 @@ not what a session looks like. Stated correctly, the terse mode's return does no
 session length — but it does depend on the 5:1 output-to-input price ratio and on cache-read
 actually being hit, and both are assumptions rather than measurements here.
 
+### The terse-mode result does not survive an equal-length comparison — retraction
+
+The last panel's one supported premise was that a per-turn scalar over runs of unequal length
+is not a valid comparison. Following that through with the data already recorded overturns this
+program's only positive result.
+
+Compare the two arms over the **same number of turns**, pairs restricted to runs that reach
+that horizon:
+
+| horizon | pairs | plain output | mode output | delta | mode shorter | p |
+|---|---|---|---|---|---|---|
+| 5 turns | 12 | 896 | 879 | −1.9% | 5/12 | 0.77 |
+| 6 turns | 12 | 1,118 | 1,127 | **+0.9%** | 5/12 | 0.77 |
+| 7 turns | 10 | 1,646 | 1,351 | −17.9% | 5/10 | 1.00 |
+| 8 turns | 8 | 2,120 | 1,499 | −29.3% | 6/8 | 0.29 |
+| 9 turns | 4 | 1,804 | 1,808 | +0.2% | 2/4 | 1.00 |
+| **full run, unequal lengths** | 12 | 2,830 | 2,196 | **−22.4%** | **11/12** | **0.0063** |
+
+The headline −22.4% at p = 0.0063 exists **only in the last row** — the one that sums over runs
+of different lengths. On every equal-length horizon the paired sign count falls to roughly a
+coin flip. At the horizon every pair reaches (6 turns), the difference is **+0.9%: no
+compression at all.**
+
+The mechanism is visible in the earlier turn-index table: late turns are the expensive ones
+(plain averages 529 output tokens at turn 9+ against ~200 early), and the mode arm ran 9.2
+turns against plain's 9.6. Summing whole runs therefore credits the mode arm for **turns it did
+not take**, not for turns it made shorter.
+
+**So the claim is withdrawn.** What the data supports now: on equal horizons this benchmark
+shows no measurable output reduction from the terse-mode banner, and the long-horizon cells
+(k = 8, 9) have four to eight pairs — too few to say anything either way. The `input_tokens`
+delta of −5 still shows the banner is served from cache rather than re-billed, and the
+cache-write reduction is still unexplained; neither rescues an output saving that is not there.
+
+**And the process point, which is the durable part.** Four numbers in this analysis were wrong
+before this one: 255, then 760, then 1,608 tokens per turn, then a −22.4% saving that was a
+turn-count artifact. Three were caught by adversarial review and the fourth by following
+review's advice further than review did. A single-arm summary statistic over variable-length
+sessions is the trap; the fix is to fix the horizon before comparing anything.
+
 ### What eight rounds actually say about always-on skills
 
 Three skills, one rig, the same question each time — **does the full block beat one sentence?**
