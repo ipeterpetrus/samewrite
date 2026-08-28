@@ -540,6 +540,57 @@ mixes the skill's content with the fact that it imposes a procedure. Six surface
 fixtures may be isomorphic to the harness, so the effective N is below six. And one model,
 one author, tiny Python packages — the estimand is this benchmark, not debugging.
 
+### Round 7: the two skills that are actually always on — and a unit error that flipped a result
+
+Six rounds tested a skill that was **never invoked once** in 1,409 transcripts. Two others are
+injected into *every* session by `SessionStart` hooks and pay carry on every turn: a terse-output
+mode (4,664 bytes, claiming "−65% output tokens, all technical substance stays") and a
+lazy-engineer mode (5,228 bytes, claiming "shortest working diff, no unrequested abstractions").
+Round 7 puts those two through the same rig, with the real banners extracted from live
+transcripts and injected through the same hook mechanism production uses — so the treatment is
+verifiable in the transcript rather than assumed. It was: banner present in 12/12 of the mode
+arm's runs and 0/12 everywhere else, in both experiments.
+
+**The unit error, and why it matters.** The first pass scored the terse mode by *word count*,
+because that is easy and mechanical. An adversarial panel's first objection was that the claim
+is about **tokens**, and words are not tokens — dropped articles, fragments and verbatim code
+tokenize differently. Rescoring the same 36 runs on billed `output_tokens` changed the answer:
+
+| contrast | by word count | by output tokens |
+|---|---|---|
+| one-sentence placebo vs plain | −37.3%, 12/12, p = 0.0005 | −14.5%, 11/12, p = 0.0063 |
+| full banner vs plain | −35.8%, 12/12, p = 0.0005 | **−22.4%**, 11/12, p = 0.0063 |
+| **full banner vs the one-sentence placebo** | +2.3%, 5/12, **p = 0.77** | **−9.2%, 10/12, p = 0.039** |
+
+By words the banner and the sentence were indistinguishable. By tokens the banner is genuinely
+ahead. **This is the first time in seven rounds that a full skill beat a one-sentence placebo
+on a significance test** — and it only appeared once the metric matched the claim.
+
+**Does it pay for itself?** The banner costs input on every turn and saves output once. Per task
+on this benchmark: **+2,337 input tokens, −634 output tokens.** Priced at published rates, that
+is net positive at every tier, because output is 5x input:
+
+| model | output saved | banner input cost | net, per 1,000 tasks |
+|---|---|---|---|
+| Fable 5 | $31.69 | $2.34 | **+$29.35** |
+| Opus 5 | $15.84 | $1.17 | **+$14.68** |
+| Sonnet 5 | $6.34 | $0.47 | **+$5.87** |
+| Haiku 4.5 | $3.17 | $0.23 | **+$2.94** |
+
+**But the claim is still about three times its measured size.** The pre-registered prediction was
+a reduction of at least 50%, since the banner claims 65%. Measured: 22.4%. That prediction failed
+and is written up as failed. A substance gate ran alongside — a fixed regex list of facts each
+answer had to contain — and it dropped from 100% (plain) to 97% in both compressed arms: a small
+but non-zero cost for the compression. The gate is mine and it is weak; a terse answer can satisfy
+all three patterns while stating the relation backwards.
+
+**The lazy-engineer mode produced no signal, and the reason is a ceiling, not a verdict.** Four
+implement-tasks that invite over-engineering, all three arms 12/12 green: added lines 2.33 (plain),
+2.50 (one-liner), 2.17 (banner), and **zero** new classes, functions or files in any arm. Nobody
+over-engineered, so there was nothing to prevent. Pre-registered prediction — the banner beats
+plain on 3 of 4 fixtures — came back 1 of 4 and is written up as failed. On tasks this small the
+experiment cannot measure the claim; that is a fixture problem, exactly like rounds 1–3.
+
 ### The same token counts, priced at frontier rates
 
 Rates per MTok from Anthropic's published pricing (retrieved 2026-06-24): Fable 5 $10/$50,
