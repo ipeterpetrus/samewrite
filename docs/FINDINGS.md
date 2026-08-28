@@ -326,6 +326,52 @@ the skill is useless, it shows these fixtures had no room for it to help. Two at
 build headroom failed, and the second set was designed *after* seeing the first ceiling by
 the same author — they are two attempts, not two independent replications.
 
+### Round 3: building headroom on purpose
+
+Rounds 1 and 2 could not measure the benefit because the control arm never failed. Round 3
+attacked that directly, from one observation: **the agent stops the moment the target test
+goes green.** So a fixture only has headroom when a *local* patch near the symptom is enough
+to turn the target green while the real cause sits several hops away, in a module the
+symptom's file does not import. The neighbour test separates them.
+
+Two mechanical controls ran before any agent did, and both are cheap:
+
+- **positive** — apply the root fix: target green *and* neighbour green (proves `ROOT` is
+  reachable);
+- **negative** — apply the shortcut patch: target green *and* neighbour **red** (proves the
+  trap exists).
+
+The negative control earned its place immediately: it disqualified a sorting fixture whose
+"shortcut" (sorting the rendered `"dept:name"` strings) turns out to be equivalent to the
+root fix, because the department is the string prefix. That fixture could not have
+discriminated anything, and without the negative control it would have shipped.
+
+The protocol was written down before any run
+([PREREGISTRATION](../experiments/skill-ab/PREREGISTRATION_round3.md)): pilot the control
+arm only, admit a fixture to the A/B if the control failed at least once in 3 repeats —
+selection on the **control arm alone**, never on the plain-vs-skill difference — and if
+nothing qualifies, report a third failure rather than tune the fixtures further.
+
+Pilot, 5 frozen fixtures x 3 control runs: four still at ceiling (3/3 `ROOT`), and one,
+`scale_table`, at `SYMPTOM` 3/3. One qualifier. Repeats were raised 3 -> 6 for power, a
+deviation declared in the pre-registration before any skill-arm run existed.
+
+**The A/B on the one fixture with headroom, 6 pairs, treatment verified 6/6 and 0/6:**
+
+| | reached root cause | took the shortcut | tokens/task |
+|---|---|---|---|
+| without the skill | **2 of 6** | 4 of 6 | 464,030 |
+| with the skill | **0 of 6** | 6 of 6 | 775,510 (**+67.1%**) |
+
+McNemar on the 2 discordant pairs: both favour the control, two-sided p = 0.50 — **not
+significant**, and 2 discordant pairs cannot be. The cost difference is: costlier in 6 of 6
+pairs, two-sided sign test p = 0.031.
+
+So the honest summary of three rounds is not "the skill does nothing". It is narrower and
+more useful: **the first time a fixture left room to find a root cause, the arm instructed
+to find root causes did not find one, and paid 67% more to not find it.** One fixture, one
+model, six pairs. That is a signal worth a bigger experiment, not a verdict.
+
 ### The same token counts, priced at frontier rates
 
 Rates per MTok from Anthropic's published pricing (retrieved 2026-06-24): Fable 5 $10/$50,

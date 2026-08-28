@@ -107,10 +107,16 @@ Per **1,000 debugging tasks**, pricing the measured token counts at published ra
 | Haiku 4.5 | $98.11 | $144.86 | **+$46.75** |
 
 **+67.6% tokens in round 2, costlier in 18 of 18 paired runs** (two-sided sign test
-p ≈ 0.00001); round 1 measured +79.9% on a different fixture set. And the outcome? The plain
-arm reached the root cause in **35 of 36 runs** — so there was no room left for the skill to
-help, and none was seen. That is a *ceiling*, not a verdict: it means these fixtures could
-not measure the benefit, not that the benefit is zero. Full method, both rounds, and the
+p ≈ 0.00001); round 1 measured +79.9% on a different fixture set. In both rounds the plain
+arm reached the root cause in **35 of 36 runs** — a ceiling, so the benefit could not be
+measured at all.
+
+Round 3 built the headroom on purpose, with the protocol written down first and two
+mechanical controls (a root fix must pass everything; a shortcut patch must pass the target
+and fail the hidden neighbour). One fixture qualified. In it, **the control arm reached the
+root cause 2 times out of 6 — and the arm told to invoke the root-cause skill reached it 0
+out of 6**, at +67.1% tokens. Two discordant pairs is not significance (p = 0.50), and it is
+not a verdict. It is the first time the question was even answerable. Full method, both rounds, and the
 reasons the dollar column is a rate-card translation rather than a prediction:
 [§9 of FINDINGS](docs/FINDINGS.md#9-what-an-always-on-skill-costs-measured-twice).
 
