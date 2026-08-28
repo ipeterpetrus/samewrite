@@ -287,6 +287,72 @@ What it broke, and what was done about it:
   subscription, where quota and context pressure are the binding constraints rather than
   dollars, carry is the right metric and the panel's headline attack does not land.
 
+## 9. What an always-on skill costs, measured twice
+
+§4 gives a formula for what an instruction block costs. This section measures one, end to
+end, on a task the skill explicitly claims: `systematic-debugging` ("ALWAYS find root cause
+before attempting fixes. Symptom fixes are failure").
+
+**Design.** Bug fixtures where the symptom differs from the root cause. A symptom-only fix
+turns the TARGET test green while a NEIGHBOR test — never present in the working directory
+while the agent runs — stays red. Scoring is mechanical, no LLM judge: `FAIL` (target red),
+`SYMPTOM` (target green, neighbor red), `ROOT` (both green), `INVALID` (agent edited a test).
+Before any agent ran, a known-good "golden fix" was applied to every fixture to prove `ROOT`
+is reachable. Two arms differ by one sentence: the second prompt says to invoke the skill
+first. **Treatment verified, not assumed** — every skill-arm run's transcript contains a
+`Skill` tool call loading `systematic-debugging` (36/36), and no plain-arm run does (0/36).
+
+| | round 1 | round 2 |
+|---|---|---|
+| fixtures | 6 single-file | 6 multi-file, misleading locus |
+| runs scored | 36 | 36 |
+| config | host's real config (~45 kB preamble + hooks) | minimal config, only the skill |
+| plain arm | 18 ROOT | 17 ROOT, 1 FAIL |
+| skill arm | 18 ROOT | 16 ROOT, 2 FAIL |
+| tokens/task, plain | 402,108 | 389,747 |
+| tokens/task, skill | 723,309 | 653,168 |
+| delta | **+79.9%** | **+67.6%** |
+| paired, skill costlier | 17 of 18 | **18 of 18** |
+| sign test (two-sided, no ties) | p ≈ 0.00015 | p ≈ 0.00001 |
+
+Token figures are **per run**, not arm totals (round-1 plain ranged 212,992–560,391 across
+its 18 runs).
+
+**The cost replicates; the benefit was never measurable.** Across both rounds the plain arm
+reached `ROOT` in 35 of 36 runs. Only one fixture ever produced a disagreement, and it
+disagreed in both directions (plain failed once, the skill arm failed twice) — a coin flip,
+not an effect. So this is a **ceiling**, and a ceiling identifies nothing: it does not show
+the skill is useless, it shows these fixtures had no room for it to help. Two attempts to
+build headroom failed, and the second set was designed *after* seeing the first ceiling by
+the same author — they are two attempts, not two independent replications.
+
+### The same token counts, priced at frontier rates
+
+Rates per MTok from Anthropic's published pricing (retrieved 2026-06-24): Fable 5 $10/$50,
+Opus 5 $5/$25, Sonnet 5 $2/$10, Haiku 4.5 $1/$5; 5-minute cache write is 1.25x input, cache
+read 0.1x input. Cost = (uncached_in x in) + (cache_write x in x 1.25) + (cache_read x in x
+0.1) + (out x out).
+
+Per **1,000 debugging tasks** of the shape measured above:
+
+| model | without the skill | with the skill | difference |
+|---|---|---|---|
+| Fable 5 | $981.14 | $1,448.65 | **+$467.51** |
+| Opus 5 | $490.57 | $724.32 | **+$233.75** |
+| Sonnet 5 | $196.23 | $289.73 | **+$93.50** |
+| Haiku 4.5 | $98.11 | $144.86 | **+$46.75** |
+
+**This is a rate-card translation, not a prediction.** Every run executed on Haiku 4.5;
+the table prices *those* token counts at other models' rates. A different model would emit
+different token counts — different tokenizer, different trajectory, different cache
+behaviour — so the dollar column answers "what would this measured workload bill at these
+rates", never "what Opus 5 would spend".
+
+**And the honest closing note:** this experiment burned roughly 20M tokens in round 1 alone
+to evaluate a listing entry worth 116 bytes. As an optimisation exercise it does not pay for
+itself. Its value is the method — mechanical scoring, a verified treatment, a positive
+control, and a ceiling reported as a ceiling.
+
 ## 8. What would falsify this
 
 - Run `tools/extract.py` + `tools/simulate.py` on your own transcripts. If byte-identical

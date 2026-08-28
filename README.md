@@ -87,6 +87,47 @@ One thing survived every robustness cut: **20.8% of overwrites (154/741) wrote c
 byte-identical to what was already on disk.** Zero changes, full token cost. That one
 is free to fix, so `samewrite` ships a hook that fixes it.
 
+## What a process skill costs, with and without
+
+The repo also measures the other half of the question: what does it cost to *add* an
+instruction? `systematic-debugging` is a skill whose whole promise is "find the root cause
+before fixing". Two arms, same bug fixtures, one sentence apart — the second invokes the
+skill. Scoring is mechanical (a hidden neighbour test catches symptom-only fixes), the
+treatment is verified in the transcripts (36/36 skill-arm runs really did load the skill;
+0/36 plain-arm runs did), and a golden fix was applied first to prove the target score was
+reachable at all.
+
+Per **1,000 debugging tasks**, pricing the measured token counts at published rates:
+
+| model | without the skill | with the skill | difference |
+|---|---|---|---|
+| Fable 5 | $981.14 | $1,448.65 | **+$467.51** |
+| Opus 5 | $490.57 | $724.32 | **+$233.75** |
+| Sonnet 5 | $196.23 | $289.73 | **+$93.50** |
+| Haiku 4.5 | $98.11 | $144.86 | **+$46.75** |
+
+**+67.6% tokens in round 2, costlier in 18 of 18 paired runs** (two-sided sign test
+p ≈ 0.00001); round 1 measured +79.9% on a different fixture set. And the outcome? The plain
+arm reached the root cause in **35 of 36 runs** — so there was no room left for the skill to
+help, and none was seen. That is a *ceiling*, not a verdict: it means these fixtures could
+not measure the benefit, not that the benefit is zero. Full method, both rounds, and the
+reasons the dollar column is a rate-card translation rather than a prediction:
+[§9 of FINDINGS](docs/FINDINGS.md#9-what-an-always-on-skill-costs-measured-twice).
+
+## Before and after: what this repo got wrong
+
+The first edition read 24 transcripts. It is kept here on purpose, because the corrections
+are the useful part.
+
+| claim | first edition | after 1,316 transcripts |
+|---|---|---|
+| where carry goes | Write calls **25.4%** | Write+Edit **9.5%**; Bash 42.5%, Read 21.3% |
+| change blocks per rewrite | **6.9** | **2.6** (median 2) |
+| the edit rule | "≤3 blocks → Edit" | that rule is **net negative**; use changed fraction <25% |
+| identical overwrites | 15% (18/122) | **20.8%** (154/741) — the one finding that held |
+| skill listing | not measured | **72.9% never invoked**, ~3% of session carry |
+| "never invoked = free to remove" | implied | **wrong** — a description steers without being loaded |
+
 ## What's here
 
 ```
