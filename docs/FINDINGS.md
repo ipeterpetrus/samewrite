@@ -78,6 +78,13 @@ order of magnitude more than anything else this repo measures, and removable thr
 supported setting (`skillOverrides`: `on` | `name-only` | `user-invocable-only` | `off`)
 rather than through better behaviour.
 
+Claude Code ships the same question first-party: `/skill-doctor` reports "which loaded
+skills are unused and costing context", `/skills` writes the `skillOverrides` setting,
+and the CLI's own usage panel warns that skills "loaded but never invoked ... each one
+adds to the system prompt every turn". Run those against this table — a number that two
+independent instruments agree on is worth more than either alone. What this tool adds is
+the archive: it counts every invocation ever made, not the live session's.
+
 Two limits worth stating. "Never invoked" means the skill's *body* never loaded; its
 one-line description sat in context regardless and may still have steered something.
 And both plugins whose skills score zero are genuinely in use — through `SessionStart`

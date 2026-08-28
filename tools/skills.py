@@ -11,9 +11,12 @@ whether the skill's *body* was ever loaded. A never-invoked skill still had its
 one-line description in context, so this is a floor on its usefulness, not proof of
 none.
 
-Acting on the result: Claude Code takes `skillOverrides` in settings
-(`on` | `name-only` | `user-invocable-only` | `off`), and its `/settings` panel writes
-those keys for you — with its own sort-by-token-cost view.
+Claude Code ships its own version of this question: `/skill-doctor` ("show which
+loaded skills are unused and costing context"), and `/skills` writes the per-skill
+`skillOverrides` setting (`on` | `name-only` | `user-invocable-only` | `off`) for you.
+Use those first. This tool exists because it works over the transcript archive rather
+than the live session, so it counts every invocation you have ever made, prices each
+entry in bytes, and can be checked against a number the CLI produces independently.
 
 Privacy: prints skill names, sizes and counts. No path, prompt, file content, or tool
 output is read out.

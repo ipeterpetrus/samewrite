@@ -95,6 +95,7 @@ hooks/install.sh            one command, idempotent, backs up settings.json
 skills/edit-discipline/     when to anchor-edit vs rewrite whole (Claude Code skill)
 tools/carry.py              carry by source over your own transcripts — the table above
 tools/skills.py             price your skill listing: which entries you have never invoked
+                            (cross-check it against the CLI's own /skill-doctor)
 tools/extract.py            pull carry data out of transcripts (redacted by default)
 tools/simulate.py           robustness suite: jackknife, bootstrap, holdout, drop-top-k
 tools/report.py             read the field ledger: how often the guard fires, and how
