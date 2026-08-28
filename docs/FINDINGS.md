@@ -632,9 +632,35 @@ The runs were not short. Median **9 turns** (mean 9.2, max 14), so the measured 
 tokens per turn**, far under the 4,664 bytes ≈ 1,485 tokens a naive reading suggests, because
 what is billed after the first turn is cache-read.
 
-Per turn, then: **−69 output tokens, +255 input tokens.** At published rates (output 5x input,
-cache-read 0.1x) that is 345 units saved against 25.5 units spent — **a factor of ~13, and
-scale-invariant**: both sides grow with turn count, so a longer session does not erode it.
+A second panel then rejected that reading, correctly: **255 reconciles with nothing** — not
+full price (the banner is ~1,485 tokens) and not a clean cache-read of it either. The number
+mixed a token count with a billing weight. Its recommended fix cost no new runs — decompose the
+per-turn billing fields already recorded — so that is what was done.
+
+**Decomposition, mode minus plain, averaged over 12 runs per arm:**
+
+| field | delta | reading |
+|---|---|---|
+| `input_tokens` | **−5** | the banner is **not** billed at full rate — if the cache missed this would be ≈ +1,485 |
+| `cache_creation_input_tokens` | −4,628 | the mode arm *writes less* cache |
+| `cache_read_input_tokens` | **+6,970** | ≈ **+760 per turn**, the banner's real recurring cost |
+| `output_tokens` | −634 | ≈ −69 per turn |
+
+So the mechanism is confirmed and the arithmetic is corrected: the recurring cost is **760
+cache-read tokens per turn, not 255**. At published rates that is 76 units spent against 345
+saved on output — still positive by a factor of about 4.5, and the cache-write reduction is a
+further saving on top. The panel's fatal case required the banner to be re-billed at full
+input rate on most turns; the `input_tokens` delta of −5 says it was not.
+
+**And the savings do not saturate — they grow.** Output delta by turn index (mode minus plain):
+
+| turn | 0–1 | 2–3 | 4–5 | 6–7 | 8 | 9+ |
+|---|---|---|---|---|---|---|
+| delta | +22 | −72, −39 | +51, +27 | −165, −130 | −70 | −167 |
+
+Early turns are a wash; the compression bites hardest late, where a verbose model pads
+summaries and wrap-ups after tool results. That is the opposite of the "savings saturate"
+prediction, and it was the judge's own steelman rather than mine.
 
 The objection was still worth raising, and one framing of it is genuinely fatal: if you hold
 the output saving fixed while letting the banner replay grow, break-even lands near 124 turns.
