@@ -3,7 +3,7 @@
 **Measure where a coding-agent session's tokens actually go, then test whether the
 instructions you install are worth what they cost.**
 
-Built from 1,316 Claude Code transcripts (237,541 assistant turns) and 300+ scored A/B
+Built from 1,316 Claude Code transcripts (237,541 assistant turns) and 342 scored A/B
 runs. Two of the first edition's three headline numbers were wrong on a 24-transcript
 sample, six analysis errors followed, and a pre-registered confirmatory run overturned the
 one positive result. All of it is kept in the open in [docs/FINDINGS.md](docs/FINDINGS.md)
@@ -16,7 +16,7 @@ are in [FINDINGS](docs/FINDINGS.md).
 
 ## What this repo concluded
 
-Eight rounds of A/B tests, 300+ scored agent runs, three always-on instruction blocks, and one
+Eight rounds of A/B tests, 342 scored agent runs, three always-on instruction blocks, and one
 pre-registered confirmatory run. The short version:
 
 1. **Session cost is carry, not output.** In an append-only, full-replay context — which is what every
@@ -264,11 +264,14 @@ checked before it is installed.
 
 ## What's here
 
-One disclosure about the evidence: of the 342 scored runs, the **48 pre-registered
-confirmatory runs** are the ones whose raw records ship here (`confirmatory_runs.jsonl`,
-plus a 480-line per-request billing ledger). The eight exploratory rounds are summarised
-in FINDINGS with their pair counts and tests; their raw records stayed local. Trust the
-48 and the corpus scripts; treat the eight rounds as the exploration that led there.
+Every run this repo has ever scored is published, classified, and reconciled in one
+table: 48 pre-registered confirmatory runs, 294 exploratory ones, 95 calibration runs, and
+654 quarantined lines from an execution that was accidentally launched twice. See
+[`experiments/skill-ab/runs/`](experiments/skill-ab/runs/). The classification is not prose:
+`manifest.json` marks each file's evidence class and `load.py` refuses to load anything that
+is not analysis-eligible. One file in twenty loads without a guard — the confirmatory run,
+which is what the conclusions rest on. The exploratory rounds are the path that led there,
+not evidence; a number that appears only in them is a lead.
 
 
 ```
