@@ -1,12 +1,49 @@
 # samewrite
 
-Measure what a coding-agent session actually spends, then enforce the one rule that is
-free to enforce.
+**Measure where a coding-agent session's tokens actually go, then test whether the
+instructions you install are worth what they cost.**
 
-`samewrite` came out of auditing real Claude Code transcripts — **1,316 of them,
-237,541 assistant turns**. The headline finding is not the one people expect, and the
-first edition of this repo got two of its three numbers wrong on a 24-transcript
-sample. Those corrections are kept in the open in [docs/FINDINGS.md](docs/FINDINGS.md).
+Built from 1,316 Claude Code transcripts (237,541 assistant turns) and 300+ scored A/B
+runs. Two of the first edition's three headline numbers were wrong on a 24-transcript
+sample, six analysis errors followed, and a pre-registered confirmatory run overturned the
+one positive result. All of it is kept in the open in [docs/FINDINGS.md](docs/FINDINGS.md)
+— the corrections are the point, not an embarrassment.
+
+**Start here:** the conclusions are directly below · the measured ranking is in
+[The numbers](#the-numbers-largest-first) · what to run on your own logs is in
+[Measure your own sessions](#measure-your-own-sessions) · the method and every retraction
+are in [FINDINGS](docs/FINDINGS.md).
+
+## What this repo concluded
+
+Eight rounds of A/B tests, 300+ scored agent runs, three always-on instruction blocks, and one
+pre-registered confirmatory run. The short version:
+
+1. **Session cost is carry, not output.** In an append-only, full-replay context — which is what every
+   agent measured here has — everything you send is billed again on every later turn, so cost is
+   `size × turns remaining` and input grows O(N²); both the model and the exponent are
+   conditional on that regime, not universal. Output is 0.3% of
+   tokens and ~11% of the bill.
+2. **The levers are not where the advice points.** Bash and Read results are 63.8% of carry;
+   injected scaffolding (skill list, hooks, reminders) is 15.3%; assistant prose is 5.6%; the
+   Write/Edit calls that "emit only the changed block" targets are 9.5%.
+3. **The popular edit rule is net negative.** `≤3 change blocks → Edit` loses ~79% of the
+   available saving on 1,316 transcripts. Changed *fraction* under ~25% is the rule that works.
+4. **Skill listings are mostly dead weight.** 72.9% of one listing (21,891 of 30,009 bytes) had
+   never been invoked once across 1,409 sessions — ~6,972 tokens re-sent every turn.
+5. **Telling the model to be terse works.** −23.4% output tokens against no instruction, 15 of
+   16 pairs, exact p = 0.0001, with 100% of required facts retained.
+6. **The kilobytes do not.** Three always-on blocks (9.4 kB debugging, 5.2 kB lazy-engineer,
+   4.7 kB terse) were each tested against a one-sentence version of their own intent. **None
+   beat the sentence on a pre-registered test.** The terse block's advantage measured −9.2%
+   (p = 0.039) on the first task set and **−0.8% (p = 0.86) on fresh pre-registered tasks.**
+7. **The method is the durable part.** Hidden neighbour tests, a held-out consumer written
+   after the patch lands, structural provenance audits (62/62 clean), verified treatment, and
+   pre-registered kill conditions — two of three generator hypotheses died by their own
+   thresholds, and six analysis errors are documented in sequence rather than tidied away.
+
+The one line of advice it supports: **write the instruction as one sentence, measure it, and
+only then consider a kilobyte of rules.**
 
 ## The numbers, largest first
 
@@ -164,37 +201,6 @@ are the useful part.
 | identical overwrites | 15% (18/122) | **20.8%** (154/741) — the one finding that held |
 | skill listing | not measured | **72.9% never invoked**, ~3% of session carry |
 | "never invoked = free to remove" | implied | **wrong** — a description steers without being loaded |
-
-## What this repo concluded
-
-Eight rounds of A/B tests, 300+ scored agent runs, three always-on instruction blocks, and one
-pre-registered confirmatory run. The short version:
-
-1. **Session cost is carry, not output.** In an append-only, full-replay context — which is what every
-   agent measured here has — everything you send is billed again on every later turn, so cost is
-   `size × turns remaining` and input grows O(N²); both the model and the exponent are
-   conditional on that regime, not universal. Output is 0.3% of
-   tokens and ~11% of the bill.
-2. **The levers are not where the advice points.** Bash and Read results are 63.8% of carry;
-   injected scaffolding (skill list, hooks, reminders) is 15.3%; assistant prose is 5.6%; the
-   Write/Edit calls that "emit only the changed block" targets are 9.5%.
-3. **The popular edit rule is net negative.** `≤3 change blocks → Edit` loses ~79% of the
-   available saving on 1,316 transcripts. Changed *fraction* under ~25% is the rule that works.
-4. **Skill listings are mostly dead weight.** 72.9% of one listing (21,891 of 30,009 bytes) had
-   never been invoked once across 1,409 sessions — ~6,972 tokens re-sent every turn.
-5. **Telling the model to be terse works.** −23.4% output tokens against no instruction, 15 of
-   16 pairs, exact p = 0.0001, with 100% of required facts retained.
-6. **The kilobytes do not.** Three always-on blocks (9.4 kB debugging, 5.2 kB lazy-engineer,
-   4.7 kB terse) were each tested against a one-sentence version of their own intent. **None
-   beat the sentence on a pre-registered test.** The terse block's advantage measured −9.2%
-   (p = 0.039) on the first task set and **−0.8% (p = 0.86) on fresh pre-registered tasks.**
-7. **The method is the durable part.** Hidden neighbour tests, a held-out consumer written
-   after the patch lands, structural provenance audits (62/62 clean), verified treatment, and
-   pre-registered kill conditions — two of three generator hypotheses died by their own
-   thresholds, and six analysis errors are documented in sequence rather than tidied away.
-
-The one line of advice it supports: **write the instruction as one sentence, measure it, and
-only then consider a kilobyte of rules.**
 
 ## Compatibility
 
