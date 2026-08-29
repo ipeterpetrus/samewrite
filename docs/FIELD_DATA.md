@@ -6,9 +6,9 @@ Range: 2026-08-23 … 2026-08-28 (5 days)
 
 | host | writes checked | denied | % | bytes saved | ~tokens |
 |---|---|---|---|---|---|
-| `host-5ce9e7` | 25 | 2 | 8.0% | 2,086 | 664 |
-| **total** | **25** | **2** | **8.0%** | **2,086** | **664** |
+| `host-5ce9e7` | 30 | 2 | 6.7% | 2,086 | 664 |
+| **total** | **30** | **2** | **6.7%** | **2,086** | **664** |
 
-Retrospective over 1,316 transcripts: 20.8% (154/741). Field: **8.0%** of 25 writes.
+Retrospective over 1,316 transcripts: 20.8% (154/741). Field: **6.7%** of 30 writes.
 
-Rewrites that changed under 25% of the file: 6 of 23 (26.1%) — 5,522 bytes (~1,759 tokens) resent for a change that would have fit in an Edit. The guard does not block these; this is a measurement, not a verdict.
+Rewrites that changed under 25% of the file: 6 of 28 (21.4%) — 5,522 bytes (~1,759 tokens) resent for a change that would have fit in an Edit. The guard does not block these; this is a measurement, not a verdict.
