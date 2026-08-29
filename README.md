@@ -58,6 +58,13 @@ Token volume across those transcripts:
 
 \* cache-read 0.1x, cache-write 1.25x, output 5x the base input rate.
 
+The carry shares below are **volume within a single billing class**: after turn 1 what is
+replayed is billed as `cache_read`, so the 0.1x discount scales every row equally and
+cancels out of the percentages. The price column above is where the discount matters, and
+it is applied there. The per-request ledger publishes `cache_read` and `cache_creation`
+separately, so this is checkable rather than asserted — an early version of this repo did
+get it wrong, and [FINDINGS records the correction](docs/FINDINGS.md).
+
 Anything entering the context at turn *i* is replayed on every turn after it. Cost is
 **size × remaining turns**, and total session input grows **O(N²)**. What you write
 once is cheap; what stays resident is not. So the question worth asking is not "who
@@ -97,9 +104,9 @@ Three consequences, each of which contradicts a popular piece of advice:
 | do this | measured effect | how sure |
 |---|---|---|
 | **End the session sooner** | **−41…−54%** of carry when one session becomes two | measured on 1,316 transcripts; published work on compaction reports −63…−86% |
-| **Prune the skill listing** | **≈ −3%** — 72.9% of it (21,891 of 30,009 bytes) had never been invoked once | invocation counted over 1,409 transcripts; cross-checked against the CLI's own token figures, 1.5% apart |
+| **Prune the skill listing** | **≈ −3%** — 72.9% of it (21,891 of 30,009 bytes) belonged to skills whose **body was never invoked once** | body invocations counted over 1,409 transcripts; a never-invoked description can still be doing routing work, so treat this as an upper bound on waste; cross-checked against the CLI's own token figures, 1.5% apart |
 | **Read a range, not a file** | Read results are **21.3%** of carry at a mean of 22.8 kB per call | measured |
-| Stop writing files identical to disk | **−0.077%**, free | 20.8% of overwrites (154/741) were byte-identical |
+| Stop writing files identical to disk — hygiene, not a saving | **−0.077%**, free | 20.8% of overwrites (154/741) were byte-identical |
 | Fix the edit rule you were told to use | **+0.07%** — and the popular version (`≤3 change blocks → Edit`) is **net negative** | held out over 20 session-level splits |
 | **Tell the model to be terse** — one sentence is enough | **−23.4%** output tokens against no instruction (15/16 pairs, exact p = 0.0001), with 100% of required facts kept | pre-registered, fresh tasks, 48 runs, zero exclusions. The 4,664-byte skill that says the same thing beat that sentence by **−0.8%, p = 0.86** — [FINDINGS](docs/FINDINGS.md) |
 | *Add a process skill that is never invoked* | **+51…+84% tokens** | six A/B rounds, costlier in 17/18, 18/18, 6/6, 12/12, 4/4, 16/16 pairs |
@@ -117,6 +124,11 @@ never beat that sentence, and cost **56% more** than it.
 test, exclusions fixed in advance — none of the three always-on blocks beat a one-sentence
 version of its own intent. The terse block went from −9.2% (p = 0.039) on the first task
 set to **−0.8% (p = 0.86)** on fresh tasks. Terseness replicates; the kilobytes do not.
+
+These are **two contrasts inside one experiment**, not two independent findings: the same
+48 runs supply both the presence effect (instruction versus none, −23.4%) and the length
+effect (block versus sentence, −0.8%). They share an error structure and should be read
+together — a reader who counts them as separate confirmations is double-counting.
 
 This is the other half of the question: what does it cost to *add* an
 instruction? `systematic-debugging` is a skill whose whole promise is "find the root cause
