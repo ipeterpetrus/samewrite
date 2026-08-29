@@ -165,6 +165,75 @@ are the useful part.
 | skill listing | not measured | **72.9% never invoked**, ~3% of session carry |
 | "never invoked = free to remove" | implied | **wrong** — a description steers without being loaded |
 
+## What this repo concluded
+
+Eight rounds of A/B tests, 300+ scored agent runs, three always-on instruction blocks, and one
+pre-registered confirmatory run. The short version:
+
+1. **Session cost is carry, not output.** Everything you send is replayed as cache-read on every
+   later turn, so cost is `size × turns remaining` and input grows O(N²). Output is 0.3% of
+   tokens and ~11% of the bill.
+2. **The levers are not where the advice points.** Bash and Read results are 63.8% of carry;
+   injected scaffolding (skill list, hooks, reminders) is 15.3%; assistant prose is 5.6%; the
+   Write/Edit calls that "emit only the changed block" targets are 9.5%.
+3. **The popular edit rule is net negative.** `≤3 change blocks → Edit` loses ~79% of the
+   available saving on 1,316 transcripts. Changed *fraction* under ~25% is the rule that works.
+4. **Skill listings are mostly dead weight.** 72.9% of one listing (21,891 of 30,009 bytes) had
+   never been invoked once across 1,409 sessions — ~6,972 tokens re-sent every turn.
+5. **Telling the model to be terse works.** −23.4% output tokens against no instruction, 15 of
+   16 pairs, exact p = 0.0001, with 100% of required facts retained.
+6. **The kilobytes do not.** Three always-on blocks (9.4 kB debugging, 5.2 kB lazy-engineer,
+   4.7 kB terse) were each tested against a one-sentence version of their own intent. **None
+   beat the sentence on a pre-registered test.** The terse block's advantage measured −9.2%
+   (p = 0.039) on the first task set and **−0.8% (p = 0.86) on fresh pre-registered tasks.**
+7. **The method is the durable part.** Hidden neighbour tests, a held-out consumer written
+   after the patch lands, structural provenance audits (62/62 clean), verified treatment, and
+   pre-registered kill conditions — two of three generator hypotheses died by their own
+   thresholds, and six analysis errors are documented in sequence rather than tidied away.
+
+The one line of advice it supports: **write the instruction as one sentence, measure it, and
+only then consider a kilobyte of rules.**
+
+## Compatibility
+
+| piece | needs | portable? |
+|---|---|---|
+| `hooks/write_noop_guard.py` | Claude Code `PreToolUse` hook protocol — JSON on stdin with `tool_name`/`tool_input`, a `hookSpecificOutput.permissionDecision` on stdout | **Claude Code only** as written; the logic is 60 lines and the contract is one function |
+| `tools/carry.py`, `skills.py`, `extract.py`, `simulate.py` | transcript JSONL with per-turn `usage` and `tool_use`/`tool_result` blocks | any agent that logs those — see below |
+| `experiments/skill-ab/` | a headless agent invocation and a per-session config directory | any CLI agent with both |
+| everything | **Python 3.8+, standard library only** | `tiktoken` is optional in `extract.py` (falls back to bytes/3.14); `pytest` is only used by the experiment fixtures |
+
+Verified here: 92 assertions across four suites pass on CPython 3.10; CI runs 3.9 and 3.12. No
+walrus operator, no `match`, no third-party runtime dependency. 45 files, 516 KB.
+
+## Using it with another agent
+
+The Claude-Code-specific part is smaller than it looks. Every transcript tool routes through one
+function — `scan()` — which turns a log file into `(turn_index, size_in_bytes, source_label)`
+triples plus a usage counter. Point that at another agent's logs and the carry arithmetic,
+the skill-listing audit and the simulation all work unchanged.
+
+What an agent must log for the tools to apply:
+
+- a **per-turn boundary** (something that marks one model call),
+- **token usage per turn** — at minimum output, ideally the cache-read/cache-write split, without
+  which the carry model degrades to a byte estimate,
+- **tool calls and their results**, distinguishable by tool name, since that is the whole point of
+  the carry table.
+
+If a log has the first and third but not the second, `carry.py` still ranks sources by bytes —
+which is what the O(N²) argument actually rests on — and only the dollar translation is lost.
+
+For an agent that has no pre-write hook at all, the guard does not port, but its finding does:
+**20.8% of overwrites in this corpus rewrote a file byte-for-byte identically.** That check is
+four lines in any write path, hook or not.
+
+And the experiment rig is agent-agnostic by construction. Its oracles are files on disk and its
+statistics are paired sign and exact permutation tests — nothing in
+`experiments/skill-ab/` knows which model produced the patch. Swapping the launcher line is
+enough to point it at a different agent, which is how any claim in a system prompt should be
+checked before it is installed.
+
 ## What's here
 
 ```
