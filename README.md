@@ -113,11 +113,12 @@ never beat that sentence, and cost **56% more** than it.
 
 ## What the instruction blocks cost
 
-Three always-on blocks were each tested against a **one-sentence version of their own intent**, and on a pre-registered confirmatory run **none beat the sentence** — the terse
-block went from −9.2% (p = 0.039) on the first task set to **−0.8% (p = 0.86)** on fresh
-tasks. What replicates is terseness itself, not the kilobytes. The cost side never wavered:
+**Verdict first:** on a pre-registered confirmatory run — fresh tasks, one endpoint, one
+test, exclusions fixed in advance — none of the three always-on blocks beat a one-sentence
+version of its own intent. The terse block went from −9.2% (p = 0.039) on the first task
+set to **−0.8% (p = 0.86)** on fresh tasks. Terseness replicates; the kilobytes do not.
 
-The repo also measures the other half of the question: what does it cost to *add* an
+This is the other half of the question: what does it cost to *add* an
 instruction? `systematic-debugging` is a skill whose whole promise is "find the root cause
 before fixing". Two arms, same bug fixtures, one sentence apart — the second invokes the
 skill. Scoring is mechanical (a hidden neighbour test catches symptom-only fixes), the
