@@ -9,6 +9,16 @@ sample, six analysis errors followed, and a pre-registered confirmatory run over
 one positive result. All of it is kept in the open in [docs/FINDINGS.md](docs/FINDINGS.md)
 — the corrections are the point, not an embarrassment.
 
+**Run it on your own logs** — nothing here is specific to this author's machine:
+
+```
+python3 tools/carry.py ~/.claude/projects/*/*.jsonl --markdown
+```
+
+That prints your own carry table: which sources occupy your context longest, and what one
+session is paying to keep them there. The numbers below are what it printed here; the
+interesting question is whether it prints the same shape for you.
+
 **Start here:** the conclusions are directly below · the measured ranking is in
 [Where the tokens go](#where-the-tokens-go) · what to run on your own logs is in
 [Measure your own sessions](#measure-your-own-sessions) · the method and every retraction
@@ -58,7 +68,13 @@ Token volume across those transcripts:
 
 \* cache-read 0.1x, cache-write 1.25x, output 5x the base input rate.
 
-The carry shares below are **volume within a single billing class**: after turn 1 what is
+The per-source shares below are **bytes x turns remaining**, converted to tokens by a
+constant measured on this corpus — an exposure measure, not a per-source billing readout,
+because the API bills one replayed prefix and does not itemise it by source. The bucket
+table above *is* real billed usage. Read the split as "what occupies the context", and the
+bucket table as "what was charged".
+
+The shares are also **volume within a single billing class**: after turn 1 what is
 replayed is billed as `cache_read`, so the 0.1x discount scales every row equally and
 cancels out of the percentages. The price column above is where the discount matters, and
 it is applied there. The per-request ledger publishes `cache_read` and `cache_creation`
