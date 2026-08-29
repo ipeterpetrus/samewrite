@@ -221,6 +221,35 @@ What an agent must log for the tools to apply:
 - **tool calls and their results**, distinguishable by tool name, since that is the whole point of
   the carry table.
 
+### A port that failed, and why that is the useful part
+
+The first agent this was pointed at — a workflow-based research/trading agent running on the
+same machine — **could not be measured by these tools at all**, and the reason generalises.
+
+Its log is 4,757 records of `ts, event, goal, usd, model, area, topic`. It has **no turn
+boundary, no tool-call labels, and no token usage** — the check for all three came back false.
+What it does have is `usd` per event, recorded directly: ~$13 of model spend across 2.5 months,
+`cx/gpt-5.5` $10.76, `cx/gpt-5.6-terra` $2.14, `ds/deepseek-v4-flash` $0.02. (A fourth
+`budget_record` event carries another $41 with no model attached and looks like a rollup of the
+same spend, so treat any total that sums all of them as double-counted.)
+
+The deeper point is not the missing fields. **That agent has no carry**, because it has no
+replayed transcript: each step is an independent call, its cost is linear in the number of
+events, and nothing from step 3 is re-billed at step 40. The `size × turns remaining` model —
+the thing this whole repo rests on — simply does not describe it.
+
+So the honest scope is narrower than the requirements list above suggests:
+
+| agent shape | does carry apply? | what to measure instead |
+|---|---|---|
+| linear replayed transcript (Claude Code, most CLI coding agents) | **yes** — this is the O(N²) regime the tools model | carry by source, exactly as here |
+| server-side compaction / context editing / pruned tool results | **partly** — replay is truncated, so carry is an upper bound | measure billed input per turn against cumulative transcript size, as [FINDINGS §7](docs/FINDINGS.md) does |
+| event- or workflow-based, fresh context per step | **no** — cost is linear in steps | per-event cost, which such agents usually already log |
+
+The three requirements are **necessary, not sufficient**: a log can satisfy all of them and
+still produce a meaningless carry table if the runtime does not actually replay what the log
+records. Check the regime before the fields.
+
 If a log has the first and third but not the second, `carry.py` still ranks sources by bytes —
 which is what the O(N²) argument actually rests on — and only the dollar translation is lost.
 
