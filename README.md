@@ -170,8 +170,10 @@ are the useful part.
 Eight rounds of A/B tests, 300+ scored agent runs, three always-on instruction blocks, and one
 pre-registered confirmatory run. The short version:
 
-1. **Session cost is carry, not output.** Everything you send is replayed as cache-read on every
-   later turn, so cost is `size × turns remaining` and input grows O(N²). Output is 0.3% of
+1. **Session cost is carry, not output.** In an append-only, full-replay context — which is what every
+   agent measured here has — everything you send is billed again on every later turn, so cost is
+   `size × turns remaining` and input grows O(N²); both the model and the exponent are
+   conditional on that regime, not universal. Output is 0.3% of
    tokens and ~11% of the bill.
 2. **The levers are not where the advice points.** Bash and Read results are 63.8% of carry;
    injected scaffolding (skill list, hooks, reminders) is 15.3%; assistant prose is 5.6%; the
@@ -210,8 +212,9 @@ walrus operator, no `match`, no third-party runtime dependency. 45 files, 516 KB
 
 The Claude-Code-specific part is smaller than it looks. Every transcript tool routes through one
 function — `scan()` — which turns a log file into `(turn_index, size_in_bytes, source_label)`
-triples plus a usage counter. Point that at another agent's logs and the carry arithmetic,
-the skill-listing audit and the simulation all work unchanged.
+triples plus a usage counter. Point that at another agent's logs and the same arithmetic runs —
+but **the carry model is exact only for append-only, full-replay contexts.** Anywhere else it is
+a linear-replay *upper bound*, not a measurement, and must be labelled that way.
 
 What an agent must log for the tools to apply:
 
@@ -219,7 +222,12 @@ What an agent must log for the tools to apply:
 - **token usage per turn** — at minimum output, ideally the cache-read/cache-write split, without
   which the carry model degrades to a byte estimate,
 - **tool calls and their results**, distinguishable by tool name, since that is the whole point of
-  the carry table.
+  the carry table,
+- and the one that is easy to forget: **verified replay semantics.** A transcript records what
+  was *written*, never what was *sent*. A rolling-summary agent, an agent with a fixed prompt, or
+  one that branches into sub-agents can satisfy the first three requirements and still produce a
+  carry table that means nothing. Either the replay behaviour is documented, or the log carries
+  per-inference inclusion intervals — `(item_id, first_included_turn, last_included_turn)`.
 
 ### A port that failed, and why that is the useful part
 
@@ -250,8 +258,11 @@ The three requirements are **necessary, not sufficient**: a log can satisfy all 
 still produce a meaningless carry table if the runtime does not actually replay what the log
 records. Check the regime before the fields.
 
-If a log has the first and third but not the second, `carry.py` still ranks sources by bytes —
-which is what the O(N²) argument actually rests on — and only the dollar translation is lost.
+If a log has the boundary and the tool calls but no usage, `carry.py` still produces a
+**byte-volume ranking**. Call it that and nothing more: it supports no token-share claim and no
+dollar claim, because bytes and tokens do not rank alike — token-dense content such as hashes,
+base64 and minified payloads is *undercounted* by bytes, and the size of that distortion is
+tokenizer-specific and unmeasured here.
 
 For an agent that has no pre-write hook at all, the guard does not port, but its finding does:
 **20.8% of overwrites in this corpus rewrote a file byte-for-byte identically.** That check is
