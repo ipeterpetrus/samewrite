@@ -43,3 +43,12 @@ output_tokens`. Diminta panel; tanpa ini hasilnya tak bisa diaudit siapa pun.
 `mode` < `oneline` pada endpoint utama dengan p < 0,05. **Bila p >= 0,05, manfaat banner
 dinyatakan TIDAK terreplikasi**, dan temuan eksploratori sebelumnya tetap eksploratori
 selamanya — tidak ada ronde penyelamat.
+
+## Addendum, 2026-08-29 — protocol deviation
+
+The first execution of this design was accidentally launched twice and its two rig
+processes wrote interleaved records to one ledger. That data was discarded and the design
+re-executed once under `flock`, with no parameter changed. This pre-registration contains
+no relaunch, locking, abort or contamination clause, so that decision was made outside the
+registered protocol and after the contamination was visible. The discarded data is
+published at `runs/quarantine/` with a collision diagnosis.

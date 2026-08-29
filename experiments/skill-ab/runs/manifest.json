@@ -1,0 +1,285 @@
+{
+  "generated_from": "the data files themselves",
+  "classification": "RETROSPECTIVE - these rules were written after the runs existed, see README",
+  "evidence_classes": {
+    "confirmatory": "pre-registered, analysis-eligible",
+    "exploratory": "not pre-registered, leads only",
+    "calibration": "single-arm or smoke, proves fixtures fail before treatment; never an effect estimate",
+    "quarantine": "forensic record of a pipeline failure; never an observation"
+  },
+  "files": [
+    {
+      "path": "exploratory/ab3.jsonl",
+      "evidence_class": "exploratory",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 12,
+      "unit": "runs",
+      "arms": [
+        "plain",
+        "skill"
+      ],
+      "sha256": "bbdd921479948cc71be746d6aba31a8f34447e5c717e7dd9ae41c0ab6c5d368f"
+    },
+    {
+      "path": "exploratory/ab4.jsonl",
+      "evidence_class": "exploratory",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 24,
+      "unit": "runs",
+      "arms": [
+        "plain",
+        "skill"
+      ],
+      "sha256": "2776b2a58891954e28a679e050fc96eb8034c98bab563fc9bc5978397dba470b"
+    },
+    {
+      "path": "exploratory/ab5.jsonl",
+      "evidence_class": "exploratory",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 12,
+      "unit": "runs",
+      "arms": [
+        "placebo",
+        "plain",
+        "skill"
+      ],
+      "sha256": "a67a8ce91f0c0e5009c1b47166d4bdb19ac497612858b25cb1acdfc8e32b5473"
+    },
+    {
+      "path": "exploratory/ab6.jsonl",
+      "evidence_class": "exploratory",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 48,
+      "unit": "runs",
+      "arms": [
+        "placebo",
+        "plain",
+        "skill"
+      ],
+      "sha256": "c8fa76c60cab5055d36ca61c5bfac30c27771ace660bcdd9630412b6f50b87a0"
+    },
+    {
+      "path": "exploratory/ab8.jsonl",
+      "evidence_class": "exploratory",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 36,
+      "unit": "runs",
+      "arms": [
+        "mode",
+        "oneline",
+        "plain"
+      ],
+      "sha256": "d2e9d9e7653b50e229a35fe1337ec951e0da6644180be2db9b78658449ade80b"
+    },
+    {
+      "path": "exploratory/ab_caveman.jsonl",
+      "evidence_class": "exploratory",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 36,
+      "unit": "runs",
+      "arms": [
+        "mode",
+        "oneline",
+        "plain"
+      ],
+      "sha256": "643aa153b2833f58c3fd6dffc6ddaf3d8ec1cc6b7288a1fa63c4d446a7cd0022"
+    },
+    {
+      "path": "exploratory/ab_ponytail.jsonl",
+      "evidence_class": "exploratory",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 36,
+      "unit": "runs",
+      "arms": [
+        "mode",
+        "oneline",
+        "plain"
+      ],
+      "sha256": "59d151d0589a3b6593726560074c3b63c9a5685886c19d4d5a8e1f30e5c3a92e"
+    },
+    {
+      "path": "exploratory/results.jsonl",
+      "evidence_class": "exploratory",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 36,
+      "unit": "runs",
+      "arms": [
+        "plain",
+        "skill"
+      ],
+      "sha256": "3e12acb1a8a59ceab77485a0ddb19cc404124f3972025f038311ae3fd40ccc9f"
+    },
+    {
+      "path": "exploratory/results2.jsonl",
+      "evidence_class": "exploratory",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 54,
+      "unit": "runs",
+      "arms": [
+        "plain",
+        "skill"
+      ],
+      "sha256": "acfa49b10c344e4b0a7e9dc0350e99afaa3d59bcb9299c33a81a7da81290d4c5"
+    },
+    {
+      "path": "calibration/cal.jsonl",
+      "evidence_class": "calibration",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 12,
+      "unit": "runs",
+      "arms": [
+        "plain"
+      ],
+      "sha256": "f2b6302cdbfb2556eed1d9580ca60f62c8b39f52b5839cfc521d41430852e8e1"
+    },
+    {
+      "path": "calibration/pilot3.jsonl",
+      "evidence_class": "calibration",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 18,
+      "unit": "runs",
+      "arms": [
+        "plain"
+      ],
+      "sha256": "7a218e7fae7efb3f55c037de614d76d42942d16affd896449b2e14e66ee2c151"
+    },
+    {
+      "path": "calibration/pilot4.jsonl",
+      "evidence_class": "calibration",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 15,
+      "unit": "runs",
+      "arms": [
+        "plain"
+      ],
+      "sha256": "5826edc9e78530a0dfcfb261f4d651c7b9f2349d03206cfd9e0c96406e7e594e"
+    },
+    {
+      "path": "calibration/pilot5.jsonl",
+      "evidence_class": "calibration",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 18,
+      "unit": "runs",
+      "arms": [
+        "plain"
+      ],
+      "sha256": "a7d23a3241824d94cf5bffb6d05e191470c54ec48e739b4c9e3e07d5c0f31f02"
+    },
+    {
+      "path": "calibration/pilot6.jsonl",
+      "evidence_class": "calibration",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 18,
+      "unit": "runs",
+      "arms": [
+        "plain"
+      ],
+      "sha256": "9dc259dd128abf80911b58844a36ba6162fe0933ac4c537d9a4f14750be65eba"
+    },
+    {
+      "path": "calibration/smoke.jsonl",
+      "evidence_class": "calibration",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 2,
+      "unit": "runs",
+      "arms": [
+        "plain",
+        "skill"
+      ],
+      "sha256": "cf5014441ade0590ce4027bd25c5be462eedba1b4f7be5781e92892086302c6b"
+    },
+    {
+      "path": "calibration/smoke2.jsonl",
+      "evidence_class": "calibration",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 4,
+      "unit": "runs",
+      "arms": [
+        "plain",
+        "skill"
+      ],
+      "sha256": "8472972b2634a4c74d3ade86cdff63e2d3b29f9adac00282c5d60a27aefa356f"
+    },
+    {
+      "path": "calibration/smoke_cv.jsonl",
+      "evidence_class": "calibration",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 8,
+      "unit": "runs",
+      "arms": [
+        "mode",
+        "plain"
+      ],
+      "sha256": "e164e2bf4f3b7c1d48a1421ff2ec636f7dbd8f9e545fbf3226fa5371380dddd4"
+    },
+    {
+      "path": "quarantine/confirm.contaminated.jsonl",
+      "evidence_class": "quarantine",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 59,
+      "unit": "runs",
+      "arms": [
+        "mode",
+        "oneline",
+        "plain"
+      ],
+      "sha256": "6fcff23cf4b698c3431563da2f192fbcb9b1ecb868be4a6dce7387c0afc29b49"
+    },
+    {
+      "path": "quarantine/ledger.contaminated.jsonl",
+      "evidence_class": "quarantine",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 595,
+      "unit": "per-request billing rows",
+      "arms": [
+        "mode",
+        "oneline",
+        "plain"
+      ],
+      "sha256": "68fc115c759b221791049572de64d0323b7ce2738c82944a37594979b14a9ad6"
+    },
+    {
+      "path": "../confirmatory_runs.jsonl",
+      "evidence_class": "confirmatory",
+      "preregistered": true,
+      "analysis_eligible": true,
+      "n": 48,
+      "unit": "runs",
+      "arms": [
+        "mode",
+        "oneline",
+        "plain"
+      ],
+      "sha256": "2da1e0fe3f1d659b15123e515c84e046e1252eab08e7ea9384a15a4967e8b0bb"
+    }
+  ],
+  "reconciliation": {
+    "scored_ab_runs_342": {
+      "exploratory": 294,
+      "confirmatory": 48,
+      "total": 342
+    },
+    "calibration_runs": 95,
+    "quarantined_lines": 654,
+    "quarantined_note": "59 run records + 595 per-request billing rows. Different units. Never pooled, never counted as runs."
+  }
+}
