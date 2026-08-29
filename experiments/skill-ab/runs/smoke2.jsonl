@@ -1,0 +1,4 @@
+{"fixture": "intdiv", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 34.5, "work": "/tmp/sd_intdiv_plain_qey9gxn3", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "intdiv", "arm": "skill", "verdict": "ROOT", "rc": 0, "sec": 47.3, "work": "/tmp/sd_intdiv_skill_t93_0yd5", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "mutdefault", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 38.2, "work": "/tmp/sd_mutdefault_plain_rt1f1vm3", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "mutdefault", "arm": "skill", "verdict": "ROOT", "rc": 0, "sec": 40.0, "work": "/tmp/sd_mutdefault_skill_y12xmdx7", "rep": 0, "model": "claude-haiku-4-5-20251001"}

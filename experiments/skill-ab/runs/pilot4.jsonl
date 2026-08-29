@@ -1,0 +1,15 @@
+{"fixture": "config_keys", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 33.2, "work": "/tmp/sd2-config_keys-plain-2uyebhmi", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "handler_registry", "arm": "plain", "verdict": "SYMPTOM", "rc": 0, "sec": 32.7, "work": "/tmp/sd2-handler_registry-plain-2m9x0cb0", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "scale_table", "arm": "plain", "verdict": "SYMPTOM", "rc": 0, "sec": 34.7, "work": "/tmp/sd2-scale_table-plain-d2gzslpw", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "sibling_callers", "arm": "plain", "verdict": "SYMPTOM", "rc": 0, "sec": 28.5, "work": "/tmp/sd2-sibling_callers-plain-cmn0eke9", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "subclass_family", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 23.2, "work": "/tmp/sd2-subclass_family-plain-tmoe0k6s", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "config_keys", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 30.4, "work": "/tmp/sd2-config_keys-plain-kyq5h0uo", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "handler_registry", "arm": "plain", "verdict": "SYMPTOM", "rc": 0, "sec": 30.6, "work": "/tmp/sd2-handler_registry-plain-c8ladq4h", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "scale_table", "arm": "plain", "verdict": "SYMPTOM", "rc": 0, "sec": 37.1, "work": "/tmp/sd2-scale_table-plain-vxhr2n5k", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "sibling_callers", "arm": "plain", "verdict": "SYMPTOM", "rc": 0, "sec": 26.6, "work": "/tmp/sd2-sibling_callers-plain-gn60w1tp", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "subclass_family", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 26.7, "work": "/tmp/sd2-subclass_family-plain-r5q0dj1o", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "config_keys", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 37.3, "work": "/tmp/sd2-config_keys-plain-dio1jl_v", "rep": 2, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "handler_registry", "arm": "plain", "verdict": "SYMPTOM", "rc": 0, "sec": 29.1, "work": "/tmp/sd2-handler_registry-plain-hr0hbrqn", "rep": 2, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "scale_table", "arm": "plain", "verdict": "SYMPTOM", "rc": 0, "sec": 33.4, "work": "/tmp/sd2-scale_table-plain-5hp3idac", "rep": 2, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "sibling_callers", "arm": "plain", "verdict": "SYMPTOM", "rc": 0, "sec": 22.2, "work": "/tmp/sd2-sibling_callers-plain-_vw0jbqr", "rep": 2, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "subclass_family", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 28.2, "work": "/tmp/sd2-subclass_family-plain-0jxwoywg", "rep": 2, "model": "claude-haiku-4-5-20251001"}

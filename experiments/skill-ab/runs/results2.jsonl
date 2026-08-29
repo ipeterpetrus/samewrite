@@ -1,0 +1,54 @@
+{"fixture": "greedy_regex", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 20.0, "work": "/tmp/sd2-greedy_regex-plain-v747v5wx", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "greedy_regex", "arm": "skill", "verdict": "ROOT", "rc": 0, "sec": 32.1, "work": "/tmp/sd2-greedy_regex-skill-uu1jl4_o", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "inheritance", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 24.6, "work": "/tmp/sd2-inheritance-plain-0vn5z9zl", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "inheritance", "arm": "skill", "verdict": "ROOT", "rc": 0, "sec": 35.1, "work": "/tmp/sd2-inheritance-skill-_onv4g49", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "money_float", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 51.0, "work": "/tmp/sd2-money_float-plain-pdpu98zu", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "money_float", "arm": "skill", "verdict": "FAIL", "rc": 0, "sec": 51.3, "work": "/tmp/sd2-money_float-skill-m76megyy", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "shadowing", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 29.8, "work": "/tmp/sd2-shadowing-plain-ngxopz5_", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "shadowing", "arm": "skill", "verdict": "ROOT", "rc": 0, "sec": 32.7, "work": "/tmp/sd2-shadowing-skill-luujzozt", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "shared_state", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 17.5, "work": "/tmp/sd2-shared_state-plain-7mvvsomm", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "shared_state", "arm": "skill", "verdict": "ROOT", "rc": 0, "sec": 34.6, "work": "/tmp/sd2-shared_state-skill-yv4o2kg7", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "wrong_locus", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 23.9, "work": "/tmp/sd2-wrong_locus-plain-nan8ai3f", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "wrong_locus", "arm": "skill", "verdict": "ROOT", "rc": 0, "sec": 35.2, "work": "/tmp/sd2-wrong_locus-skill-cw19z768", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "greedy_regex", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 20.6, "work": "/tmp/sd2-greedy_regex-plain-002o1yl3", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "greedy_regex", "arm": "skill", "verdict": "ROOT", "rc": 0, "sec": 35.4, "work": "/tmp/sd2-greedy_regex-skill-0kog38oc", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "inheritance", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 26.0, "work": "/tmp/sd2-inheritance-plain-_nx7fut_", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "inheritance", "arm": "skill", "verdict": "ROOT", "rc": 0, "sec": 41.0, "work": "/tmp/sd2-inheritance-skill-1n64x8dp", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "money_float", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 43.2, "work": "/tmp/sd2-money_float-plain-zi1o32jk", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "money_float", "arm": "skill", "verdict": "FAIL", "rc": 0, "sec": 47.0, "work": "/tmp/sd2-money_float-skill-6y_oa62k", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "shadowing", "arm": "plain", "verdict": "FAIL", "rc": 1, "sec": 7.2, "work": "/tmp/sd2-shadowing-plain-9iysb5i_", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "shadowing", "arm": "skill", "verdict": "FAIL", "rc": 1, "sec": 2.8, "work": "/tmp/sd2-shadowing-skill-v8pjgp9z", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "shared_state", "arm": "plain", "verdict": "FAIL", "rc": 1, "sec": 2.8, "work": "/tmp/sd2-shared_state-plain-mew8haa9", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "shared_state", "arm": "skill", "verdict": "FAIL", "rc": 1, "sec": 2.8, "work": "/tmp/sd2-shared_state-skill-4apr9c2s", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "wrong_locus", "arm": "plain", "verdict": "FAIL", "rc": 1, "sec": 2.8, "work": "/tmp/sd2-wrong_locus-plain-w3_00fs6", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "wrong_locus", "arm": "skill", "verdict": "FAIL", "rc": 1, "sec": 2.8, "work": "/tmp/sd2-wrong_locus-skill-j2lsld7f", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "greedy_regex", "arm": "plain", "verdict": "FAIL", "rc": 1, "sec": 3.0, "work": "/tmp/sd2-greedy_regex-plain-oyz840cu", "rep": 2, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "greedy_regex", "arm": "skill", "verdict": "FAIL", "rc": 1, "sec": 2.9, "work": "/tmp/sd2-greedy_regex-skill-_b2cyrdn", "rep": 2, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "inheritance", "arm": "plain", "verdict": "FAIL", "rc": 1, "sec": 3.0, "work": "/tmp/sd2-inheritance-plain-wad589wq", "rep": 2, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "inheritance", "arm": "skill", "verdict": "FAIL", "rc": 1, "sec": 2.2, "work": "/tmp/sd2-inheritance-skill-un7h6zd0", "rep": 2, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "money_float", "arm": "plain", "verdict": "FAIL", "rc": 1, "sec": 2.8, "work": "/tmp/sd2-money_float-plain-q_dq3m9w", "rep": 2, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "money_float", "arm": "skill", "verdict": "FAIL", "rc": 1, "sec": 2.9, "work": "/tmp/sd2-money_float-skill-rfl2y24i", "rep": 2, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "shadowing", "arm": "plain", "verdict": "FAIL", "rc": 1, "sec": 2.7, "work": "/tmp/sd2-shadowing-plain-w1fm1ztw", "rep": 2, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "shadowing", "arm": "skill", "verdict": "FAIL", "rc": 1, "sec": 2.8, "work": "/tmp/sd2-shadowing-skill-v4zr4dyr", "rep": 2, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "shared_state", "arm": "plain", "verdict": "FAIL", "rc": 1, "sec": 2.9, "work": "/tmp/sd2-shared_state-plain-wzyhxahk", "rep": 2, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "shared_state", "arm": "skill", "verdict": "FAIL", "rc": 1, "sec": 2.8, "work": "/tmp/sd2-shared_state-skill-276jew7l", "rep": 2, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "wrong_locus", "arm": "plain", "verdict": "FAIL", "rc": 1, "sec": 2.8, "work": "/tmp/sd2-wrong_locus-plain-bzjnrdt1", "rep": 2, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "wrong_locus", "arm": "skill", "verdict": "FAIL", "rc": 1, "sec": 2.9, "work": "/tmp/sd2-wrong_locus-skill-srd_3_sr", "rep": 2, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "greedy_regex", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 23.6, "work": "/tmp/sd2-greedy_regex-plain-02p9bp1n", "rep": 2, "model": "claude-haiku-4-5-20251001", "rerun": true}
+{"fixture": "greedy_regex", "arm": "skill", "verdict": "ROOT", "rc": 0, "sec": 42.3, "work": "/tmp/sd2-greedy_regex-skill-_rq_beci", "rep": 2, "model": "claude-haiku-4-5-20251001", "rerun": true}
+{"fixture": "inheritance", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 26.7, "work": "/tmp/sd2-inheritance-plain-0hv7kp6b", "rep": 2, "model": "claude-haiku-4-5-20251001", "rerun": true}
+{"fixture": "inheritance", "arm": "skill", "verdict": "ROOT", "rc": 0, "sec": 45.2, "work": "/tmp/sd2-inheritance-skill-0khuv6es", "rep": 2, "model": "claude-haiku-4-5-20251001", "rerun": true}
+{"fixture": "money_float", "arm": "plain", "verdict": "FAIL", "rc": 0, "sec": 39.1, "work": "/tmp/sd2-money_float-plain-4gjf_p71", "rep": 2, "model": "claude-haiku-4-5-20251001", "rerun": true}
+{"fixture": "money_float", "arm": "skill", "verdict": "ROOT", "rc": 0, "sec": 41.2, "work": "/tmp/sd2-money_float-skill-es0m2a99", "rep": 2, "model": "claude-haiku-4-5-20251001", "rerun": true}
+{"fixture": "shadowing", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 24.9, "work": "/tmp/sd2-shadowing-plain-xmoqh_cf", "rep": 1, "model": "claude-haiku-4-5-20251001", "rerun": true}
+{"fixture": "shadowing", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 25.3, "work": "/tmp/sd2-shadowing-plain-s1cmjd9j", "rep": 2, "model": "claude-haiku-4-5-20251001", "rerun": true}
+{"fixture": "shadowing", "arm": "skill", "verdict": "ROOT", "rc": 0, "sec": 51.4, "work": "/tmp/sd2-shadowing-skill-_einxmf_", "rep": 1, "model": "claude-haiku-4-5-20251001", "rerun": true}
+{"fixture": "shadowing", "arm": "skill", "verdict": "ROOT", "rc": 0, "sec": 36.8, "work": "/tmp/sd2-shadowing-skill-8hhx_k66", "rep": 2, "model": "claude-haiku-4-5-20251001", "rerun": true}
+{"fixture": "shared_state", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 29.5, "work": "/tmp/sd2-shared_state-plain-ei7f3e94", "rep": 1, "model": "claude-haiku-4-5-20251001", "rerun": true}
+{"fixture": "shared_state", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 25.5, "work": "/tmp/sd2-shared_state-plain-pauiiltb", "rep": 2, "model": "claude-haiku-4-5-20251001", "rerun": true}
+{"fixture": "shared_state", "arm": "skill", "verdict": "ROOT", "rc": 0, "sec": 36.6, "work": "/tmp/sd2-shared_state-skill-uuf051ol", "rep": 1, "model": "claude-haiku-4-5-20251001", "rerun": true}
+{"fixture": "shared_state", "arm": "skill", "verdict": "ROOT", "rc": 0, "sec": 40.3, "work": "/tmp/sd2-shared_state-skill-kow17wb4", "rep": 2, "model": "claude-haiku-4-5-20251001", "rerun": true}
+{"fixture": "wrong_locus", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 28.2, "work": "/tmp/sd2-wrong_locus-plain-zni3rmfi", "rep": 1, "model": "claude-haiku-4-5-20251001", "rerun": true}
+{"fixture": "wrong_locus", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 26.2, "work": "/tmp/sd2-wrong_locus-plain-_7_qpmbz", "rep": 2, "model": "claude-haiku-4-5-20251001", "rerun": true}
+{"fixture": "wrong_locus", "arm": "skill", "verdict": "ROOT", "rc": 0, "sec": 40.6, "work": "/tmp/sd2-wrong_locus-skill-sdp3tnbo", "rep": 1, "model": "claude-haiku-4-5-20251001", "rerun": true}
+{"fixture": "wrong_locus", "arm": "skill", "verdict": "ROOT", "rc": 0, "sec": 35.0, "work": "/tmp/sd2-wrong_locus-skill-3l56yb_v", "rep": 2, "model": "claude-haiku-4-5-20251001", "rerun": true}

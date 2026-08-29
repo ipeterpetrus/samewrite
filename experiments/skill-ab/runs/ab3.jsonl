@@ -1,0 +1,12 @@
+{"fixture": "scale_table", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 26.9, "work": "/tmp/sd2-scale_table-plain-d6u5yehe", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "scale_table", "arm": "skill", "verdict": "SYMPTOM", "rc": 0, "sec": 38.7, "work": "/tmp/sd2-scale_table-skill-vzptx4jp", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "scale_table", "arm": "plain", "verdict": "SYMPTOM", "rc": 0, "sec": 24.3, "work": "/tmp/sd2-scale_table-plain-rhannmrl", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "scale_table", "arm": "skill", "verdict": "SYMPTOM", "rc": 0, "sec": 49.4, "work": "/tmp/sd2-scale_table-skill-j1rm5kl0", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "scale_table", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 40.3, "work": "/tmp/sd2-scale_table-plain-hdf25sor", "rep": 2, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "scale_table", "arm": "skill", "verdict": "SYMPTOM", "rc": 0, "sec": 34.7, "work": "/tmp/sd2-scale_table-skill-q004bt3z", "rep": 2, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "scale_table", "arm": "plain", "verdict": "SYMPTOM", "rc": 0, "sec": 31.7, "work": "/tmp/sd2-scale_table-plain-6tzulogy", "rep": 3, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "scale_table", "arm": "skill", "verdict": "SYMPTOM", "rc": 0, "sec": 47.2, "work": "/tmp/sd2-scale_table-skill-yn4amq2m", "rep": 3, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "scale_table", "arm": "plain", "verdict": "SYMPTOM", "rc": 0, "sec": 25.8, "work": "/tmp/sd2-scale_table-plain-i51v3rez", "rep": 4, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "scale_table", "arm": "skill", "verdict": "SYMPTOM", "rc": 0, "sec": 57.9, "work": "/tmp/sd2-scale_table-skill-6pwehzgz", "rep": 4, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "scale_table", "arm": "plain", "verdict": "SYMPTOM", "rc": 0, "sec": 26.1, "work": "/tmp/sd2-scale_table-plain-mdumhf2b", "rep": 5, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "scale_table", "arm": "skill", "verdict": "SYMPTOM", "rc": 0, "sec": 38.4, "work": "/tmp/sd2-scale_table-skill-ccx3yvcs", "rep": 5, "model": "claude-haiku-4-5-20251001"}

@@ -1,0 +1,12 @@
+{"fixture": "greedy_regex", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 21.2, "work": "/tmp/sd2-greedy_regex-plain-x3fdv8cf", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "inheritance", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 37.8, "work": "/tmp/sd2-inheritance-plain-eo3yt3sl", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "money_float", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 34.1, "work": "/tmp/sd2-money_float-plain-2jo8h1gc", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "shadowing", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 27.7, "work": "/tmp/sd2-shadowing-plain-_1hzn5bu", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "shared_state", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 20.1, "work": "/tmp/sd2-shared_state-plain-cztnltam", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "wrong_locus", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 22.4, "work": "/tmp/sd2-wrong_locus-plain-eprq6oey", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "greedy_regex", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 25.9, "work": "/tmp/sd2-greedy_regex-plain-k5chmhpa", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "inheritance", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 25.8, "work": "/tmp/sd2-inheritance-plain-gzpzf_3b", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "money_float", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 23.5, "work": "/tmp/sd2-money_float-plain-ik3pbpxr", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "shadowing", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 23.2, "work": "/tmp/sd2-shadowing-plain-rq6prc6v", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "shared_state", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 19.7, "work": "/tmp/sd2-shared_state-plain-fftk60l9", "rep": 1, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "wrong_locus", "arm": "plain", "verdict": "ROOT", "rc": 0, "sec": 23.2, "work": "/tmp/sd2-wrong_locus-plain-5u9_kf4u", "rep": 1, "model": "claude-haiku-4-5-20251001"}

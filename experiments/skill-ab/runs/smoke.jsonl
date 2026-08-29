@@ -1,0 +1,2 @@
+{"fixture": "intdiv", "arm": "plain", "verdict": "FAIL", "rc": 0, "sec": 29.1, "work": "/tmp/sd_intdiv_plain_9sc_2thg", "rep": 0, "model": "claude-haiku-4-5-20251001"}
+{"fixture": "intdiv", "arm": "skill", "verdict": "FAIL", "rc": 0, "sec": 46.2, "work": "/tmp/sd_intdiv_skill_9brmuy12", "rep": 0, "model": "claude-haiku-4-5-20251001"}
