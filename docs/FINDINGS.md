@@ -903,7 +903,7 @@ task reminder — outweighs the listing on its own. All three are the same shape
 text injected by the harness rather than by the model or the user, replayed on every
 later turn.
 
-This does not retract [section 5](#5-the-skill-listing-tax). Pruning the listing is still
+This does not retract [section 1](#1-where-the-tokens-actually-go). Pruning the listing is still
 the cheapest of the three to act on, because a skill can be set to `user-invocable-only`
 in one settings key while a hook has to be justified or deleted. It corrects the *ranking*:
 this repo told readers to look at the listing, and the listing is the smallest of the three.
