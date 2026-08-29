@@ -10,7 +10,7 @@ one positive result. All of it is kept in the open in [docs/FINDINGS.md](docs/FI
 — the corrections are the point, not an embarrassment.
 
 **Start here:** the conclusions are directly below · the measured ranking is in
-[The numbers](#the-numbers-largest-first) · what to run on your own logs is in
+[Where the tokens go](#where-the-tokens-go) · what to run on your own logs is in
 [Measure your own sessions](#measure-your-own-sessions) · the method and every retraction
 are in [FINDINGS](docs/FINDINGS.md).
 
@@ -45,29 +45,7 @@ pre-registered confirmatory run. The short version:
 The one line of advice it supports: **write the instruction as one sentence, measure it, and
 only then consider a kilobyte of rules.**
 
-## The numbers, largest first
-
-Everything here is measured on this author's own transcripts, and the ranking is the point —
-the levers people talk about are at the bottom.
-
-| do this | measured effect | how sure |
-|---|---|---|
-| **End the session sooner** | **−41…−54%** of carry when one session becomes two | measured on 1,316 transcripts; published work on compaction reports −63…−86% |
-| **Prune the skill listing** | **≈ −3%** — 72.9% of it (21,891 of 30,009 bytes) had never been invoked once | invocation counted over 1,409 transcripts; cross-checked against the CLI's own token figures, 1.5% apart |
-| **Read a range, not a file** | Read results are **21.3%** of carry at a mean of 22.8 kB per call | measured |
-| Stop writing files identical to disk | **−0.077%**, free | 20.8% of overwrites (154/741) were byte-identical |
-| Fix the edit rule you were told to use | **+0.07%** — and the popular version (`≤3 change blocks → Edit`) is **net negative** | held out over 20 session-level splits |
-| **Tell the model to be terse** — one sentence is enough | **−23.4%** output tokens against no instruction (15/16 pairs, exact p = 0.0001), with 100% of required facts kept | pre-registered, fresh tasks, 48 runs, zero exclusions. The 4,664-byte skill that says the same thing beat that sentence by **−0.8%, p = 0.86** — [FINDINGS](docs/FINDINGS.md) |
-| *Add a process skill that is never invoked* | **+51…+84% tokens** | six A/B rounds, costlier in 17/18, 18/18, 6/6, 12/12, 4/4, 16/16 pairs |
-
-The last row is not a typo. Adding one always-on instruction was the most expensive thing
-measured here, and across five rounds of A/B its benefit appeared on exactly one fixture out
-of the five that had any room to show it. In round 5 a **placebo arm** — one sentence urging
-care and planning, no mention of root causes — matched the skill's outcome exactly while
-costing **63% fewer tokens** than it. Round 6 ran the same three arms over 48 runs: the skill
-never beat that sentence, and cost **56% more** than it.
-
-## The finding
+## Where the tokens go
 
 Token volume across those transcripts:
 
@@ -114,39 +92,30 @@ Three consequences, each of which contradicts a popular piece of advice:
   does not clear its cost on its edit rule alone; it clears it only by redirecting
   attention to Bash and Read.
 
-## What one run finds
+### What to do about it, largest effect first
 
-The hook is the small half of this repo. The measurement is the large half. Point
-`tools/carry.py` and `tools/skills.py` at your own transcripts and you get a ranked
-budget instead of folklore. Here is what one real setup returned — 421 sessions,
-median 484 turns:
-
-| what you are usually told | what was measured | what it is worth |
+| do this | measured effect | how sure |
 |---|---|---|
-| "never rewrite a whole file, emit only the changed block" | Write+Edit calls are **9.5%** of carry — and the ≤3-block version of that rule is **net negative** | +0.072% once the rule is fixed |
-| "be terse, output tokens are expensive" | assistant prose is **5.6%** of carry | ≤5.6%, paid for in clarity |
-| *nobody mentions this one* | the skill listing is **30,009 bytes injected at turn 0**, and **66 of its 82 entries (72.9%) had never been invoked once** across 1,409 sessions | **~6,972 tokens re-sent on every single turn** — ~3% of session carry, recoverable with a settings flag |
-| *nor this one* | `Read` results are **21.3%** of carry at a mean of **22.8 kB per call**, 25x a Bash result | read a range, not a file |
-| "start a fresh session now and then" | correct — and it dominates everything else here | splitting a session in two measures **−41…−54%** |
+| **End the session sooner** | **−41…−54%** of carry when one session becomes two | measured on 1,316 transcripts; published work on compaction reports −63…−86% |
+| **Prune the skill listing** | **≈ −3%** — 72.9% of it (21,891 of 30,009 bytes) had never been invoked once | invocation counted over 1,409 transcripts; cross-checked against the CLI's own token figures, 1.5% apart |
+| **Read a range, not a file** | Read results are **21.3%** of carry at a mean of 22.8 kB per call | measured |
+| Stop writing files identical to disk | **−0.077%**, free | 20.8% of overwrites (154/741) were byte-identical |
+| Fix the edit rule you were told to use | **+0.07%** — and the popular version (`≤3 change blocks → Edit`) is **net negative** | held out over 20 session-level splits |
+| **Tell the model to be terse** — one sentence is enough | **−23.4%** output tokens against no instruction (15/16 pairs, exact p = 0.0001), with 100% of required facts kept | pre-registered, fresh tasks, 48 runs, zero exclusions. The 4,664-byte skill that says the same thing beat that sentence by **−0.8%, p = 0.86** — [FINDINGS](docs/FINDINGS.md) |
+| *Add a process skill that is never invoked* | **+51…+84% tokens** | six A/B rounds, costlier in 17/18, 18/18, 6/6, 12/12, 4/4, 16/16 pairs |
 
-Three of those five rows contradict the advice. The no-op guard this repo ships is the
-smallest of them (0.077%) and the only one that needs no judgement — which is why it is
-the only thing here that runs by itself.
+The last row is not a typo. Adding one always-on instruction was the most expensive thing
+measured here, and across five rounds of A/B its benefit appeared on exactly one fixture out
+of the five that had any room to show it. In round 5 a **placebo arm** — one sentence urging
+care and planning, no mention of root causes — matched the skill's outcome exactly while
+costing **63% fewer tokens** than it. Round 6 ran the same three arms over 48 runs: the skill
+never beat that sentence, and cost **56% more** than it.
 
-```bash
-git clone https://github.com/ipeterpetrus/samewrite && cd samewrite
-python3 tools/carry.py  ~/.claude/projects/*/*.jsonl   # where your tokens actually are
-python3 tools/skills.py ~/.claude/projects/*/*.jsonl   # what you carry and never invoke
-```
+## What the instruction blocks cost
 
-Both read sizes, tool names and skill names only. No path, prompt, file content or tool
-output is printed — and nothing is sent anywhere.
-
-One thing survived every robustness cut: **20.8% of overwrites (154/741) wrote content
-byte-identical to what was already on disk.** Zero changes, full token cost. That one
-is free to fix, so `samewrite` ships a hook that fixes it.
-
-## What a process skill costs, with and without
+Three always-on blocks were each tested against a **one-sentence version of their own intent**, and on a pre-registered confirmatory run **none beat the sentence** — the terse
+block went from −9.2% (p = 0.039) on the first task set to **−0.8% (p = 0.86)** on fresh
+tasks. What replicates is terseness itself, not the kilobytes. The cost side never wavered:
 
 The repo also measures the other half of the question: what does it cost to *add* an
 instruction? `systematic-debugging` is a skill whose whole promise is "find the root cause
