@@ -880,3 +880,49 @@ control, and a ceiling reported as a ceiling.
   reach, not about how often no-op writes happen. Check both: the retrospective number
   comes from transcripts, which record the call regardless. This is the same failure class
   `tools/health.py` exists for — ledger silence is not proof the guard is alive.
+
+## 10. The hook banners cost more than the skill listing
+
+Everyone worries about the skill listing. On this corpus the hooks cost nearly twice as
+much.
+
+Fresh run of `tools/carry.py` over every transcript on this host — 1,080 files, 341 sessions
+of 50+ turns, 192,752 turns, carry ~42.3 billion token-turns:
+
+| injected source | share of carry | bytes/turn |
+|---|---|---|
+| `attach:task_reminder` | 4.13% | 66 |
+| `attach:skill_listing` | **3.14%** | 43 |
+| `attach:hook_success` | 2.90% | 46 |
+| `attach:hook_additional_context` | 2.11% | 32 |
+| `attach:hook_system_message` | 0.82% | 10 |
+| **hook classes combined** | **5.83%** | **88** |
+
+**Hooks are 1.86x the skill listing**, and a third injected source nobody discusses — the
+task reminder — outweighs the listing on its own. All three are the same shape of cost:
+text injected by the harness rather than by the model or the user, replayed on every
+later turn.
+
+This does not retract [section 5](#5-the-skill-listing-tax). Pruning the listing is still
+the cheapest of the three to act on, because a skill can be set to `user-invocable-only`
+in one settings key while a hook has to be justified or deleted. It corrects the *ranking*:
+this repo told readers to look at the listing, and the listing is the smallest of the three.
+
+### Scope, honestly
+
+- **Observational, corpus-scale, one host.** Not an experiment: no arms, no pre-registration.
+  It is a measurement of what this machine's transcripts contain, and it is reported because
+  the measurement is cheap for anyone to repeat — `python3 tools/carry.py <your transcripts>`.
+- **This host runs 43 hooks.** A machine with two hooks will not see 5.83%, and the ratio
+  is a property of the configuration, not of hooks in general. What transfers is the
+  *method*, and the point that injected scaffolding is worth ranking before it is trimmed.
+- **The corpus has grown** since the headline figures elsewhere in this document were
+  computed (1,316 transcripts, 237,541 turns). This run sees 192,752 turns after the
+  50-turn filter and puts Bash at 45.11% against the published 42.5%, Read at 19.83%
+  against 21.3%. The published numbers are not restated here and are not superseded by a
+  differently-filtered run; the shape is stable, the second decimal is not.
+- **Discovered while answering a different question.** The session that produced it was
+  routed through Bash for nearly everything, which put its own `Bash` share at 76.8% and
+  collapsed `Read` + `Write/Edit` to 0.51% — a reminder that tool-routing policy moves
+  carry between buckets without removing it. That n=1 observation is what prompted the
+  corpus run; the corpus run is what makes it a finding.
