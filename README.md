@@ -264,6 +264,13 @@ checked before it is installed.
 
 ## What's here
 
+One disclosure about the evidence: of the 342 scored runs, the **48 pre-registered
+confirmatory runs** are the ones whose raw records ship here (`confirmatory_runs.jsonl`,
+plus a 480-line per-request billing ledger). The eight exploratory rounds are summarised
+in FINDINGS with their pair counts and tests; their raw records stayed local. Trust the
+48 and the corpus scripts; treat the eight rounds as the exploration that led there.
+
+
 ```
 hooks/write_noop_guard.py   PreToolUse(Write) — deny writes identical to disk
 hooks/install.sh            one command, idempotent, backs up settings.json
