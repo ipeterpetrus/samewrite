@@ -14,6 +14,12 @@ Reproduce: `tools/extract.py` + `tools/simulate.py` for the overwrite analysis,
 
 ## 1. Where the tokens actually go
 
+**Corpus version.** Both tables below come from the 421-session cohort, captured before the
+section 10 run. Section 10 re-ran `tools/carry.py` over a later, larger corpus (1,080 files,
+192,752 turns after the 50-turn filter) and got different shares — 45.11% where this table
+says 42.53%. The two are not interchangeable: cite a share together with the cohort it came
+from, not on its own.
+
 Billed tokens over the 421-session cohort:
 
 | bucket | tokens | share of volume | share of price* |
