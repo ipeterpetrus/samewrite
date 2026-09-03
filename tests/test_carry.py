@@ -74,7 +74,8 @@ def main():
         a = carry.accumulate([p], min_turns=50)
         check("--min-turns membuang sesi pendek", a["sessions"], 0)
         check("nol sesi -> keluaran jujur, bukan pembagian nol",
-              carry.render(a).strip(), "no session met --min-turns")
+              carry.render(a).strip(),
+              "no session met --min-turns (1 below threshold, 0 unreadable)")
 
         a = carry.accumulate([p], min_turns=1)
         check("ambang rendah -> sesi terhitung", (a["sessions"], a["turns"]), (1, 3))

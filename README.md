@@ -39,14 +39,16 @@ pre-registered confirmatory run. The short version:
    Write/Edit calls that "emit only the changed block" targets are 9.5%.
 3. **The popular edit rule is net negative.** `≤3 change blocks → Edit` loses ~79% of the
    available saving on 1,316 transcripts. Changed *fraction* under ~25% is the rule that works.
-4. **Skill listings are mostly dead weight.** 72.9% of one listing (21,891 of 30,009 bytes) had
+4. **Skill listings are mostly uninvoked.** 72.9% of one listing (21,891 of 30,009 bytes) had
    never been invoked once across 1,409 sessions — ~6,972 tokens re-sent every turn.
 5. **Telling the model to be terse works.** −23.4% output tokens against no instruction, 15 of
    16 pairs, exact p = 0.0001, with 100% of required facts retained.
 6. **The kilobytes do not.** Three always-on blocks (9.4 kB debugging, 5.2 kB lazy-engineer,
    4.7 kB terse) were each tested against a one-sentence version of their own intent. **None
-   beat the sentence on a pre-registered test.** The terse block's advantage measured −9.2%
-   (p = 0.039) on the first task set and **−0.8% (p = 0.86) on fresh pre-registered tasks.**
+   showed a significant advantage over the sentence on a pre-registered test** — at n = 16
+   the design detects only d_z ≳ 0.75, so that bounds the advantage rather than excluding
+   one. The terse block's advantage measured −9.2% (p = 0.039) on the first task set and
+   **−0.8% (p = 0.86) on fresh pre-registered tasks.**
 7. **The method is the durable part.** Hidden neighbour tests, a held-out consumer written
    after the patch lands, structural provenance audits (62/62 clean), verified treatment, and
    pre-registered kill conditions — two of three generator hypotheses died by their own
@@ -137,9 +139,11 @@ never beat that sentence, and cost **56% more** than it.
 ## What the instruction blocks cost
 
 **Verdict first:** on a pre-registered confirmatory run — fresh tasks, one endpoint, one
-test, exclusions fixed in advance — none of the three always-on blocks beat a one-sentence
-version of its own intent. The terse block went from −9.2% (p = 0.039) on the first task
-set to **−0.8% (p = 0.86)** on fresh tasks. Terseness replicates; the kilobytes do not.
+test, exclusions fixed in advance — none of the three always-on blocks showed a significant
+advantage over a one-sentence version of its own intent. With 16 pairs the design detects
+only d_z ≳ 0.75: that bounds the advantage, it does not establish equivalence. The terse
+block went from −9.2% (p = 0.039) on the first task set to **−0.8% (p = 0.86)** on fresh
+tasks. Terseness replicates; the kilobytes do not.
 
 These are **two contrasts inside one experiment**, not two independent findings: the same
 48 runs supply both the presence effect (instruction versus none, −23.4%) and the length

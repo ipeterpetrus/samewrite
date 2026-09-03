@@ -89,13 +89,16 @@ def bucket(src):
 def accumulate(paths, min_turns=50):
     carry, size, usage = collections.Counter(), collections.Counter(), collections.Counter()
     turns = sessions = 0
+    unreadable = short = 0
     lengths = []
     for p in paths:
         try:
             N, items, u = scan(p)
         except OSError:
+            unreadable += 1
             continue
         if N < min_turns:                   # stubs and aborted sessions carry nothing
+            short += 1
             continue
         sessions += 1
         turns += N
@@ -106,13 +109,18 @@ def accumulate(paths, min_turns=50):
             carry[b] += n * (N - i)
             size[b] += n
     return dict(sessions=sessions, turns=turns, lengths=sorted(lengths),
-                carry=carry, size=size, usage=usage)
+                carry=carry, size=size, usage=usage,
+                unreadable=unreadable, short=short)
 
 
 def render(a, markdown=False):
     C = sum(a["carry"].values())
     if not C:
-        return "no session met --min-turns\n"
+        # A silent empty result reads like "your logs are clean". Say which files were
+        # skipped and why, so a different transcript shape is visible as a shape problem.
+        return ("no session met --min-turns "
+                f"({a.get('short', 0)} below threshold, "
+                f"{a.get('unreadable', 0)} unreadable)\n")
     T, out = a["turns"], []
     med = a["lengths"][len(a["lengths"]) // 2]
     U = sum(a["usage"].values()) or 1
@@ -148,8 +156,12 @@ def main():
     ap.add_argument("--min-turns", type=int, default=50,
                     help="ignore sessions shorter than this (default 50)")
     args = ap.parse_args()
-    sys.stdout.write(render(accumulate(args.files, args.min_turns), args.markdown))
+    a = accumulate(args.files, args.min_turns)
+    sys.stdout.write(render(a, args.markdown))
+    # exit non-zero when nothing was recognised: a zero-record run is a schema mismatch,
+    # not a finding, and a pipeline must be able to tell the two apart.
+    return 2 if not sum(a["carry"].values()) else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
