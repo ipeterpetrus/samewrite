@@ -84,7 +84,73 @@ def interaction(en, id_):
     print("  differ. It is not evidence that they are equal.")
 
 
+# Correct minimal solutions, the same ones used as positive controls before the run.
+MINIMAL = {
+ "config_merge": '''def merge(base, override):
+    out = dict(base)
+    for k, v in override.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+''',
+ "path_router": '''def route(pattern, path):
+    p = pattern.strip("/").split("/")
+    q = path.strip("/").split("/")
+    if len(p) != len(q):
+        return None
+    caps = {}
+    for a, b in zip(p, q):
+        if a.startswith("<") and a.endswith(">"):
+            caps[a[1:-1]] = b
+        elif a != b:
+            return None
+    return caps
+''',
+}
+
+# Each mutation breaks one real behaviour the task asked for. A gate that passes any of
+# these is not measuring correctness, it is measuring "the file imports".
+MUTANTS = {
+ "config_merge": [
+   ("nested replaced instead of merged", "if isinstance(v, dict) and isinstance(out.get(k), dict)",
+    "if False"),
+   ("input mutated", "out = dict(base)", "out = base"),
+ ],
+ "path_router": [
+   ("length mismatch accepted", "if len(p) != len(q):", "if False:"),
+   ("literal segments not checked", "elif a != b:", "elif False:"),
+ ],
+}
+
+
+def gate_mutation_control():
+    """Round 23: a correctness gate passing 48/48 shows nothing until it is shown to fail.
+    Mutate a working solution and require pytest to go red."""
+    import subprocess, tempfile
+    sys.path.insert(0, HERE)
+    import fixtures_round8 as fx
+    print("\n=== correctness gate mutation control ===")
+    root = tempfile.mkdtemp(prefix="mut-")
+    ok = True
+    for task, muts in sorted(MUTANTS.items()):
+        for label, old, new in muts:
+            src = MINIMAL[task]
+            assert old in src, f"mutation anchor missing in {task}: {old!r}"
+            d = fx.build(root + "/" + label.replace(" ", "_"), task)
+            open(os.path.join(d, "mod.py"), "w").write(src.replace(old, new, 1))
+            rc = subprocess.run(["/usr/bin/python3", "-m", "pytest", "-q", "test_target.py"],
+                                cwd=d, capture_output=True, timeout=120).returncode
+            caught = rc != 0
+            ok &= caught
+            print(f"  {task:14s} {label:36s} pytest {'RED  (caught)' if caught else 'GREEN **GATE MISSED IT**'}")
+    print(f"  gate rejects broken solutions: {ok}")
+    return ok
+
+
 if __name__ == "__main__":
     en = report("English (primary)", "minimal_change_en.jsonl")
     id_ = report("Indonesian", "minimal_change_id.jsonl")
     interaction(en, id_)
+    assert gate_mutation_control(), "correctness gate passed a broken solution"

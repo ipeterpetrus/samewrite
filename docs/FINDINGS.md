@@ -885,22 +885,35 @@ first — and registered the task-level sign test as primary.
 replicate as confirmatory evidence at this task count, the exploratory 7-of-7 stands as
 exploratory only, and there is no rescue round.
 
-**And the design could not have won, for a reason the pre-registration missed.** It chose
-six tasks precisely so the sign-test floor would be 2/2⁶ = 0.031, below 0.05. But a sign
-test discards **ties**, and the endpoint — non-blank lines, ranging 8 to 27 — is coarse
-enough that ties are common. One tied task drops the floor's denominator to five and the
-floor to **0.0625**, at which point the registered test cannot reject however clean the
-data. English tied once and landed exactly on its floor; Indonesian tied twice. Planning n
-for a floor is only valid if the endpoint is continuous enough that ties are rare, and
-"lines of code" is not.
+**The design lost its ability to reject the moment one task tied — a hazard the
+pre-registration missed.** Six tasks were chosen precisely so the sign-test floor would be
+2/2⁶ = 0.031, below 0.05. With zero ties that design could have rejected; a sign test
+discards ties, though, and the endpoint — non-blank lines, ranging 8 to 27 — is coarse
+enough that ties happen. One tie drops the denominator to five and the floor to **0.0625**,
+above the threshold, and from there no data could have produced a rejection. English tied
+once and landed *exactly* on its floor. Planning n against a floor is only sound when the
+endpoint is continuous enough for ties to be rare, and lines of code is not. Stated
+plainly, because it arrived after the null and that is when such explanations are least
+trustworthy: this is a real design defect, not a reason to believe the effect exists.
 
-**What the data do show, descriptively and post-hoc.** Across twelve task-language cells,
-the sentence produced fewer lines in **nine** and more in **zero**, with three ties. That
-direction is consistent, and it is exactly the sort of pooled observation the
-pre-registration forbade using as a rescue — it is recorded here as a lead for a design
-with a continuous endpoint or more tasks, not as a result. The language interaction is
-flat (English larger in 2 of 6, p = 0.69), so nothing here suggests the two languages
-behave differently.
+**The null may simply be true.** The most likely alternative to "underpowered" is
+"the sentence does nothing measurable at this size of task", and nothing in this run
+distinguishes them. A magnitude-aware test would not automatically have rescued it either
+— −12.1% overall in English is carried disproportionately by two tasks.
+
+**A pooled count, recorded and deliberately not used.** Across twelve task-language cells
+the sentence produced fewer lines in nine and more in zero, three ties. The
+pre-registration forbade pooling as a rescue, and it would be a poor rescue anyway: the
+twelve cells are not twelve independent observations, since each task appears in both
+languages. It is written down as a lead for a future design with a continuous endpoint and
+frozen third-party tasks — not as evidence. The language interaction is flat (English
+larger in 2 of 6, p = 0.69).
+
+**The correctness gate was shown to bite.** It passed 48 of 48, which on its own
+demonstrates nothing. Four mutations of the two hand-written minimal solutions — nested
+dicts replaced instead of merged, an input mutated in place, a length mismatch accepted, a
+literal path segment left unchecked — all turn `pytest` red. `analyze_minimal.py` runs that
+control on every invocation and asserts on it.
 
 ### Both contrasts, every horizon — and the status this result is entitled to
 
