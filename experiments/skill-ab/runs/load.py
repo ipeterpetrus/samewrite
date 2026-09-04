@@ -39,6 +39,8 @@ if __name__ == "__main__":
             assert not e["analysis_eligible"]
     # Nailed down on purpose, not derived from the manifest: a self-test that reads its
     # own expectation out of the file it is testing will bless any future edit in silence.
-    # Two, since 2a6edd3: the Indonesian confirmatory run and its English replication.
-    assert ok == 2, f"exactly two files should load unguarded, got {ok}"
+    # Four, since 0436efe: the Indonesian confirmatory run, its English replication, and
+    # the two arms of the minimal-change replication (whose registered prediction failed --
+    # a pre-registered null is still confirmatory evidence and still analysis-eligible).
+    assert ok == 4, f"exactly four files should load unguarded, got {ok}"
     print(f"OK: {len(BY_PATH)} files classified, {ok} analysis-eligible")

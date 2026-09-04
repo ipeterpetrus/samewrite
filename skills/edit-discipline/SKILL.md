@@ -84,11 +84,14 @@ measured **-0.8% against the one sentence** (p = 0.86, Indonesian, pre-registere
 -23.4% headline is the block-versus-nothing contrast, and the sentence gets essentially
 all of that on its own.
 
-**Minimal change — one language only, and thinner.** *"Buat perubahan sekecil mungkin;
-jangan menambah abstraksi yang tak diminta."* Fewer non-blank lines in 7 of 7 pairs
-(p = 0.016) where a 5,228-byte version managed 5 of 7 (p = 0.45). This one has **no English
-replication**, n = 7, and its endpoint is lines rather than tokens. Treat the English
-rendering as untested.
+**Minimal change — tested the same way, and it did not replicate.** *"Buat perubahan
+sekecil mungkin; jangan menambah abstraksi yang tak diminta."* The often-quoted 7 of 7,
+p = 0.016 is **exploratory**. A pre-registered replication over six tasks in both languages
+came back **p = 0.0625 in English and 0.125 in Indonesian** — the registered prediction
+failed, and the sentence is not established here the way terseness is. The direction is
+consistent (fewer lines in 9 of 12 task-language cells, more in none), so the instruction
+is still worth writing; it is a lead, not a measured effect. Do not quote a percentage for
+it.
 
 **One channel was tested, and it is not this one.** Both sentences were delivered as a
 prompt prefix, and the blocks as a `SessionStart` banner. Skill-body delivery — how you

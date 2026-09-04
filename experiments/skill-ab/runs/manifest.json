@@ -305,6 +305,36 @@
       "language": "en",
       "note": "English replication of the terseness contrast; protocol in PREREGISTRATION_english_replication.md, committed at 2a6edd3 before this file existed.",
       "sha256": "26e79ed45fb24a78d9b318f2a592d8e595b64276c443e96c28ee02ed6a4776b1"
+    },
+    {
+      "path": "../minimal_change_en.jsonl",
+      "evidence_class": "confirmatory",
+      "preregistered": true,
+      "analysis_eligible": true,
+      "n": 24,
+      "unit": "runs",
+      "arms": [
+        "oneline",
+        "plain"
+      ],
+      "language": "en",
+      "note": "Minimal-change replication, protocol in PREREGISTRATION_minimal_change_english.md committed at 0436efe before these files existed. The registered prediction FAILED; the records are published because a null is a result.",
+      "sha256": "283534b2c9cd28f75404041c34eed55f204c14e37b1f5a045ebad715b54f3aaa"
+    },
+    {
+      "path": "../minimal_change_id.jsonl",
+      "evidence_class": "confirmatory",
+      "preregistered": true,
+      "analysis_eligible": true,
+      "n": 24,
+      "unit": "runs",
+      "arms": [
+        "oneline",
+        "plain"
+      ],
+      "language": "id",
+      "note": "Minimal-change replication, protocol in PREREGISTRATION_minimal_change_english.md committed at 0436efe before these files existed. The registered prediction FAILED; the records are published because a null is a result.",
+      "sha256": "566a13145035f025217b6c84565f904069b6704c4d54d15c6cd532fd3a419042"
     }
   ],
   "reconciliation": {

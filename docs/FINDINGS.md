@@ -859,6 +859,49 @@ are different arms and had been used interchangeably.
 it was never re-run in English, its n is 7, and its endpoint is lines rather than tokens.
 That asymmetry is now stated in the skill file rather than smoothed over.
 
+### The minimal-change replication: a pre-registered null, and a design that could not have won
+
+The terseness result replicated. The minimal-change result was put through the same
+treatment and did not, and the protocol said in advance what that would mean.
+
+Two gaps drove it. The 7-of-7, p = 0.016 figure quoted throughout comes from
+`runs/exploratory/ab8.jsonl`, which the manifest has always classified **exploratory,
+not pre-registered** — and the skill file had been printing it beside a confirmatory
+result without distinguishing them. And four fixtures cannot carry a significance claim
+however many repeats they get. So the protocol
+([PREREGISTRATION_minimal_change_english.md](../experiments/skill-ab/PREREGISTRATION_minimal_change_english.md),
+committed at `0436efe` before the data existed) used **six** tasks — two written for this
+run and given a hand-written minimal solution plus a green `pytest` as a positive control
+first — and registered the task-level sign test as primary.
+
+48 runs, **zero failed the correctness gate, zero pairs dropped**:
+
+| | smaller in | tied | total lines | sign test | floor |
+|---|---|---|---|---|---|
+| **English (primary)** | 5/6 | 1 | 132 → 116 (−12.1%) | **p = 0.0625** | 0.0625 |
+| Indonesian | 4/6 | 2 | 126 → 117 (−7.1%) | p = 0.1250 | 0.1250 |
+
+**The registered prediction failed.** Per the protocol: the minimal-change result does not
+replicate as confirmatory evidence at this task count, the exploratory 7-of-7 stands as
+exploratory only, and there is no rescue round.
+
+**And the design could not have won, for a reason the pre-registration missed.** It chose
+six tasks precisely so the sign-test floor would be 2/2⁶ = 0.031, below 0.05. But a sign
+test discards **ties**, and the endpoint — non-blank lines, ranging 8 to 27 — is coarse
+enough that ties are common. One tied task drops the floor's denominator to five and the
+floor to **0.0625**, at which point the registered test cannot reject however clean the
+data. English tied once and landed exactly on its floor; Indonesian tied twice. Planning n
+for a floor is only valid if the endpoint is continuous enough that ties are rare, and
+"lines of code" is not.
+
+**What the data do show, descriptively and post-hoc.** Across twelve task-language cells,
+the sentence produced fewer lines in **nine** and more in **zero**, with three ties. That
+direction is consistent, and it is exactly the sort of pooled observation the
+pre-registration forbade using as a rescue — it is recorded here as a lead for a design
+with a continuous endpoint or more tasks, not as a result. The language interaction is
+flat (English larger in 2 of 6, p = 0.69), so nothing here suggests the two languages
+behave differently.
+
 ### Both contrasts, every horizon — and the status this result is entitled to
 
 The decision-relevant comparison is not banner-versus-nothing, it is **banner versus a single

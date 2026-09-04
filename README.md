@@ -402,8 +402,12 @@ because the negative findings are useful, not because it is a maintained product
   *tokens* and whose languages do not tokenize alike, and least for the line-count
   results. The terseness contrast now has a pre-registered English replication and holds
   there (−19.6%, p = 0.0070); every other English phrasing quoted here is still an untested
-  translation of the string that was measured, and the minimal-change result in particular
-  has never been run outside Indonesian.
+  translation of the string that was measured.
+- **The minimal-change sentence has a pre-registered replication, and it failed.** Six
+  tasks, both languages, 48 runs: p = 0.0625 in English and 0.125 in Indonesian, against a
+  registered threshold of 0.05. The direction is consistent (fewer lines in 9 of 12
+  task-language cells, more in none) but the effect is not established. The 7-of-7,
+  p = 0.016 figure that circulated before is exploratory and is labelled as such now.
 - The saving is 0.077% (identical writes) plus at most 0.086% (an oracle edit policy;
   the deployable fraction rule reaches ~0.072% of that). Everything here is ~0.1%.
 - The guard is **fail-open** on every error. It saves tokens; it does not prevent harm.
