@@ -64,8 +64,15 @@ exact paired permutation, two-sided:
 
 The English run was pre-registered before it had data
 (`experiments/skill-ab/PREREGISTRATION_english_replication.md`) and its prediction held.
-The substance gate — a fixed list of facts each answer had to contain — stayed at **100%
-in both arms of both languages**, so the saving is not paid for in dropped content.
+The substance gate — a fixed list of facts each answer had to contain, with a negative
+control proving it rejects empty and truncated answers — stayed at **100% in both arms of
+both languages**, so the saving is not paid for in dropped content.
+
+**What replicates is the direction, not the size.** The sentence was cheaper in **4 of 4
+tasks in both languages**. The two magnitudes are not distinguishable: a post-hoc
+interaction test gives +3.5 pp, p = 0.63. And four tasks is four observations however many
+times each is repeated — a sign test across them bottoms out at p = 0.125, so treat this as
+"it goes the same way in two unrelated languages", not as a measured size that transfers.
 
 **Write the sentence in the language you actually prompt in.** Two languages is not all
 languages, but the effect surviving a move between two unrelated ones is the evidence

@@ -41,11 +41,14 @@ pre-registered confirmatory run. The short version:
    available saving on 1,316 transcripts. Changed *fraction* under ~25% is the rule that works.
 4. **Skill listings are mostly uninvoked.** 72.9% of one listing (21,891 of 30,009 bytes) had
    never been invoked once across 1,409 sessions — ~6,972 tokens re-sent every turn.
-5. **Telling the model to be terse works, in more than one language.** One sentence against no
-   instruction: **−22.7%** output tokens in Indonesian (14 of 16 pairs, exact p = 0.0001) and
-   **−19.6%** in a pre-registered English replication (12 of 16, p = 0.0070), with 100% of
-   required facts retained in every arm of both. The always-on banner scores −23.4% (15 of 16)
-   against no instruction — a different arm, and barely ahead of the sentence.
+5. **Telling the model to be terse works, and it works the same way in two languages.** One
+   sentence against no instruction: **−22.7%** output tokens in Indonesian (14 of 16 pairs,
+   exact p = 0.0001) and **−19.6%** in a pre-registered English replication (12 of 16,
+   p = 0.0070) — cheaper in **4 of 4 tasks in both**, with 100% of required facts retained
+   everywhere. The two sizes are *not* distinguishable (interaction +3.5 pp, p = 0.63), and
+   four tasks cannot carry a significance claim of their own, so what replicates is the
+   direction. The always-on banner scores −23.4% (15 of 16) against no instruction — a
+   different arm, and barely ahead of the sentence.
 6. **The kilobytes do not.** Three always-on blocks (9.4 kB debugging, 5.2 kB lazy-engineer,
    4.7 kB terse) were each tested against a one-sentence version of their own intent. **None
    showed a significant advantage over the sentence on a pre-registered test** — at n = 16

@@ -87,3 +87,39 @@ One additional language is not "all languages". A positive result licenses "the 
 not specific to Indonesian"; it does not license "language does not matter". It also does
 not test the **skill-body delivery channel** — the instruction is delivered here as a
 prompt prefix, exactly as in the Indonesian run.
+
+---
+
+## Addendum, 2026-09-04, after the run — three defects in the protocol above
+
+Written after the data existed and labelled as such. None of these change the registered
+prediction or the analysis that was run; they record what the protocol got wrong.
+
+**1. The stopping rule as written is false.** It says quota exhaustion "cannot see the
+data". It can: quota is consumed by billed output tokens, which is the endpoint. A run
+that stopped early for quota would have stopped *because* the arms were producing many
+tokens. The rule should have been a fixed 32-run target with partial data declared an
+aborted study, and that is how it will be written next time. It did not bite here — the
+run completed all 32 with zero exclusions — but a rule that only works when it is not
+needed is not a rule.
+
+**2. The protocol registered no task-level analysis, and the task level is what
+generalises.** Four tasks repeated four times is sixteen paired runs but four
+observations of "a task". The run-level test answers "on these four fixtures, does the
+sentence save tokens" and is valid for that. It does not license "on tasks in general".
+A two-sided sign test across four tasks has a floor of 2/2^4 = 0.125 and cannot reach
+0.05 whatever the data say, so the task level is reported as direction and magnitude
+only, never as significance.
+
+**3. The protocol registered no interaction test,** so comparing −22.7% with −19.6% by
+reading two p-values side by side was never licensed. The interaction was computed after
+the fact and is reported as post-hoc: mean difference-in-differences +3.5 pp,
+exact p = 0.625 over four tasks. The claim that the English effect is *smaller* is
+therefore withdrawn — the data do not support it.
+
+A fourth item, raised by the same review and checked rather than conceded: the substance
+gate scores 48/48 in every arm, which a reviewer called a gate that measures nothing. It
+was given a negative control — empty, truncated and evasive answers, all four tasks — and
+rejected every one, 0 of 3 facts in all twelve cases. The gate discriminates; the arms
+simply all cleared it. `analyze_lang.py` runs that control on every invocation and
+asserts on it.

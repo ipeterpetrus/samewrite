@@ -815,11 +815,32 @@ Same four tasks, same model, same substance gates, 16 pairs, prompt prefix deliv
 | Indonesian | 3,091 | 2,388 | **−22.7%** | 14/16 | **0.0001** |
 | English | 2,870 | 2,308 | **−19.6%** | 12/16 | **0.0070** |
 
-**The prediction held.** The effect is not an artefact of Indonesian: it survives a move
-to an unrelated language, with a magnitude about a sixth smaller and a p-value two orders
-weaker on the same n — consistent with a real effect measured slightly less sharply, not
-with a null. The substance gate stayed at **48/48 in every arm of both languages**, so
-neither language paid for brevity in dropped facts.
+**The prediction held, and the honest form of it is directional.** The sentence used
+fewer output tokens in **4 of 4 tasks in both languages**, which is the part that
+replicates. The magnitudes are not comparable by reading two p-values side by side, and a
+post-hoc interaction test on the task-level deltas says so: mean difference-in-differences
+**+3.5 pp, exact p = 0.625** over four tasks. **The claim that the English effect is
+smaller is withdrawn** — the data do not support it.
+
+**Four tasks is four observations, whatever the repeat count.** The run-level test above
+is valid for the question "on these four fixtures, does the sentence save tokens". It does
+not license "on tasks in general": a two-sided sign test across four tasks has a floor of
+2/2⁴ = **0.125** and could not reach 0.05 however clean the result. Per task, one sentence
+against none:
+
+| task | Indonesian | English |
+|---|---|---|
+| `identity_cmp` | −25.8% | −10.3% |
+| `late_binding` | −27.6% | −25.6% |
+| `set_order` | −7.9% | −20.5% |
+| `shallow_copy` | −30.1% | −21.1% |
+
+The substance gate stayed at **48/48 in every arm of both languages**. A reviewer's
+objection was that a gate which never fails has not been shown to measure anything, so it
+was given a negative control: empty, truncated and evasive answers, all four tasks. It
+rejected every one — 0 of 3 facts in all twelve cases. `analyze_lang.py` reruns that
+control on each invocation and asserts on it, so the gate cannot rot into a rubber stamp
+unnoticed.
 
 **What this fixes in the write-up, beyond the language.** Recomputing all three contrasts
 with one script exposed a second misattribution, this one nothing to do with translation:
