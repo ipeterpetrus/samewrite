@@ -390,6 +390,12 @@ because the negative findings are useful, not because it is a maintained product
 
 ## Honest limits
 
+- **Every A/B run in this repo was conducted in Indonesian.** The task prompts, the
+  one-sentence placebos and the substance-gate patterns are all Indonesian; the write-up
+  is English. That matters most for the terseness result, whose endpoint is output
+  *tokens* and whose languages do not tokenize alike, and least for the line-count
+  results. No English replication has been run, so treat the English phrasings quoted
+  throughout as untested translations of the strings that were measured.
 - The saving is 0.077% (identical writes) plus at most 0.086% (an oracle edit policy;
   the deployable fraction rule reaches ~0.072% of that). Everything here is ~0.1%.
 - The guard is **fail-open** on every error. It saves tokens; it does not prevent harm.

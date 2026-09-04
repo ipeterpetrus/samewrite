@@ -53,13 +53,29 @@ carry, which no rule on this page can do.
 Two always-on instruction blocks were tested against one-sentence versions of their
 own intent. The sentence won or tied every time; the kilobytes never won.
 
-- **Terseness** — *"Answer tersely; keep every technical fact."* Cuts output tokens
-  ~23% against no instruction (15 of 16 pairs, exact p = 0.0001), 100% of required
-  facts retained. A 4,664-byte block saying the same thing measured **−0.8% against
-  that one sentence** (p = 0.86) on a pre-registered run.
-- **Minimal change** — *"Make the smallest possible change, add no unrequested
-  abstraction."* Fewer non-blank lines in 7 of 7 pairs (p = 0.016). The 5,228-byte
-  version: 5 of 7, p = 0.45.
+- **Terseness** — cuts output tokens ~23% against no instruction (15 of 16 pairs, exact
+  p = 0.0001), 100% of required facts retained. A 4,664-byte block saying the same thing
+  measured **-0.8% against that one sentence** (p = 0.86) on a pre-registered run.
+- **Minimal change** — fewer non-blank lines in 7 of 7 pairs (p = 0.016). The 5,228-byte
+  version managed 5 of 7, p = 0.45.
 
-Write the sentence, measure it, and only then consider a kilobyte of rules. That is
-also why this file is 2 kB rather than 10.
+**What was actually tested, verbatim.** Both sentences, and every task prompt and
+substance gate in the rig, were Indonesian:
+
+```
+Jawab sesingkat mungkin, tanpa mengurangi isi teknisnya.
+Buat perubahan sekecil mungkin; jangan menambah abstraksi yang tak diminta.
+```
+
+The English renderings — *"Answer tersely; keep every technical fact."* and *"Make the
+smallest possible change, add no unrequested abstraction."* — are **untested
+translations**, and the two results are not equally exposed. Terseness is scored in output
+*tokens*, and two languages do not tokenize alike, so the ~23% has no licence to travel.
+Minimal change is scored in non-blank *lines*, which travels better, but n = 7 and
+"abstraksi yang tak diminta" is a loose match for "unrequested abstraction". Delivery was
+narrower than this page, too: the sentence was measured as a prompt prefix and as a
+`SessionStart` banner. **Skill-body delivery — how you are reading it now — was never
+tested.**
+
+Write the sentence, measure it in your own language and channel, and only then consider a
+kilobyte of rules. That is also why this file is under 4 kB rather than 10.

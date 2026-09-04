@@ -258,6 +258,17 @@ on compaction reports −62.8…−85.9%.
 Everything in this repo is worth ~0.1%. Session length is worth 50-88%. Do not mistake
 one for the other.
 
+**And it does not fix the language it was measured in.** Every A/B run below was conducted
+in Indonesian — task prompts, one-sentence placebos, and the regex substance gates alike.
+The two sentences that beat their own kilobyte blocks were, verbatim, `Jawab sesingkat
+mungkin, tanpa mengurangi isi teknisnya.` and `Buat perubahan sekecil mungkin; jangan
+menambah abstraksi yang tak diminta.` Every English phrasing in this document is a
+translation that was never run. The exposure is uneven: the terseness contrast is scored in
+output **tokens**, and two languages do not tokenize alike, so its magnitude has no licence
+to travel; the line-count contrasts travel better. Twenty rounds of cross-family review did
+not raise this, because no round read the rig — which is itself the finding: a panel
+attacks what it is shown.
+
 ## 7. What an adversarial panel broke
 
 Before publication these findings went to an 8-model, 4-family adversarial panel plus a
