@@ -33,7 +33,9 @@ F["csv_report"] = dict(files={
             assert report(str(p)) == {}
     '''),
 }, ask="Implementasikan report(path): baca CSV itu, jumlahkan kolom hours per dept, "
-       "kembalikan dict. test_target.py harus lulus.")
+       "kembalikan dict. test_target.py harus lulus.",
+   ask_en="Implement report(path): read that CSV, sum the hours column per dept, "
+          "return a dict. test_target.py must pass.")
 
 F["rate_limiter"] = dict(files={
     "mod.py": D('''
@@ -60,7 +62,9 @@ F["rate_limiter"] = dict(files={
             assert allow("e", 3) is True
     '''),
 }, ask="Implementasikan allow(key, now): izinkan maksimal 3 panggilan per key dalam jendela "
-       "60 detik yang menggeser; now adalah detik. test_target.py harus lulus.")
+       "60 detik yang menggeser; now adalah detik. test_target.py harus lulus.",
+   ask_en="Implement allow(key, now): allow at most 3 calls per key within a sliding "
+          "60 second window; now is in seconds. test_target.py must pass.")
 
 F["retry_backoff"] = dict(files={
     "mod.py": D('''
@@ -94,7 +98,10 @@ F["retry_backoff"] = dict(files={
     '''),
 }, ask="Implementasikan call(fn, sleeper): coba fn hingga 4 kali; di antara percobaan panggil "
        "sleeper(detik) dengan backoff 1, 2, 4. Lempar ulang bila semua gagal. "
-       "test_target.py harus lulus.")
+       "test_target.py harus lulus.",
+   ask_en="Implement call(fn, sleeper): try fn up to 4 times; between attempts call "
+          "sleeper(seconds) with backoff 1, 2, 4. Re-raise if all fail. "
+          "test_target.py must pass.")
 
 F["plugin_registry"] = dict(files={
     "mod.py": D('''
@@ -123,7 +130,60 @@ F["plugin_registry"] = dict(files={
     '''),
 }, ask="Implementasikan register(name) sebagai dekorator yang mendaftarkan fungsi, dan "
        "dispatch(name, value) yang memanggilnya; nama tak dikenal melempar KeyError. "
-       "test_target.py harus lulus.")
+       "test_target.py harus lulus.",
+   ask_en="Implement register(name) as a decorator that registers a function, and "
+          "dispatch(name, value) that calls it; an unknown name raises KeyError. "
+          "test_target.py must pass.")
+
+
+F["config_merge"] = dict(files={
+    "mod.py": D('''
+        def merge(base, override):
+            raise NotImplementedError
+    '''),
+    "test_target.py": D('''
+        from mod import merge
+        def test_right_wins():
+            assert merge({"a": 1, "b": 2}, {"b": 3}) == {"a": 1, "b": 3}
+        def test_nested_merges_not_replaces():
+            assert merge({"db": {"host": "h", "port": 1}}, {"db": {"port": 2}}) \
+                   == {"db": {"host": "h", "port": 2}}
+        def test_inputs_untouched():
+            a = {"db": {"port": 1}}
+            merge(a, {"db": {"port": 2}})
+            assert a == {"db": {"port": 1}}
+    '''),
+}, ask="Implementasikan merge(base, override): gabungkan dua dict config bersarang, "
+       "nilai override menang, dict di dalamnya digabung bukan diganti, dan kedua "
+       "masukan tidak boleh berubah. test_target.py harus lulus.",
+   ask_en="Implement merge(base, override): combine two nested config dicts, override "
+          "wins, dicts inside are merged rather than replaced, and neither input may "
+          "be mutated. test_target.py must pass.")
+
+F["path_router"] = dict(files={
+    "mod.py": D('''
+        def route(pattern, path):
+            raise NotImplementedError
+    '''),
+    "test_target.py": D('''
+        from mod import route
+        def test_static():
+            assert route("/users/list", "/users/list") == {}
+        def test_param():
+            assert route("/users/<id>", "/users/42") == {"id": "42"}
+        def test_two_params():
+            assert route("/a/<x>/b/<y>", "/a/1/b/2") == {"x": "1", "y": "2"}
+        def test_no_match():
+            assert route("/users/<id>", "/posts/42") is None
+        def test_length_mismatch():
+            assert route("/users/<id>", "/users/42/edit") is None
+    '''),
+}, ask="Implementasikan route(pattern, path): cocokkan path dengan pola bersegmen; "
+       "segmen <nama> menangkap nilainya. Kembalikan dict tangkapan, atau None kalau "
+       "tak cocok. test_target.py harus lulus.",
+   ask_en="Implement route(pattern, path): match a path against a segmented pattern; "
+          "a <name> segment captures its value. Return a dict of captures, or None if "
+          "it does not match. test_target.py must pass.")
 
 
 def build(root, name):

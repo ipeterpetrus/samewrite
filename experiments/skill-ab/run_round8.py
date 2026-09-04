@@ -2,8 +2,13 @@
 """Ronde 8: ponytail pada tugas BESAR. Gerbang benar dulu, baru ukur ukuran perubahan."""
 import argparse, ast, json, os, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import fixtures8 as fx
+import fixtures_round8 as fx   # berkasnya memang bernama ini; `fixtures8` tak pernah ada
+                               # dan rig ini karenanya ImportError sejak dipublikasikan
 from rig_modes import defs_count, CFG, ONELINER
+
+# Kalimat Inggris = terjemahan SETIA dari yang Indonesia, bukan parafrasa. Kalau yang
+# diuji bukan padanan, hasilnya tak menjawab apa pun soal bahasa.
+ONELINER_EN = {"ponytail": "Make the change as small as possible; do not add abstractions that were not asked for."}
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CLAUDE = os.path.expanduser("~/.local/bin/claude")
@@ -17,15 +22,16 @@ def imports_count(src):
         return -1
 
 
-def one(name, arm, model, timeout):
+def one(name, arm, model, timeout, lang="id"):
     spec = fx.F[name]
     work = tempfile.mkdtemp(prefix=f"p8-{name}-{arm}-")
     d = fx.build(work, name)
     base = spec["files"]["mod.py"]
     cfg = os.path.join(HERE, CFG["ponytail" if arm == "mode" else arm])
-    prompt = spec["ask"]
+    prompt = spec["ask"] if lang == "id" else spec["ask_en"]
     if arm == "oneline":
-        prompt = ONELINER["ponytail"] + " " + prompt
+        one_liner = ONELINER["ponytail"] if lang == "id" else ONELINER_EN["ponytail"]
+        prompt = one_liner + " " + prompt
     env = dict(os.environ, CLAUDE_CONFIG_DIR=cfg)
     t0 = time.time()
     try:
@@ -42,7 +48,7 @@ def one(name, arm, model, timeout):
     cur = open(mp).read() if os.path.exists(mp) else ""
     extra = [f for f in os.listdir(d) if f.endswith(".py")
              and f not in spec["files"] and not f.startswith(("_", "test_"))]
-    return dict(fixture=name, arm=arm, rc=rc, sec=round(time.time() - t0, 1),
+    return dict(fixture=name, arm=arm, lang=lang, rc=rc, sec=round(time.time() - t0, 1),
                 work=work, passing=(ok == 0),
                 lines=len([l for l in cur.splitlines() if l.strip()]),
                 added=max(0, len(cur.splitlines()) - len(base.splitlines())),
@@ -57,11 +63,12 @@ def main():
     ap.add_argument("--model", default="claude-haiku-4-5-20251001")
     ap.add_argument("--timeout", type=int, default=600)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--lang", default="id", choices=("id", "en"))
     a = ap.parse_args()
     for r in range(a.repeat):
         for n in sorted(fx.F):
             for arm in a.arms.split(","):
-                res = one(n, arm, a.model, a.timeout)
+                res = one(n, arm, a.model, a.timeout, a.lang)
                 res.update(rep=r, model=a.model)
                 with open(a.out, "a") as fh:
                     fh.write(json.dumps(res) + "\n")
