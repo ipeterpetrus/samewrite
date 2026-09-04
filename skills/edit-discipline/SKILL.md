@@ -32,6 +32,9 @@ the riskier path.
 
 ## Where the tokens actually are
 
+Shares below are the 421-session cohort; a later 1,080-file run put Bash at 45.1% and
+Read at 19.8%, so quote a share together with the corpus it came from.
+
 | source | share of carry |
 |---|---|
 | Bash call + result | 42.5% |
@@ -44,3 +47,19 @@ Everything above the line is worth ~0.1% of a session. This half is worth more:
 read a range, not a whole file (mean Read result 22.8 kB, 25x a Bash result);
 ask Bash for the answer, not the log; and end the session — halving N halves
 carry, which no rule on this page can do.
+
+## How long the instruction itself should be
+
+Two always-on instruction blocks were tested against one-sentence versions of their
+own intent. The sentence won or tied every time; the kilobytes never won.
+
+- **Terseness** — *"Answer tersely; keep every technical fact."* Cuts output tokens
+  ~23% against no instruction (15 of 16 pairs, exact p = 0.0001), 100% of required
+  facts retained. A 4,664-byte block saying the same thing measured **−0.8% against
+  that one sentence** (p = 0.86) on a pre-registered run.
+- **Minimal change** — *"Make the smallest possible change, add no unrequested
+  abstraction."* Fewer non-blank lines in 7 of 7 pairs (p = 0.016). The 5,228-byte
+  version: 5 of 7, p = 0.45.
+
+Write the sentence, measure it, and only then consider a kilobyte of rules. That is
+also why this file is 2 kB rather than 10.
