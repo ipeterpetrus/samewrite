@@ -50,32 +50,42 @@ carry, which no rule on this page can do.
 
 ## How long the instruction itself should be
 
-Two always-on instruction blocks were tested against one-sentence versions of their
-own intent. The sentence won or tied every time; the kilobytes never won.
+Two always-on instruction blocks were tested against one-sentence versions of their own
+intent. The sentence won or tied every time; the kilobytes never won.
 
-- **Terseness** — cuts output tokens ~23% against no instruction (15 of 16 pairs, exact
-  p = 0.0001), 100% of required facts retained. A 4,664-byte block saying the same thing
-  measured **-0.8% against that one sentence** (p = 0.86) on a pre-registered run.
-- **Minimal change** — fewer non-blank lines in 7 of 7 pairs (p = 0.016). The 5,228-byte
-  version managed 5 of 7, p = 0.45.
+**Terseness — replicated in two languages.** The instruction was measured as a prefix to
+the request, against no instruction at all, on billed `output_tokens`, 16 pairs each,
+exact paired permutation, two-sided:
 
-**What was actually tested, verbatim.** Both sentences, and every task prompt and
-substance gate in the rig, were Indonesian:
+| language | sentence as run | delta | lower in | p |
+|---|---|---|---|---|
+| Indonesian | `Jawab sesingkat mungkin, tanpa mengurangi isi teknisnya.` | **-22.7%** | 14/16 | 0.0001 |
+| English | `Answer as briefly as possible, without reducing the technical content.` | **-19.6%** | 12/16 | 0.0070 |
 
-```
-Jawab sesingkat mungkin, tanpa mengurangi isi teknisnya.
-Buat perubahan sekecil mungkin; jangan menambah abstraksi yang tak diminta.
-```
+The English run was pre-registered before it had data
+(`experiments/skill-ab/PREREGISTRATION_english_replication.md`) and its prediction held.
+The substance gate — a fixed list of facts each answer had to contain — stayed at **100%
+in both arms of both languages**, so the saving is not paid for in dropped content.
 
-The English renderings — *"Answer tersely; keep every technical fact."* and *"Make the
-smallest possible change, add no unrequested abstraction."* — are **untested
-translations**, and the two results are not equally exposed. Terseness is scored in output
-*tokens*, and two languages do not tokenize alike, so the ~23% has no licence to travel.
-Minimal change is scored in non-blank *lines*, which travels better, but n = 7 and
-"abstraksi yang tak diminta" is a loose match for "unrequested abstraction". Delivery was
-narrower than this page, too: the sentence was measured as a prompt prefix and as a
-`SessionStart` banner. **Skill-body delivery — how you are reading it now — was never
-tested.**
+**Write the sentence in the language you actually prompt in.** Two languages is not all
+languages, but the effect surviving a move between two unrelated ones is the evidence
+that it is about instruction-following, not about a particular tokenizer. Translate the
+sentence; do not import a foreign one.
+
+**The kilobyte does not add anything.** A 4,664-byte always-on block saying the same thing
+measured **-0.8% against the one sentence** (p = 0.86, Indonesian, pre-registered). Its
+-23.4% headline is the block-versus-nothing contrast, and the sentence gets essentially
+all of that on its own.
+
+**Minimal change — one language only, and thinner.** *"Buat perubahan sekecil mungkin;
+jangan menambah abstraksi yang tak diminta."* Fewer non-blank lines in 7 of 7 pairs
+(p = 0.016) where a 5,228-byte version managed 5 of 7 (p = 0.45). This one has **no English
+replication**, n = 7, and its endpoint is lines rather than tokens. Treat the English
+rendering as untested.
+
+**One channel was tested, and it is not this one.** Both sentences were delivered as a
+prompt prefix, and the blocks as a `SessionStart` banner. Skill-body delivery — how you
+are reading this — was never measured.
 
 Write the sentence, measure it in your own language and channel, and only then consider a
-kilobyte of rules. That is also why this file is under 4 kB rather than 10.
+kilobyte of rules. That is also why this file is under 5 kB rather than 10.

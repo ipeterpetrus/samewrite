@@ -24,8 +24,9 @@ def load(path, i_know=False):
     if not e["analysis_eligible"]:
         print(f"*** {e['evidence_class'].upper()} - NOT CONFIRMATORY: "
               f"{path} was not pre-registered. A number computed from it is a lead, not a result.")
-    f = BASE / path if not str(path).startswith("..") else BASE / path
-    return [json.loads(l) for l in f.read_text().splitlines() if l.strip()]
+    # .splitlines() also splits on U+2028/U+2029, which are legal inside a JSON string:
+    # one model answer containing them becomes two half-lines and the parse dies.
+    return [json.loads(l) for l in (BASE / path).read_text().split("\n") if l.strip()]
 
 
 if __name__ == "__main__":
@@ -36,5 +37,8 @@ if __name__ == "__main__":
             assert e["analysis_eligible"], f"{p} loaded without a guard"
         except ValueError:
             assert not e["analysis_eligible"]
-    assert ok == 1, f"exactly one file should load unguarded, got {ok}"
+    # Nailed down on purpose, not derived from the manifest: a self-test that reads its
+    # own expectation out of the file it is testing will bless any future edit in silence.
+    # Two, since 2a6edd3: the Indonesian confirmatory run and its English replication.
+    assert ok == 2, f"exactly two files should load unguarded, got {ok}"
     print(f"OK: {len(BY_PATH)} files classified, {ok} analysis-eligible")

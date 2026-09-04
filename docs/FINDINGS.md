@@ -798,6 +798,46 @@ Per task the two treated arms track each other everywhere:
 one-sentence versions of their own intent. None of them beat the sentence on a pre-registered
 test. The instruction is worth having; the kilobytes are not.
 
+### The English replication: the sentence travels, the magnitude shrinks a little
+
+Round 21 of adversarial review noticed what twenty rounds before it had not: every run
+above was conducted in Indonesian, and the numbers were being quoted beside English
+sentences. The endpoint is `output_tokens`, and two languages do not tokenize alike, so
+the objection had teeth. The protocol was pre-registered at commit `2a6edd3`, before the
+data file existed — the prediction on record was that the one-sentence instruction would
+still beat no instruction at p < 0.05, and that failure would mean the effect is
+language-bound with no rescue round.
+
+Same four tasks, same model, same substance gates, 16 pairs, prompt prefix delivery:
+
+| language | plain | one sentence | delta | sentence lower in | exact p |
+|---|---|---|---|---|---|
+| Indonesian | 3,091 | 2,388 | **−22.7%** | 14/16 | **0.0001** |
+| English | 2,870 | 2,308 | **−19.6%** | 12/16 | **0.0070** |
+
+**The prediction held.** The effect is not an artefact of Indonesian: it survives a move
+to an unrelated language, with a magnitude about a sixth smaller and a p-value two orders
+weaker on the same n — consistent with a real effect measured slightly less sharply, not
+with a null. The substance gate stayed at **48/48 in every arm of both languages**, so
+neither language paid for brevity in dropped facts.
+
+**What this fixes in the write-up, beyond the language.** Recomputing all three contrasts
+with one script exposed a second misattribution, this one nothing to do with translation:
+the **−23.4%, 15 of 16** figure quoted throughout as "telling the model to be terse" is
+the *banner* arm against plain. The *sentence* against plain is **−22.7%, 14 of 16**. The
+two are within a point of each other — which is the whole point of section 9 — but they
+are different arms and had been used interchangeably.
+
+| contrast (Indonesian, n = 16) | mean plain → treated | delta | lower in | exact p |
+|---|---|---|---|---|
+| one sentence vs plain | 3,091 → 2,388 | −22.7% | 14/16 | 0.0001 |
+| banner vs plain | 3,091 → 2,369 | −23.4% | 15/16 | 0.0001 |
+| banner vs one sentence | 2,388 → 2,369 | −0.8% | 6/16 | 0.855 |
+
+**Two languages is not all languages,** and the minimal-change result still has only one:
+it was never re-run in English, its n is 7, and its endpoint is lines rather than tokens.
+That asymmetry is now stated in the skill file rather than smoothed over.
+
 ### Both contrasts, every horizon — and the status this result is entitled to
 
 The decision-relevant comparison is not banner-versus-nothing, it is **banner versus a single

@@ -41,8 +41,11 @@ pre-registered confirmatory run. The short version:
    available saving on 1,316 transcripts. Changed *fraction* under ~25% is the rule that works.
 4. **Skill listings are mostly uninvoked.** 72.9% of one listing (21,891 of 30,009 bytes) had
    never been invoked once across 1,409 sessions — ~6,972 tokens re-sent every turn.
-5. **Telling the model to be terse works.** −23.4% output tokens against no instruction, 15 of
-   16 pairs, exact p = 0.0001, with 100% of required facts retained.
+5. **Telling the model to be terse works, in more than one language.** One sentence against no
+   instruction: **−22.7%** output tokens in Indonesian (14 of 16 pairs, exact p = 0.0001) and
+   **−19.6%** in a pre-registered English replication (12 of 16, p = 0.0070), with 100% of
+   required facts retained in every arm of both. The always-on banner scores −23.4% (15 of 16)
+   against no instruction — a different arm, and barely ahead of the sentence.
 6. **The kilobytes do not.** Three always-on blocks (9.4 kB debugging, 5.2 kB lazy-engineer,
    4.7 kB terse) were each tested against a one-sentence version of their own intent. **None
    showed a significant advantage over the sentence on a pre-registered test** — at n = 16
@@ -390,12 +393,14 @@ because the negative findings are useful, not because it is a maintained product
 
 ## Honest limits
 
-- **Every A/B run in this repo was conducted in Indonesian.** The task prompts, the
+- **Every A/B run in this repo except one was conducted in Indonesian.** The task prompts, the
   one-sentence placebos and the substance-gate patterns are all Indonesian; the write-up
   is English. That matters most for the terseness result, whose endpoint is output
   *tokens* and whose languages do not tokenize alike, and least for the line-count
-  results. No English replication has been run, so treat the English phrasings quoted
-  throughout as untested translations of the strings that were measured.
+  results. The terseness contrast now has a pre-registered English replication and holds
+  there (−19.6%, p = 0.0070); every other English phrasing quoted here is still an untested
+  translation of the string that was measured, and the minimal-change result in particular
+  has never been run outside Indonesian.
 - The saving is 0.077% (identical writes) plus at most 0.086% (an oracle edit policy;
   the deployable fraction rule reaches ~0.072% of that). Everything here is ~0.1%.
 - The guard is **fail-open** on every error. It saves tokens; it does not prevent harm.
