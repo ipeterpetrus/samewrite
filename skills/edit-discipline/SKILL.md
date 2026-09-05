@@ -84,14 +84,15 @@ measured **-0.8% against the one sentence** (p = 0.86, Indonesian, pre-registere
 -23.4% headline is the block-versus-nothing contrast, and the sentence gets essentially
 all of that on its own.
 
-**Minimal change — tested three times, and it has no demonstrated effect.** *"Make the
-change as small as possible; do not add abstractions that were not asked for."* Two
-pre-registered studies failed their own thresholds: six author-written tasks in two
-languages (p = 0.0625 / 0.125), then twenty frozen third-party MBPP tasks with a continuous
-endpoint (**p = 0.113**, smaller in 8 of 16 — a coin flip, despite a −15.4% aggregate that
-two tasks carry). The often-quoted 7-of-7, p = 0.016 is exploratory and **superseded**.
-Write the sentence if you like it; this repo has no evidence that it changes solution size,
-and quotes no number for it.
+**Minimal change — tested three times, never demonstrated.** *"Make the change as small
+as possible; do not add abstractions that were not asked for."* Two pre-registered studies
+failed their own thresholds: six author-written tasks in two languages (p = 0.0625 /
+0.125), then twenty frozen third-party MBPP tasks with a continuous endpoint (p = 0.113,
+smaller in 8 of 16 — a coin flip). The often-quoted 7-of-7, p = 0.016 is exploratory and
+**superseded**. What that licenses is narrow: **no statistically demonstrated effect under
+the tested protocol**, not "no effect" — the 95% CI on the mean change is [−18.3%, +0.9%],
+which is inconclusive, not empty. Write the sentence if you like it; this repo quotes no
+number for it.
 
 **One channel was tested, and it is not this one.** Both sentences were delivered as a
 prompt prefix, and the blocks as a `SessionStart` banner. Skill-body delivery — how you

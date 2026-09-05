@@ -26,10 +26,13 @@ instruction on these tasks.
 ## Consequence fixed in advance
 
 This is the second pre-registered minimal-change failure, and this task set is independently
-authored and frozen. Per the protocol, the instruction has **no demonstrated effect on
-solution size**. The earlier exploratory 7-of-7 is superseded as evidence rather than
-promoted by the directional pooled result here. No fourth endpoint or task-set rescue is
-planned.
+authored and frozen. Per the protocol the claim is retired, in these words and no stronger:
+**no statistically demonstrated effect on solution size under the tested protocol** — this
+endpoint, this subset, this model, one draw per arm, size scored only where both arms
+passed the gate. Non-significance is not equivalence: the 95% bootstrap CI on the mean
+per-task proportional change is **[-18.3%, +0.9%]**, which is inconclusive against any
+bound worth setting. The earlier exploratory 7-of-7 is superseded rather than promoted by
+the directional pooled result here. No fourth endpoint or task-set rescue is planned.
 
 Reproduce the analysis with:
 

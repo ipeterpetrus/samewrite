@@ -939,23 +939,33 @@ previous design cannot arise.
 | non-blank lines (secondary) | — | — | exact sign test, 8 smaller / 4 larger / 4 tied | p = 0.388 |
 
 **The registered prediction failed for the second time, on an independent, third-party
-task set.** Per the protocol, that is not an underpowered accident, and there is no fourth
-round: **the minimal-change instruction has no demonstrated effect on solution size.** The
-exploratory 7-of-7, p = 0.016 is **superseded**, not merely unpromoted.
+task set.** Per the protocol there is no fourth round, and the claim is retired. The
+precise wording matters and round 24 forced it: **no statistically demonstrated effect on
+solution size under the tested protocol** — this endpoint, this task subset, this model,
+one draw per arm, size measured only on pairs where both arms passed. That is not the same
+as "no effect", and this repo does not claim the stronger thing.
 
-**The pooled number and the per-task number disagree, and the per-task one is right.**
-Characters fell 15.4% in aggregate — which reads like an effect — while the sentence was
-smaller in **8 of 16 tasks**, a coin flip. Two tasks carry the aggregate: `mbpp_39`
-(1,101 → 615 characters, −44.1%, and the only plain run that also spawned an extra file)
-and `mbpp_34` (−43.8%). This is exactly the pattern round 23's judge warned about when it
-said the null may simply be true, and it is why the pooled figure is reported here and
-tested nowhere.
+**Non-significance is not equivalence, so here is the interval.** The 95% bootstrap CI on
+the mean per-task proportional change is **[−18.3%, +0.9%]**. It spans zero, and it also
+spans reductions large enough that anyone would want them. The honest label is
+**inconclusive against any bound worth setting**, not "the instruction does nothing".
 
-**The correctness gate finally bit.** In the two previous studies it passed 48 of 48 and
-had to be defended with mutation tests. Here it **dropped four pairs of twenty** —
-`mbpp_60`, `mbpp_122`, `mbpp_136` failed or produced nothing in both arms, `mbpp_131` in
-the `oneline` arm — with no substitution and no rerun. A gate that removes a fifth of the
-sample on harder tasks is a gate that was doing something on the easy ones too.
+**The pooled number and the per-task number disagree.** Characters fell 15.4% in aggregate
+while the sentence was smaller in **8 of 16 tasks** — a coin flip. Two tasks are much of
+the aggregate: `mbpp_39` (1,101 → 615 characters, −44.1%, and the only `plain` run that
+also spawned an extra file) and `mbpp_34` (−43.8%). But discounting them entirely would be
+too convenient, and a leave-one-out check says so: **drop both and the remaining fourteen
+tasks still pool to −7.2%.** A panel raised the fairer reading — an instruction that
+prevents over-engineering *should* do nothing where nobody over-engineers and a lot where
+someone does — and this design cannot separate that story from noise, because there is one
+run per cell.
+
+**The correctness gate dropped four pairs of twenty** — `mbpp_60`, `mbpp_122`, `mbpp_136`
+failed or produced nothing in both arms, `mbpp_131` in the `oneline` arm — with no
+substitution and no rerun, as registered. The size result therefore describes only tasks
+both arms could solve, which are the easier ones. What that attrition says about the two
+earlier studies where the gate passed 48 of 48 is **nothing**: different tasks, different
+gate, and a claim to the contrary was removed from this section after review.
 
 ### Both contrasts, every horizon — and the status this result is entitled to
 

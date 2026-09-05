@@ -17,6 +17,16 @@ def exact_perm_p(diffs):
     return hit / 2 ** len(diffs)
 
 
+def boot_ci(vals, iters=20000, seed=11):
+    """Percentile bootstrap on the mean. Seeded, so the printed interval is the same
+    number every time anyone runs this."""
+    import random
+    rng = random.Random(seed)
+    n = len(vals)
+    means = sorted(sum(rng.choice(vals) for _ in range(n)) / n for _ in range(iters))
+    return means[int(0.025 * iters)], means[int(0.975 * iters)]
+
+
 def sign_test(k, n):
     if n == 0:
         return 1.0
@@ -75,6 +85,13 @@ def main(path="mbpp_minimal_change.jsonl"):
           f"smaller in {sum(1 for x in d if x < 0)}/{len(d)}")
     print(f"  exact paired permutation, two-sided: p = {exact_perm_p(d):.5f}  "
           f"(threshold 0.05)")
+    # Round 24: a bare p is not an answer to "how big could the effect be". Report an
+    # interval and say plainly that non-significance is not equivalence.
+    lo_ci, hi_ci = boot_ci(d)
+    print(f"  95% bootstrap CI on the mean delta: [{100*lo_ci:+.1f}%, {100*hi_ci:+.1f}%]")
+    print("  The interval spans zero AND spans reductions large enough to matter, so this")
+    print("  is INCONCLUSIVE against any sensible bound - not evidence of no effect.")
+
 
     # SECONDARY: non-blank lines, exact sign test
     lo = sum(1 for t in keep if keep[t]["oneline"]["lines"] < keep[t]["plain"]["lines"])
@@ -84,6 +101,15 @@ def main(path="mbpp_minimal_change.jsonl"):
           f"tied in {len(keep)-n}")
     print(f"  exact two-sided sign test on {n} non-tied tasks: p = {sign_test(max(lo,hi), n):.5f}"
           f"  (floor {sign_test(n, n):.6f})")
+
+    # Leave-one-task-out: how much of the pooled figure is two tasks?
+    worst = sorted(keep, key=lambda t: (keep[t]["oneline"]["chars"] - keep[t]["plain"]["chars"])
+                                       / keep[t]["plain"]["chars"])[:2]
+    rest = [t for t in keep if t not in worst]
+    rp = sum(keep[t]["plain"]["chars"] for t in rest)
+    rq = sum(keep[t]["oneline"]["chars"] for t in rest)
+    print(f"\n  leave-out the two largest reductions (mbpp_{worst[0]}, mbpp_{worst[1]}): "
+          f"pooled {100*(rq-rp)/rp:+.1f}% over {len(rest)} tasks")
 
     nf = sum(keep[t][a]["new_files"] for t in keep for a in ("plain", "oneline"))
     print(f"\nrecorded, not tested: {nf} extra files created across all runs")

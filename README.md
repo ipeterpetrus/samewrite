@@ -406,10 +406,11 @@ because the negative findings are useful, not because it is a maintained product
 - **The minimal-change sentence failed two pre-registered tests and is retired.** Six
   author-written tasks in two languages (p = 0.0625 / 0.125), then twenty frozen
   third-party MBPP tasks with a continuous endpoint and a mechanical selection rule
-  (**p = 0.113**; smaller in 8 of 16 tasks, a coin flip, while the −15.4% aggregate is
-  carried by two). Per the protocol there is no third attempt: the instruction has **no
-  demonstrated effect on solution size**, and the 7-of-7, p = 0.016 figure that circulated
-  before is exploratory and superseded.
+  (**p = 0.113**; smaller in 8 of 16 tasks, a coin flip). Per the protocol there is no
+  third attempt: **no statistically demonstrated effect under the tested protocol** — which
+  is not the same as no effect, since the 95% CI on the mean change is [−18.3%, +0.9%] and
+  is inconclusive rather than empty. The 7-of-7, p = 0.016 figure that circulated before is
+  exploratory and superseded.
 - The saving is 0.077% (identical writes) plus at most 0.086% (an oracle edit policy;
   the deployable fraction rule reaches ~0.072% of that). Everything here is ~0.1%.
 - The guard is **fail-open** on every error. It saves tokens; it does not prevent harm.
