@@ -396,6 +396,11 @@ because the negative findings are useful, not because it is a maintained product
 
 ## Honest limits
 
+- **"Bytes" in the carry tables are characters as counted by Python's `len()`,** not UTF-8
+  bytes — identical for ASCII, and the chars-to-tokens constant was calibrated on the same
+  count, so the shares are internally consistent; the label was wrong. `tools/carry.py` now
+  says `chars/turn`. It also prints injected attachments per type; the tables here sum them
+  into one "injected" row.
 - **Every A/B run in this repo except one was conducted in Indonesian.** The task prompts, the
   one-sentence placebos and the substance-gate patterns are all Indonesian; the write-up
   is English. That matters most for the terseness result, whose endpoint is output

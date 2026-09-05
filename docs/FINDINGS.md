@@ -14,6 +14,10 @@ Reproduce: `tools/extract.py` + `tools/simulate.py` for the overwrite analysis,
 
 ## 1. Where the tokens actually go
 
+**Units.** Every "byte" figure in this document is a character count from `len()`, not a
+UTF-8 byte count. The two coincide for ASCII, the chars-to-tokens constant was calibrated on
+the same count, and the shares are unaffected; only the label was wrong.
+
 **Corpus version.** Both tables below come from the 421-session cohort, captured before the
 section 10 run. Section 10 re-ran `tools/carry.py` over a later, larger corpus (1,080 files,
 192,752 turns after the 50-turn filter) and got different shares — 45.11% where this table
