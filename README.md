@@ -403,11 +403,13 @@ because the negative findings are useful, not because it is a maintained product
   results. The terseness contrast now has a pre-registered English replication and holds
   there (−19.6%, p = 0.0070); every other English phrasing quoted here is still an untested
   translation of the string that was measured.
-- **The minimal-change sentence has a pre-registered replication, and it failed.** Six
-  tasks, both languages, 48 runs: p = 0.0625 in English and 0.125 in Indonesian, against a
-  registered threshold of 0.05. The direction is consistent (fewer lines in 9 of 12
-  task-language cells, more in none) but the effect is not established. The 7-of-7,
-  p = 0.016 figure that circulated before is exploratory and is labelled as such now.
+- **The minimal-change sentence failed two pre-registered tests and is retired.** Six
+  author-written tasks in two languages (p = 0.0625 / 0.125), then twenty frozen
+  third-party MBPP tasks with a continuous endpoint and a mechanical selection rule
+  (**p = 0.113**; smaller in 8 of 16 tasks, a coin flip, while the −15.4% aggregate is
+  carried by two). Per the protocol there is no third attempt: the instruction has **no
+  demonstrated effect on solution size**, and the 7-of-7, p = 0.016 figure that circulated
+  before is exploratory and superseded.
 - The saving is 0.077% (identical writes) plus at most 0.086% (an oracle edit policy;
   the deployable fraction rule reaches ~0.072% of that). Everything here is ~0.1%.
 - The guard is **fail-open** on every error. It saves tokens; it does not prevent harm.

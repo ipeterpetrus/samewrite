@@ -335,6 +335,21 @@
       "language": "id",
       "note": "Minimal-change replication, protocol in PREREGISTRATION_minimal_change_english.md committed at 0436efe before these files existed. The registered prediction FAILED; the records are published because a null is a result.",
       "sha256": "566a13145035f025217b6c84565f904069b6704c4d54d15c6cd532fd3a419042"
+    },
+    {
+      "path": "../mbpp_minimal_change.jsonl",
+      "evidence_class": "confirmatory",
+      "preregistered": true,
+      "analysis_eligible": true,
+      "n": 40,
+      "unit": "runs",
+      "arms": [
+        "oneline",
+        "plain"
+      ],
+      "language": "en",
+      "note": "Frozen third-party MBPP minimal-change study, protocol in PREREGISTRATION_mbpp_minimal_change.md committed at ed366d8 before this file existed. Four pairs failed the registered correctness gate and were dropped; the primary registered prediction FAILED (exact paired permutation p=0.11292).",
+      "sha256": "c212c01b77952a96138274c0e952fcaffa29cf928c550e08c68b5a71c049d487"
     }
   ],
   "reconciliation": {
@@ -342,6 +357,11 @@
       "exploratory": 294,
       "confirmatory": 48,
       "total": 342
+    },
+    "registered_replications": {
+      "english_terseness": 32,
+      "minimal_change": 88,
+      "all_scored_ab_runs": 462
     },
     "calibration_runs": 95,
     "quarantined_lines": 654,

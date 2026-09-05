@@ -84,14 +84,14 @@ measured **-0.8% against the one sentence** (p = 0.86, Indonesian, pre-registere
 -23.4% headline is the block-versus-nothing contrast, and the sentence gets essentially
 all of that on its own.
 
-**Minimal change — tested the same way, and it did not replicate.** *"Buat perubahan
-sekecil mungkin; jangan menambah abstraksi yang tak diminta."* The often-quoted 7 of 7,
-p = 0.016 is **exploratory**. A pre-registered replication over six tasks in both languages
-came back **p = 0.0625 in English and 0.125 in Indonesian** — the registered prediction
-failed, and the sentence is not established here the way terseness is. The direction is
-consistent (fewer lines in 9 of 12 task-language cells, more in none), so the instruction
-is still worth writing; it is a lead, not a measured effect. Do not quote a percentage for
-it.
+**Minimal change — tested three times, and it has no demonstrated effect.** *"Make the
+change as small as possible; do not add abstractions that were not asked for."* Two
+pre-registered studies failed their own thresholds: six author-written tasks in two
+languages (p = 0.0625 / 0.125), then twenty frozen third-party MBPP tasks with a continuous
+endpoint (**p = 0.113**, smaller in 8 of 16 — a coin flip, despite a −15.4% aggregate that
+two tasks carry). The often-quoted 7-of-7, p = 0.016 is exploratory and **superseded**.
+Write the sentence if you like it; this repo has no evidence that it changes solution size,
+and quotes no number for it.
 
 **One channel was tested, and it is not this one.** Both sentences were delivered as a
 prompt prefix, and the blocks as a `SessionStart` banner. Skill-body delivery — how you

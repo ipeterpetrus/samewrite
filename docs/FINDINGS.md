@@ -915,6 +915,48 @@ dicts replaced instead of merged, an input mutated in place, a length mismatch a
 literal path segment left unchecked — all turn `pytest` red. `analyze_minimal.py` runs that
 control on every invocation and asserts on it.
 
+### Third attempt, on tasks nobody here wrote — and the claim is retired
+
+Round 23 said the previous null was hard to read: the fixtures were mine and I knew the
+hypothesis, and the endpoint was too coarse for the test. Both were fixed rather than
+argued with.
+
+**The tasks come from [MBPP](https://github.com/google-research/google-research/tree/master/mbpp)**
+(Austin et al. 2021, CC-BY-4.0) — 974 tasks with prompts, reference solutions and
+behaviour-pinning asserts written years before this question existed. The dataset is not
+vendored; it is fetched and checked against a hash fixed in the protocol, and a different
+hash refuses to run. Twenty tasks are chosen by a rule that never touches an arm: ascending
+`task_id`, first twenty whose reference solution has ≥ 12 non-blank lines, imports stdlib
+only, and **passes the dataset's own tests** — a positive control that costs the author no
+judgement. **The endpoint is characters**, continuous, so the tie hazard that sank the
+previous design cannot arise.
+
+40 runs, protocol at `ed366d8` before the data existed:
+
+| | plain | oneline | registered test | result |
+|---|---|---|---|---|
+| **characters** (primary) | 6,386 | 5,404 | exact paired permutation on task-level proportional deltas | **p = 0.113** |
+| non-blank lines (secondary) | — | — | exact sign test, 8 smaller / 4 larger / 4 tied | p = 0.388 |
+
+**The registered prediction failed for the second time, on an independent, third-party
+task set.** Per the protocol, that is not an underpowered accident, and there is no fourth
+round: **the minimal-change instruction has no demonstrated effect on solution size.** The
+exploratory 7-of-7, p = 0.016 is **superseded**, not merely unpromoted.
+
+**The pooled number and the per-task number disagree, and the per-task one is right.**
+Characters fell 15.4% in aggregate — which reads like an effect — while the sentence was
+smaller in **8 of 16 tasks**, a coin flip. Two tasks carry the aggregate: `mbpp_39`
+(1,101 → 615 characters, −44.1%, and the only plain run that also spawned an extra file)
+and `mbpp_34` (−43.8%). This is exactly the pattern round 23's judge warned about when it
+said the null may simply be true, and it is why the pooled figure is reported here and
+tested nowhere.
+
+**The correctness gate finally bit.** In the two previous studies it passed 48 of 48 and
+had to be defended with mutation tests. Here it **dropped four pairs of twenty** —
+`mbpp_60`, `mbpp_122`, `mbpp_136` failed or produced nothing in both arms, `mbpp_131` in
+the `oneline` arm — with no substitution and no rerun. A gate that removes a fifth of the
+sample on harder tasks is a gate that was doing something on the easy ones too.
+
 ### Both contrasts, every horizon — and the status this result is entitled to
 
 The decision-relevant comparison is not banner-versus-nothing, it is **banner versus a single

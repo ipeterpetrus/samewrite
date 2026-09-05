@@ -14,18 +14,38 @@ preregistered=False. The conclusions rest on confirmatory_runs.jsonl.
 Pass i_know=True to load it anyway.
 ```
 
-With `i_know=True` it loads and prints `*** EXPLORATORY — NOT CONFIRMATORY`. One file in
-twenty loads without a guard: the pre-registered confirmatory run.
+With `i_know=True` it loads and prints `*** EXPLORATORY — NOT CONFIRMATORY`. Five files
+load without a guard: the pre-registered confirmatory records, including null results.
+
+## Frozen third-party minimal-change study
+
+[`../mbpp_minimal_change.jsonl`](../mbpp_minimal_change.jsonl) is a completed, pre-registered
+40-run study on 20 mechanically selected MBPP tasks. Its task prompts, reference solutions,
+and tests predate this hypothesis; the dataset hash and selection rule are fixed in
+[`../PREREGISTRATION_mbpp_minimal_change.md`](../PREREGISTRATION_mbpp_minimal_change.md).
+
+Four pairs failed the non-negotiable correctness gate and were dropped as registered. Of
+the remaining 16 pairs, `oneline` used 5,404 characters versus 6,386 for `plain` (-15.4%
+pooled; mean paired proportional change -8.7%), but the primary exact paired permutation
+test was **p = 0.11292**, above the pre-registered 0.05 threshold. The prediction failed.
+The registered line-count secondary was also non-significant (8 smaller, 4 larger, 4 tied;
+two-sided exact sign-test p = 0.38770). A directional pooled difference is not a positive
+result after the registered test has failed.
 
 ## Reconciliation
 
-Every run this repo has ever scored, in one table. Nothing is dropped silently.
+Every scored A/B run is reconciled below. The original outcome experiment is retained as
+its own subtotal so its 342-run figure remains comparable with earlier reports; later
+pre-registered replications are listed separately rather than silently folded into it.
 
 | bucket | n | unit | what it can support |
 |---|---|---|---|
 | **confirmatory** (`../confirmatory_runs.jsonl`) | **48** | runs | the conclusions. Pre-registered: one endpoint, one test, exclusions fixed in advance |
 | **exploratory** (`exploratory/`) | **294** | runs | leads. Not pre-registered; fixtures and endpoints changed between rounds |
-| scored A/B total | **342** | runs | the figure quoted in the repo description |
+| original outcome-experiment subtotal | **342** | runs | 294 exploratory + 48 original confirmatory; the figure quoted in the repo description |
+| terseness English replication (`../english_replication.jsonl`) | **32** | runs | pre-registered replication; analysed separately from the original outcome experiment |
+| minimal-change replications (`../minimal_change_{en,id}.jsonl`, `../mbpp_minimal_change.jsonl`) | **88** | runs | all pre-registered; both registered minimal-change predictions failed |
+| all scored A/B runs | **462** | runs | original outcome experiment plus all listed replications |
 | **calibration** (`calibration/`) | **95** | runs | that fixtures fail before treatment. 81 single-arm, 14 smoke. Never an effect estimate |
 | **quarantine** (`quarantine/`) | **654** | **lines, not runs** | nothing. See below |
 
