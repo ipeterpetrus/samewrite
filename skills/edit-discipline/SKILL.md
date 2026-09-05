@@ -37,31 +37,23 @@ share with its corpus. `tools/carry.py` prints attachments per type; this table 
 | Write + Edit calls | 9.5% |
 | assistant prose | 5.6% |
 | human prompts | 4.2% |
+| other tools | 1.5% |
 
 Everything in the section above is worth ~0.1% of a session. This half is worth more:
 read a range, not a whole file (mean Read result 22.8 kB, 25x a Bash result); ask Bash for
 the answer, not the log; and end the session — halving N halves carry, which no rule on
 this page can do.
 
-## How long the instruction itself should be
+## The instruction itself
 
-Three always-on blocks were tested against a one-sentence version of their own intent.
-None showed a significant advantage over the sentence on a pre-registered test (n = 16
-detects only d_z ≳ 0.75, so that bounds the advantage rather than excluding one).
+Prefix the request with **one sentence, in the language you actually prompt in**. Measured
+against no instruction, on billed output tokens, 16 pairs each, facts retained 100%:
+`Jawab sesingkat mungkin, tanpa mengurangi isi teknisnya.` **−22.7%** (14/16, p = 0.0001);
+`Answer as briefly as possible, without reducing the technical content.` **−19.6%** (12/16,
+p = 0.0070, pre-registered). A 4,664-character always-on block saying the same thing added
+**−0.8%** over the sentence (p = 0.86). Do not ship the block.
 
-- **Terseness works, and it travels.** One sentence prefixed to the request — Indonesian
-  `Jawab sesingkat mungkin, tanpa mengurangi isi teknisnya.` / English `Answer as briefly
-  as possible, without reducing the technical content.` — cut billed output tokens
-  **-22.7%** and **-19.6%** against no instruction (14/16 and 12/16 pairs, p = 0.0001 and
-  0.0070), with 100% of required facts kept in every arm. A 4,664-byte block saying the
-  same thing added **-0.8%** over the sentence (p = 0.86). Write it in the language you
-  actually prompt in.
-- **Minimal change did not replicate.** "Make the change as small as possible; do not add
-  abstractions that were not asked for" failed two pre-registered tests (p = 0.0625 on
-  author tasks, 0.113 on twenty frozen MBPP tasks; 95% CI on the mean change
-  [-18.3%, +0.9%]). Inconclusive, not empty. No number is quoted for it.
-- **Delivery caveat.** Sentences were measured as a prompt prefix, blocks as a
-  `SessionStart` banner. Skill-body delivery — this file — was never measured.
-
-Every number above, its protocol, and every retraction: `docs/FINDINGS.md` section 9.
-This file stays short on purpose. It is the rule it recommends.
+The minimal-change sentence ("make the change as small as possible; add no unrequested
+abstraction") failed two pre-registered tests; no number is quoted for it. Sentences were
+measured as a prompt prefix, blocks as a `SessionStart` banner — never as a skill body like
+this one. Protocols, intervals and every retraction: `docs/FINDINGS.md` section 9.
