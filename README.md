@@ -3,7 +3,7 @@
 **Measure where a coding-agent session's tokens actually go, then test whether the
 instructions you install are worth what they cost.**
 
-Built from 1,316 Claude Code transcripts (237,541 assistant turns) and 342 scored A/B
+Built from 1,316 Claude Code transcripts (237,541 assistant turns) and 462 scored A/B
 runs. Two of the first edition's three headline numbers were wrong on a 24-transcript
 sample, six analysis errors followed, and a pre-registered confirmatory run overturned the
 one positive result. All of it is kept in the open in [docs/FINDINGS.md](docs/FINDINGS.md)
@@ -26,8 +26,8 @@ are in [FINDINGS](docs/FINDINGS.md).
 
 ## What this repo concluded
 
-Eight rounds of A/B tests, 342 scored agent runs, three always-on instruction blocks, and one
-pre-registered confirmatory run. The short version:
+Eight rounds of A/B tests, 462 scored agent runs, three always-on instruction blocks, and four
+pre-registered runs — one of which replicated and two of which failed. The short version:
 
 1. **Session cost is carry, not output.** In an append-only, full-replay context — which is what every
    agent measured here has — everything you send is billed again on every later turn, so cost is
@@ -132,7 +132,7 @@ Three consequences, each of which contradicts a popular piece of advice:
 | **Read a range, not a file** | Read results are **21.3%** of carry at a mean of 22.8 kB per call | measured |
 | Stop writing files identical to disk — hygiene, not a saving | **−0.077%**, free | 20.8% of overwrites (154/741) were byte-identical |
 | Fix the edit rule you were told to use | **+0.07%** — and the popular version (`≤3 change blocks → Edit`) is **net negative** | held out over 20 session-level splits |
-| **Tell the model to be terse** — one sentence is enough | **−23.4%** output tokens against no instruction (15/16 pairs, exact p = 0.0001), with 100% of required facts kept | pre-registered, fresh tasks, 48 runs, zero exclusions. The 4,664-byte skill that says the same thing beat that sentence by **−0.8%, p = 0.86** — [FINDINGS](docs/FINDINGS.md) |
+| **Tell the model to be terse** — one sentence is enough | **−22.7%** output tokens against no instruction (14/16 pairs, exact p = 0.0001), and **−19.6%** in a pre-registered English replication (12/16, p = 0.0070), with 100% of required facts kept in every arm | pre-registered, fresh tasks, zero exclusions. The 4,664-byte skill that says the same thing beat that sentence by **−0.8%, p = 0.86** — [FINDINGS](docs/FINDINGS.md) |
 | *Add a process skill that is never invoked* | **+51…+84% tokens** | six A/B rounds, costlier in 17/18, 18/18, 6/6, 12/12, 4/4, 16/16 pairs |
 
 The last row is not a typo. Adding one always-on instruction was the most expensive thing
@@ -152,8 +152,8 @@ block went from −9.2% (p = 0.039) on the first task set to **−0.8% (p = 0.86
 tasks. Terseness replicates; the kilobytes do not.
 
 These are **two contrasts inside one experiment**, not two independent findings: the same
-48 runs supply both the presence effect (instruction versus none, −23.4%) and the length
-effect (block versus sentence, −0.8%). They share an error structure and should be read
+48 runs supply both the presence effect (sentence versus none, −22.7%; banner versus none,
+−23.4%) and the length effect (block versus sentence, −0.8%). They share an error structure and should be read
 together — a reader who counts them as separate confirmations is double-counting.
 
 This is the other half of the question: what does it cost to *add* an
