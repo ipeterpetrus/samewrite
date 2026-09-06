@@ -361,12 +361,14 @@ tested against — installs as a Claude Code plugin:
 
 Or without the CLI: copy `skills/edit-discipline/` into `~/.claude/skills/`.
 
-**What it costs, by the same measure this repo argues with.** `claude plugin details
-samewrite` reports **~83 tokens always-on** (the listing entry, carried by every turn of
-every session) and **~1.1 k on invocation**. A skill that never fires still bills the 83.
-That is the whole argument of §4 turned on this repo's own artifact, and it is the number to
-weigh against whatever the skill saves you — [`tools/skills.py`](tools/skills.py) will tell
-you afterwards whether you ever invoked it.
+**What it costs, by the same measure this repo argues with.** Installed into a fresh config
+directory, `claude plugin details samewrite` reports **~64 tokens always-on** — the listing
+entry, carried by every turn of every session — and **~680 on invocation**. A skill that
+never fires still bills the 64. That is the whole argument of §4 turned on this repo's own
+artifact, and it is the number to weigh against whatever the skill saves you;
+[`tools/skills.py`](tools/skills.py) will tell you afterwards whether you ever invoked it.
+(The CLI calls these projections, and they are: the same plugin read **~83 / ~1.1 k** in a
+profile that already had a dozen others installed. Measure yours, do not quote this one.)
 
 The plugin ships **the skill only**. The hook below stays a separate, deliberate install:
 handing someone a marketplace command that also wires code into every `Write` is the
