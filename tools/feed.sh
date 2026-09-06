@@ -7,7 +7,8 @@ LEDGERS="${SAMEWRITE_LEDGERS:-$HOME/logs/samewrite.jsonl}"
 OUT="$REPO/docs/FIELD_DATA.md"
 
 # shellcheck disable=SC2086
-NEW="$(/usr/bin/python3 "$REPO/tools/report.py" $LEDGERS --markdown 2>/dev/null || true)"
+PY_BIN="${SAMEWRITE_PYTHON:-$(command -v python3)}"
+NEW="$("$PY_BIN" "$REPO/tools/report.py" $LEDGERS --markdown 2>/dev/null || true)"
 [ -z "$NEW" ] && { echo "ledger kosong — tak ada yang di-feed"; exit 0; }
 
 if [ -f "$OUT" ] && [ "$NEW" = "$(cat "$OUT")" ]; then

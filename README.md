@@ -12,8 +12,14 @@ one positive result. All of it is kept in the open in [docs/FINDINGS.md](docs/FI
 **Run it on your own logs** — nothing here is specific to this author's machine:
 
 ```
-python3 tools/carry.py ~/.claude/projects/*/*.jsonl --markdown
+python3 tools/carry.py --markdown
 ```
+
+With no path at all it finds every Claude Code profile on the machine — `CLAUDE_CONFIG_DIR`,
+`~/.claude`, `~/.config/claude`, and any `~/.claude-*` sibling — and says on stderr which ones
+it read. That matters more than it sounds: a second account or a work profile is easy to miss,
+and `~/.claude/projects/*/*.jsonl` measures one of them while reporting it as "your sessions".
+Name a file or a directory to narrow it.
 
 That prints your own carry table: which sources occupy your context longest, and what one
 session is paying to keep them there. The numbers below are what it printed here; the
@@ -217,10 +223,20 @@ are the useful part.
 | `hooks/write_noop_guard.py` | Claude Code `PreToolUse` hook protocol — JSON on stdin with `tool_name`/`tool_input`, a `hookSpecificOutput.permissionDecision` on stdout | **Claude Code only** as written; the logic is 60 lines and the contract is one function |
 | `tools/carry.py`, `skills.py`, `extract.py`, `simulate.py` | transcript JSONL with per-turn `usage` and `tool_use`/`tool_result` blocks | any agent that logs those — see below |
 | `experiments/skill-ab/` | a headless agent invocation and a per-session config directory | any CLI agent with both |
-| everything | **Python 3.8+, standard library only** | `tiktoken` is optional in `extract.py` (falls back to bytes/3.14); `pytest` is only used by the experiment fixtures |
+| `skills/edit-discipline/` | nothing — it is Markdown with YAML front matter | any agent that reads a skill file; the plugin manifests are Claude Code's format |
+| `tools/profiles.py` | `CLAUDE_CONFIG_DIR` or a `<profile>/projects/<project>/<session>.jsonl` layout | Claude Code's layout; pass a directory or file list for any other |
+| everything | **Python 3.9+, standard library only** | `tiktoken` is optional in `extract.py` (falls back to bytes/3.14); `pytest` is only used by the experiment fixtures |
 
-Verified here: 92 assertions across four suites pass on CPython 3.10; CI runs 3.9 and 3.12. No
-walrus operator, no `match`, no third-party runtime dependency. 45 files, 516 KB.
+Verified here: 124 assertions across six suites pass on CPython 3.10, and `claude plugin
+validate` passes on both manifests and on the skills directory; CI runs every suite on 3.9 and
+3.12. **3.8 is not tested** — an earlier
+version of this table claimed 3.8+ on nothing but the absence of newer syntax, which is an
+argument, not a test. No walrus operator, no `match`, no third-party runtime dependency.
+
+Multi-profile machines are the case most likely to break silently: two accounts, or
+`CLAUDE_CONFIG_DIR` pointed elsewhere, mean two archives. All four transcript tools discover
+every profile when given no path, accept a profile directory as an argument, de-duplicate
+symlinked archives, and print the scope they read to stderr.
 
 ## Using it with another agent
 
@@ -305,6 +321,8 @@ hooks/write_noop_guard.py   PreToolUse(Write) — deny writes identical to disk
 hooks/install.sh            one command, idempotent, backs up settings.json
 skills/edit-discipline/     when to anchor-edit vs rewrite whole (Claude Code skill)
 tools/carry.py              carry by source over your own transcripts — the table above
+tools/profiles.py           find every Claude Code profile on the machine; the reason the
+                            tools take a directory, or nothing, instead of one glob
 tools/skills.py             price your skill listing: which entries you have never invoked
                             (cross-check it against the CLI's own /skill-doctor)
 tools/extract.py            pull carry data out of transcripts (redacted by default)
@@ -314,7 +332,8 @@ tools/report.py             read the field ledger: how often the guard fires, an
 tools/feed.sh               regenerate docs/FIELD_DATA.md from the ledger, commit if changed
 tools/health.py             is the guard still installed? ledger silence proves nothing on
                             its own, so compare it against session activity
-tests/                      92 assertions in four suites, mutation-tested
+.claude-plugin/             plugin + marketplace manifests (`/plugin marketplace add`)
+tests/                      124 assertions in six suites, mutation-tested
 docs/FINDINGS.md            full numbers, method, the corrections, and what an
                             adversarial panel broke before publication
 ```
@@ -328,6 +347,30 @@ Its load-bearing findings come from one author's sessions on one model family (A
 2026). Measure your own before trusting it; every tool needed to do that is in here,
 and [§8](docs/FINDINGS.md#8-what-would-falsify-this) says what result should make you
 delete it.
+
+## Install the skill
+
+The [`edit-discipline`](skills/edit-discipline/SKILL.md) skill — anchor an Edit under ~25%
+changed, rewrite over ~40%, and the one sentence that beat every kilobyte block it was
+tested against — installs as a Claude Code plugin:
+
+```
+/plugin marketplace add ipeterpetrus/samewrite
+/plugin install samewrite@samewrite
+```
+
+Or without the CLI: copy `skills/edit-discipline/` into `~/.claude/skills/`.
+
+**What it costs, by the same measure this repo argues with.** `claude plugin details
+samewrite` reports **~83 tokens always-on** (the listing entry, carried by every turn of
+every session) and **~1.1 k on invocation**. A skill that never fires still bills the 83.
+That is the whole argument of §4 turned on this repo's own artifact, and it is the number to
+weigh against whatever the skill saves you — [`tools/skills.py`](tools/skills.py) will tell
+you afterwards whether you ever invoked it.
+
+The plugin ships **the skill only**. The hook below stays a separate, deliberate install:
+handing someone a marketplace command that also wires code into every `Write` is the
+auto-update pattern this repo tells you not to accept.
 
 ## Install the hook
 
@@ -356,11 +399,24 @@ the right move is to remove the hook.
 ## Measure your own sessions
 
 ```bash
-python3 tools/carry.py ~/.claude/projects/*/*.jsonl --markdown
-python3 tools/skills.py ~/.claude/projects/*/*.jsonl --markdown
-python3 tools/extract.py mine.pkl ~/.claude/projects/*/*.jsonl
+python3 tools/carry.py  --markdown          # every profile on this machine
+python3 tools/skills.py --markdown
+python3 tools/extract.py mine.pkl ~/.claude
 python3 tools/simulate.py mine.pkl
 ```
+
+Each tool takes transcripts, **profile directories**, or nothing at all:
+
+| you type | it reads |
+|---|---|
+| *(no path)* | every profile found: `CLAUDE_CONFIG_DIR`, `~/.claude`, `~/.config/claude`, `~/.claude-*` |
+| `~/.claude-work` | that one profile, whole |
+| `~/.claude/projects/-repo/*.jsonl` | exactly those files |
+
+The scope actually read is printed to **stderr** — `841 transcript(s) discovered in 3
+profile(s): …` — so a piped `--markdown` table stays clean while the scope stays visible.
+Two profiles that symlink to one archive are counted once. There is no merged-profile
+number anywhere in this README that was not produced this way.
 
 `carry.py` and `skills.py` read sizes, tool names and skill names only — no path,
 prompt, file content, or tool output is stored or printed.

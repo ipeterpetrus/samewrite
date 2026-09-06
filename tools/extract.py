@@ -13,6 +13,8 @@ berkas yang ditimpa. Yang TIDAK tersimpan: path, prompt, isi tool result, isi be
 pakai: python3 tools/extract.py OUT.pkl transcript.jsonl [...] [--keep-content]
 """
 import hashlib, json, os, pickle, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import profiles  # directories and profile discovery; see tools/profiles.py
 
 try:
     import tiktoken
@@ -80,6 +82,10 @@ def main():
     if len(args) < 2:
         sys.exit(__doc__)
     out, files = args[0], args[1:]
+    files, roots = profiles.resolve(files)
+    line = profiles.note(files, roots, True)
+    if line:
+        print(line, file=sys.stderr)
     data = [d for d in (scan(f, keep) for f in files) if d["N"] > 0]
     pickle.dump(data, open(out, "wb"))
     print(f"tokenizer={TOKENIZER} sesi={len(data)} turn={sum(d['N'] for d in data):,} "

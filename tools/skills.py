@@ -33,9 +33,14 @@ still be set to `off` or `user-invocable-only`, but not to `name-only`.
 Privacy: prints skill names, sizes and counts. No path, prompt, file content, or tool
 output is read out.
 
-usage: python3 tools/skills.py transcript.jsonl [...] [--markdown] [--min-uses N]
+usage: python3 tools/skills.py [transcript.jsonl | profile-dir ...] [--markdown]
+                              [--min-uses N]
+With no path it discovers every Claude Code profile on the machine (tools/profiles.py).
 """
 import argparse, collections, json, os, re, sys
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import profiles  # multi-profile discovery; see tools/profiles.py
 
 B2T = 1 / 3.14
 ENTRY = re.compile(r"^- ([A-Za-z0-9_.:-]+): ")
@@ -148,12 +153,17 @@ def render(listing, rows, min_uses, markdown):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("files", nargs="+")
+    ap.add_argument("files", nargs="*",
+                    help="transcripts or profile directories; empty = discover all profiles")
     ap.add_argument("--markdown", action="store_true")
     ap.add_argument("--min-uses", type=int, default=0,
                     help="treat entries with this many uses or fewer as cold (default 0)")
     args = ap.parse_args()
-    listing, uses, sess = scan(args.files)
+    paths, roots = profiles.resolve(args.files)
+    line = profiles.note(paths, roots, bool(args.files))
+    if line:
+        print(line, file=sys.stderr)
+    listing, uses, sess = scan(paths)
     if not listing:
         print("no skill listing found in these transcripts — nothing to price")
         return 1

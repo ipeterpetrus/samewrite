@@ -13,6 +13,10 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: guard suite
         run: python3 tests/test_write_noop_guard.py
+      - name: profile discovery suite
+        run: python3 tests/test_profiles.py
+      - name: plugin + marketplace manifests
+        run: python3 tests/test_plugin_manifest.py
       - name: carry suite
         run: python3 tests/test_carry.py
       - name: skills suite

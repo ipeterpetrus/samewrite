@@ -11,9 +11,16 @@ it runs over a multi-GB corpus in seconds.
 Privacy: reads sizes and tool names only. No path, prompt, file content, or tool
 output is stored or printed.
 
-usage: python3 tools/carry.py transcript.jsonl [...] [--markdown] [--min-turns N]
+usage: python3 tools/carry.py [transcript.jsonl | profile-dir ...] [--markdown]
+                             [--min-turns N]
+With no path at all it discovers every Claude Code profile on the machine and says on
+stderr which ones it read — a number from one profile reported as "your sessions" is
+the quiet error this replaces.
 """
 import argparse, collections, json, os, sys
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import profiles  # multi-profile discovery; see tools/profiles.py
 
 B2T = 1 / 3.14          # chars -> tokens, measured on o200k over this corpus. Sizes here
                         # are len(str), i.e. characters, not UTF-8 bytes; identical for
@@ -120,9 +127,12 @@ def render(a, markdown=False):
     if not C:
         # A silent empty result reads like "your logs are clean". Say which files were
         # skipped and why, so a different transcript shape is visible as a shape problem.
-        return ("no session met --min-turns "
-                f"({a.get('short', 0)} below threshold, "
-                f"{a.get('unreadable', 0)} unreadable)\n")
+        # "sessions read, carry zero" and "nothing read at all" are different problems and
+        # printing one message for both sent a shape mismatch looking like an empty archive.
+        return (f"no carry to report: {a['sessions']} session(s) read "
+                f"({a.get('short', 0)} below --min-turns, "
+                f"{a.get('unreadable', 0)} unreadable). "
+                "A session whose every item lands on its final turn carries nothing.\n")
     T, out = a["turns"], []
     med = a["lengths"][len(a["lengths"]) // 2]
     U = sum(a["usage"].values()) or 1
@@ -155,12 +165,17 @@ def render(a, markdown=False):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("files", nargs="+")
+    ap.add_argument("files", nargs="*",
+                    help="transcripts or profile directories; empty = discover all profiles")
     ap.add_argument("--markdown", action="store_true")
     ap.add_argument("--min-turns", type=int, default=50,
                     help="ignore sessions shorter than this (default 50)")
     args = ap.parse_args()
-    a = accumulate(args.files, args.min_turns)
+    paths, roots = profiles.resolve(args.files)
+    line = profiles.note(paths, roots, bool(args.files))
+    if line:
+        print(line, file=sys.stderr)   # stderr: --markdown output stays pipeable
+    a = accumulate(paths, args.min_turns)
     sys.stdout.write(render(a, args.markdown))
     # exit non-zero when nothing was recognised: a zero-record run is a schema mismatch,
     # not a finding, and a pipeline must be able to tell the two apart.

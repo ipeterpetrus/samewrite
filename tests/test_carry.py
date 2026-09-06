@@ -75,7 +75,8 @@ def main():
         check("--min-turns membuang sesi pendek", a["sessions"], 0)
         check("nol sesi -> keluaran jujur, bukan pembagian nol",
               carry.render(a).strip(),
-              "no session met --min-turns (1 below threshold, 0 unreadable)")
+              "no carry to report: 0 session(s) read (1 below --min-turns, 0 unreadable). "
+              "A session whose every item lands on its final turn carries nothing.")
 
         a = carry.accumulate([p], min_turns=1)
         check("ambang rendah -> sesi terhitung", (a["sessions"], a["turns"]), (1, 3))
