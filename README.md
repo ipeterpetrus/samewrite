@@ -234,9 +234,11 @@ version of this table claimed 3.8+ on nothing but the absence of newer syntax, w
 argument, not a test. No walrus operator, no `match`, no third-party runtime dependency.
 
 Multi-profile machines are the case most likely to break silently: two accounts, or
-`CLAUDE_CONFIG_DIR` pointed elsewhere, mean two archives. All four transcript tools discover
-every profile when given no path, accept a profile directory as an argument, de-duplicate
-symlinked archives, and print the scope they read to stderr.
+`CLAUDE_CONFIG_DIR` pointed elsewhere, mean two archives. `carry.py` and `skills.py` discover
+every profile when given no path at all; all three transcript readers — those two and
+`extract.py` — accept a profile directory as an argument, de-duplicate symlinked archives, and
+print the scope they read to stderr. (`extract.py` still requires its output file, so it has no
+zero-argument form; `simulate.py` reads that output, not transcripts.)
 
 ## Using it with another agent
 
