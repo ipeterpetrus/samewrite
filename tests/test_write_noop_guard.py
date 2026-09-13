@@ -70,8 +70,9 @@ with tempfile.TemporaryDirectory() as d:
           bash("cat > %s <<'EOF'\nline1\nline2\nEOF" % same), True)
     check("heredoc isi beda -> allow",
           bash("cat > %s <<'EOF'\nline1\nline9\nEOF" % same), False)
-    check("tee identik -> deny",
-          bash("tee %s <<'EOF'\nline1\nline2\nEOF" % same), True)
+    # tee DICABUT (ronde-2): ia juga menulis ke stdout, jadi menolaknya membuang keluaran
+    check("tee identik -> allow (tee menulis stdout juga, bukan no-op)",
+          bash("tee %s <<'EOF'\nline1\nline2\nEOF" % same), False)
     # tag TANPA kutip: shell mengekspansi $VAR di body, jadi teks mentah BUKAN yang
     # mendarat di disk. Membandingkannya akan menjawab pertanyaan yang salah.
     check("tag tak terkutip -> allow walau teks sama",
@@ -81,6 +82,8 @@ with tempfile.TemporaryDirectory() as d:
           bash("cat >> %s <<'EOF'\nline1\nline2\nEOF" % same), False)
     check("tee -a (append) -> allow walau isi sama",
           bash("tee -a %s <<'EOF'\nline1\nline2\nEOF" % same), False)
+    check("kutip di TENGAH nama berkas -> allow (jangan menebak)",
+          bash("cat > %s\" <<'EOF'\nline1\nline2\nEOF" % same), False)
     # menolak perintah majemuk ikut membatalkan chmod-nya, yang bukan no-op.
     check("perintah majemuk -> allow",
           bash("cat > %s <<'EOF'\nline1\nline2\nEOF\nchmod +x %s" % (same, same)), False)

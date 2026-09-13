@@ -21,6 +21,13 @@ import argparse, collections, json, os, statistics, sys
 B2T = 1 / 3.14
 
 
+# SATUAN, dan kenapa repo ini memakai DUA — dinyatakan, bukan disembunyikan (review ronde-2):
+# `carry.py` dan `skills.py` mengukur dengan `len(str)` = CODE POINT, dan konstanta B2T
+# (1 tok ~ 3,14 B) dikalibrasi terhadap satuan itu; mengubah penghitungnya tanpa
+# mengkalibrasi ulang B2T hanya memindahkan biasnya. Alat yang lebih baru di sini memakai
+# UTF-8 BYTE karena itu yang sebenarnya dikirim. Selisihnya DIUKUR di korpus penulis:
+# 4.095.770 code point vs 4.134.426 byte = 0,94%. Terlalu kecil untuk menggeser satu pun
+# SHARE (semua bucket bergeser searah), cukup besar untuk tidak boleh didiamkan.
 def nbytes(obj):
     """UTF-8 BYTES of the JSON form, not code points. Columns here are labelled `B`,
     and a schema full of non-ASCII would otherwise be reported smaller than it is sent."""

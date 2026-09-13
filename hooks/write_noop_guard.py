@@ -124,12 +124,12 @@ def deny(reason):
 #   - hanya `>`, bukan `>>`: append dengan isi sama BUKAN no-op.
 #   - perintah harus tunggal. `cat > f <<'EOF' ... EOF` lalu `chmod +x f` adalah satu
 #     panggilan Bash: menolaknya ikut membatalkan chmod, yang bukan no-op.
-# Dua bentuk, dan keduanya menulis berkas: `cat > f` memakai redirect shell, `tee f`
-# memakai argumen. `tee -a` (append) sengaja TIDAK cocok — flag apa pun menggugurkannya.
+# HANYA `cat > f`. `tee f` sempat didukung lalu DICABUT (review ronde-2): `tee` juga
+# menulis body ke STDOUT, jadi menolaknya membuang keluaran yang mungkin dipakai pipa
+# berikutnya — perintah itu bukan no-op meski isi berkasnya identik.
 HEREDOC = re.compile(
     r"""^\s*(?:
             cat\s*>\s*(?!>)                    # cat > f   (timpa saja, bukan >>)
-          | tee\s+(?!-)                        # tee f     (tanpa flag: -a = append)
         )
         (?P<path>"[^"]+"|'[^']+'|[^\s<>|&;-][^\s<>|&;]*)
         \s*<<\s*(?P<q>['"])(?P<tag>[A-Za-z_][\w]*)(?P=q)\s*\n
@@ -145,7 +145,16 @@ def heredoc_write(cmd):
     m = HEREDOC.match(cmd.strip())
     if not m:
         return None
-    path = m.group("path").strip("\"'")
+    raw = m.group("path")
+    # Buang SATU lapis kutip pembungkus, dan hanya kalau ia benar-benar berpasangan.
+    # `.strip("\"'")` yang lama memakan kutip yang merupakan bagian SAH dari nama berkas:
+    # `cat > 'f"'` menulis berkas bernama `f"`, bukan `f`.
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
+        path = raw[1:-1]
+    else:
+        path = raw
+        if '"' in path or "'" in path:
+            return None                       # kutip di tengah: jangan menebak
     # Path yang akan DIEKSPANSI shell bukan path yang ditulis: `cat > "$(printf f)"`
     # menulis berkas `f`, tapi kita akan membandingkan berkas bernama `$(printf f)`.
     # Menebak hasil ekspansi = menebak; menolak = melewatkan satu kasus. Melewatkan
