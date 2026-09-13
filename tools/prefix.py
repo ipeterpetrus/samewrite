@@ -117,15 +117,18 @@ def render(a):
 def _selfcheck():
     a = accumulate([])
     assert render(a).startswith("no prompt_snapshot"), render(a)
+    # `both` SENGAJA bukan totals+sysb: kalau ia sama, mutasi yang mengganti median-of-both
+    # dengan penjumlahan dua median akan lolos, dan assert di bawah tak membuktikan apa pun.
+    # Ditemukan lewat uji mutasi — versi pertama fixture ini memakai 3768 = 3454+314.
     a = dict(tools=collections.Counter({"Big": 3140, "Small": 314}),
-             totals=[3454.0], sysb=[314.0], both=[3768.0], sessions=1)
+             totals=[3454.0], sysb=[314.0], both=[6280.0], sessions=1)
     r = render(a)
     assert "1,000 tok" in r and "100 tok" in r, r     # 3140/3.14 and 314/3.14
     assert "90.9%" in r, r                            # 3140 of 3454
     assert r.index("Big") < r.index("Small"), "harus urut besar-ke-kecil"
     # "together" harus datang dari kohort yang membawa KEDUA bagian, bukan dari
     # penjumlahan dua median atas himpunan sesi berbeda.
-    assert "1,200 tok" in r, r                        # 3768/3.14, bukan (3454+314)/3.14 kebetulan
+    assert "2,000 tok" in r, r      # 6280/3.14 — penjumlahan dua median akan memberi 1.200
     assert "1 session(s) carrying both" in r, r
     r2 = render(dict(a, sysb=[], both=[]))
     assert "not computed" in r2, r2                   # tanpa pasangan: JANGAN mengarang angka

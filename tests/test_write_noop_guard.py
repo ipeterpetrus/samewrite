@@ -36,6 +36,9 @@ def w(d, name, body):
 with tempfile.TemporaryDirectory() as d:
     ROOT[0] = d
     same = w(d, "same.txt", "line1\nline2\n")
+    # Berkas dengan nama yang MEMUAT metakarakter glob, isinya identik dengan payload uji.
+    # Tanpa penolakan path, guard akan stat path literal ini, menemukannya, dan DENY.
+    globby = w(d, "glob*.txt", "line1\nline2\n")
     empty = w(d, "empty.txt", "")
     missing = os.path.join(d, "tidak_ada.txt")
 
@@ -90,10 +93,14 @@ with tempfile.TemporaryDirectory() as d:
     check("heredoc ke berkas belum ada -> allow",
           bash("cat > %s <<'EOF'\nline1\nline2\nEOF" % missing), False)
     # path yang akan diekspansi shell: kita tak tahu berkas mana yang benar-benar ditulis
+    # Path ber-metakarakter yang menunjuk berkas NYATA ber-isi identik. Tanpa penolakan
+    # path, guard stat path literal ini, menemukannya, dan DENY. Dengan penolakan, ALLOW.
+    # Uji mutasi membuktikan versi pertama tes ini lolos tanpa guard sama sekali, karena
+    # path karangannya memang tak menunjuk berkas mana pun.
+    check("path ber-glob -> allow walau berkas literal itu ADA dan isinya identik",
+          bash("cat > %s <<'EOF'\nline1\nline2\nEOF" % globby), False)
     check("path ber-substitusi perintah -> allow",
-          bash("cat > \"$(printf %s)\" <<'EOF'\nline1\nline2\nEOF" % same), False)
-    check("path ber-glob -> allow",
-          bash("cat > %s* <<'EOF'\nline1\nline2\nEOF" % same), False)
+          bash("cat > \"$(printf %%s)%s\" <<'EOF'\nline1\nline2\nEOF" % same), False)
     check("heredoc ke path sensitif -> allow (jangan jadi oracle)",
           bash("cat > %s/id_rsa <<'EOF'\nline1\nline2\nEOF" % ROOT[0]), False)
     # 8: fail-open
