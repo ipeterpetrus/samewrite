@@ -225,6 +225,7 @@ def trend(records, key, min_n=4):
     """
     pts = [(r["ts"], r["shares"][key]) for r in records
            if isinstance(r.get("shares"), dict) and key in r["shares"] and r.get("ts")]
+    pts.sort()                                  # urutan TULIS bukan urutan WAKTU: jam bisa mundur
     if len(pts) < min_n:
         return None
     t0 = pts[0][0]
@@ -287,12 +288,21 @@ def history(path, a, C):
     # Delta hanya berarti kalau KORPUSNYA sebanding. Menjalankan atas satu transkrip lalu
     # atas seluruh arsip menghasilkan selisih belasan poin yang BUKAN pergerakan apa pun —
     # dan tanpa cek ini, "since last run" menyajikannya seolah-olah pergerakan.
-    p_scan = prev.get("scanned") or 0
-    n_scan = now["scanned"]
-    if p_scan and n_scan and (max(p_scan, n_scan) / min(p_scan, n_scan)) > 1.5:
-        return ["", f"  corpus changed: {p_scan:,} files scanned last time, {n_scan:,} now.",
+    # Kriterianya ISI, bukan jumlah berkas. Rotasi log memecah satu transkrip jadi dua
+    # tanpa mengubah satu turn pun — memakai jumlah berkas akan menolak perbandingan yang
+    # sah. Turn adalah hal yang benar-benar diukur, jadi turn yang menentukan sebanding.
+    p_turn = prev.get("turns") or 0
+    n_turn = now["turns"] or 0
+    if p_turn and n_turn and (max(p_turn, n_turn) / min(p_turn, n_turn)) > 1.5:
+        return ["", f"  corpus changed: {p_turn:,} turns last time, {n_turn:,} now "
+                    f"({prev.get('scanned', 0):,} -> {now['scanned']:,} files).",
                 "    Shares are NOT comparable across different inputs — no delta reported.",
                 "    Point both runs at the same glob if you want movement."]
+    # Jam mundur: record yang lebih tua tertulis belakangan membuat "since last run" dan
+    # slope tren menghitung selisih waktu NEGATIF. Lebih baik diam daripada salah.
+    if now["ts"] < (prev.get("ts") or 0):
+        return ["", "  clock went backwards since the last record — no delta reported.",
+                "    (a record with an older timestamp was appended after a newer one)"]
     days = (now["ts"] - prev.get("ts", now["ts"])) / 86400.0
     rows = []
     for k, v in now["shares"].items():

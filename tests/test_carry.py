@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Uji tools/carry.py: rumus carry, atribusi tool_result, gerbang --min-turns,
 dan janji privasinya. Berdiri sendiri — jalankan berkas ini, tanpa runner."""
-import json, os, subprocess, sys, tempfile
+import json, os, subprocess, sys, tempfile, time as _time
 
 CARRY = os.path.join(os.path.dirname(__file__), "..", "tools", "carry.py")
 sys.path.insert(0, os.path.dirname(CARRY))
@@ -154,6 +154,25 @@ def main():
                              "--history", hp2], capture_output=True, text=True).stdout
         check("korpus berubah -> delta DITOLAK", "corpus changed" in h3, True)
         check("korpus berubah -> nol angka delta palsu", "since last run" in h3, False)
+
+        # Rotasi log: jumlah BERKAS berubah, isi tidak. Delta harus tetap dilaporkan —
+        # kriteria sebanding adalah turn, bukan berapa berkas isinya dipecah.
+        hp4 = os.path.join(d, "hist4.jsonl")
+        rot = {"ts": int(_time.time()) - 3600, "sessions": 1, "turns": 3,
+               "carry_bytes": 999, "scanned": 1,
+               "shares": {"Bash": 60.0, "prose": 40.0}, "bpt": {"Bash": 9, "prose": 9}}
+        open(hp4, "w").write(json.dumps(rot) + "\n")
+        h4 = subprocess.run([sys.executable, CARRY, p, "--min-turns", "1", "--history", hp4],
+                            capture_output=True, text=True).stdout
+        check("rotasi berkas tak menolak delta", "corpus changed" in h4, False)
+
+        # Jam mundur: record dgn ts lebih tua ditulis belakangan -> JANGAN lapor delta.
+        hp5 = os.path.join(d, "hist5.jsonl")
+        fut = dict(rot, ts=int(_time.time()) + 86400)
+        open(hp5, "w").write(json.dumps(fut) + "\n")
+        h5 = subprocess.run([sys.executable, CARRY, p, "--min-turns", "1", "--history", hp5],
+                            capture_output=True, text=True).stdout
+        check("jam mundur -> delta ditolak", "clock went backwards" in h5, True)
 
         # TREN: arah jangka panjang butuh SELURUH berkas, bukan dua titik terakhir, dan
         # tak boleh diklaim dari sampel kecil. Slope diuji terhadap kemiringan yang dibuat.
