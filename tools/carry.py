@@ -17,8 +17,7 @@ With no path at all it discovers every Claude Code profile on the machine and sa
 stderr which ones it read — a number from one profile reported as "your sessions" is
 the quiet error this replaces.
 """
-import argparse, collections, json, os, sys
-import os, sys
+import argparse, collections, json, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import profiles  # multi-profile discovery; see tools/profiles.py
 
@@ -213,6 +212,60 @@ def render(a, markdown=False, b2t=None):
     return "\n".join(out) + "\n"
 
 
+def history(path, a, C):
+    """Append this run's shares and compare against the previous one.
+
+    An observer that keeps no record can only ever say what today looks like. With a
+    history it says what CHANGED, which is the thing a person can act on — and it gets
+    sharper every time it runs, because the baseline is real rather than remembered.
+    Stores shares and byte counts only: no paths, no filenames, no content.
+    """
+    now = {"ts": int(time.time()), "sessions": a["sessions"], "turns": a["turns"],
+           "carry_bytes": C,
+           "shares": {k: round(100 * v / C, 4) for k, v in a["carry"].most_common()}}
+    prev = None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:                   # last valid record wins
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    o = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(o, dict) and isinstance(o.get("shares"), dict):
+                    prev = o
+    except OSError:
+        pass
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(now, ensure_ascii=False) + "\n")
+    except OSError:
+        pass                                   # observing must not break measuring
+    if not prev:
+        return ["", f"  history: first record written to {os.path.basename(path)} — "
+                    "run again later and this section will show what moved."]
+    days = (now["ts"] - prev.get("ts", now["ts"])) / 86400.0
+    rows = []
+    for k, v in now["shares"].items():
+        p0 = prev["shares"].get(k)
+        if p0 is None:
+            rows.append((abs(v), f"  {k:32s} {v:6.2f}%  (new)"))
+        elif abs(v - p0) >= 0.05:
+            rows.append((abs(v - p0), f"  {k:32s} {p0:6.2f}% -> {v:6.2f}%  ({v - p0:+.2f})"))
+    gone = [k for k in prev["shares"] if k not in now["shares"]]
+    out = ["", f"  since last run ({days:.1f} days, "
+               f"{now['turns'] - prev.get('turns', 0):+,} turns):"]
+    if not rows and not gone:
+        out.append("    nothing moved by more than 0.05 points.")
+    for _, line in sorted(rows, reverse=True)[:8]:
+        out.append("  " + line.strip().ljust(0))
+    for k in gone[:3]:
+        out.append(f"    {k} disappeared")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("files", nargs="*",
@@ -220,6 +273,9 @@ def main():
     ap.add_argument("--markdown", action="store_true")
     ap.add_argument("--min-turns", type=int, default=50,
                     help="ignore sessions shorter than this (default 50)")
+    ap.add_argument("--history", metavar="PATH", default=None,
+                    help="append this run's shares to PATH and print what moved since the "
+                         "previous run. Shares and counts only — no paths, no content.")
     ap.add_argument("--b2t", type=float, default=None, metavar="BYTES_PER_TOKEN",
                     help="add a token column using YOUR measured ratio (tools/b2t_validate.py). "
                          "Omitted by default: the ratio is language-dependent (3.31 English, "
@@ -233,6 +289,10 @@ def main():
     a = accumulate(paths, args.min_turns)
     b2t = (1.0 / args.b2t) if args.b2t else None
     sys.stdout.write(render(a, args.markdown, b2t))
+    if args.history:
+        C = sum(a["carry"].values())
+        if C:
+            sys.stdout.write("\n".join(history(args.history, a, C)) + "\n")
     # exit non-zero when nothing was recognised: a zero-record run is a schema mismatch,
     # not a finding, and a pipeline must be able to tell the two apart.
     # Exit bukan-nol menandai SCHEMA MISMATCH ("tak ada record dikenali"), bukan "carry nol".

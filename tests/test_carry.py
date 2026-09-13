@@ -128,6 +128,23 @@ def main():
         tok = subprocess.run([sys.executable, CARRY, p, "--min-turns", "1", "--b2t", "2"],
                              capture_output=True, text=True).stdout
         check("--b2t memunculkan kolom token", "carry_tok" in tok, True)
+
+        # --history: observer yang menyimpan riwayat harus (a) menulis record, (b) pada run
+        # berikutnya melaporkan PERUBAHAN, dan (c) tak pernah menulis path/isi ke ledger.
+        hp = os.path.join(d, "hist.jsonl")
+        h1 = subprocess.run([sys.executable, CARRY, p, "--min-turns", "1", "--history", hp],
+                            capture_output=True, text=True).stdout
+        check("history: run pertama bilang first record", "first record" in h1, True)
+        h2 = subprocess.run([sys.executable, CARRY, p, p2, "--min-turns", "1", "--history", hp],
+                            capture_output=True, text=True).stdout
+        check("history: run kedua melapor sejak-run-terakhir", "since last run" in h2, True)
+        hraw = open(hp, encoding="utf-8").read()
+        # Bukan cuma path fixture: NOL path absolut apa pun. Uji mutasi membuktikan versi
+        # pertama cek ini lolos saat cwd yang bocor, karena cwd != direktori fixture.
+        check("history tak memuat path fixture", d in hraw, False)
+        check("history tak memuat path absolut apa pun", "/home/" in hraw or "/tmp/" in hraw, False)
+        check("history tak memuat isi tool", "zzz" in hraw, False)
+        check("history memuat share", '"shares"' in hraw, True)
         rawtok = [int(x.split()[-1].replace(",", "")) for x in tok.splitlines()
                   if x.startswith("Bash ")]
         if raw and rawtok:

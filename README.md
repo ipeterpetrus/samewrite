@@ -25,6 +25,29 @@ That prints your own carry table: which sources occupy your context longest, and
 session is paying to keep them there. The numbers below are what it printed here; the
 interesting question is whether it prints the same shape for you.
 
+### Quick start — three commands, nothing installed
+
+```bash
+git clone https://github.com/ipeterpetrus/samewrite && cd samewrite
+
+# 1. where your own session tokens go (bytes; shares are what matter)
+python3 tools/carry.py ~/.claude/projects/*/*.jsonl
+
+# 2. which skill-listing entries you have never once invoked
+python3 tools/skills.py ~/.claude/projects/*/*.jsonl
+
+# 3. the part no carry table can see: system prompt + tool schemas
+python3 tools/prefix.py ~/.claude/projects/*/*.jsonl --min-turns 50
+```
+
+Read-only, no dependencies beyond Python 3, and nothing is written to your machine.
+Installing the skill or the hook is a separate, optional step further down.
+
+Run it again next month with `--history ~/logs/carry_history.jsonl` and it stops
+reporting numbers and starts reporting **movement** — which source grew, which shrank,
+over how many turns. The file holds shares and counts only: no paths, no filenames, no
+content. The longer you keep it, the sharper the comparison gets.
+
 **Start here:** the conclusions are directly below · the measured ranking is in
 [Where the tokens go](#where-the-tokens-go) · what to run on your own logs is in
 [Measure your own sessions](#measure-your-own-sessions) · the method and every retraction
@@ -46,7 +69,8 @@ pre-registered runs — one of which replicated and two of which failed. The sho
 3. **The popular edit rule is net negative.** `≤3 change blocks → Edit` loses ~79% of the
    available saving on 1,316 transcripts. Changed *fraction* under ~25% is the rule that works.
 4. **Skill listings are mostly uninvoked.** 72.9% of one listing (21,891 of 30,009 bytes) had
-   never been invoked once across 1,409 sessions — ~6,972 tokens re-sent every turn.
+   never been invoked once across 1,409 sessions — ~6,972 tokens re-sent every turn (bytes ÷ 3.14;
+   see [Units](#units) — the shares hold regardless, the token figure is language-dependent).
 5. **Telling the model to be terse works, and it works the same way in two languages.** One
    sentence against no instruction: **−22.7%** output tokens in Indonesian (14 of 16 pairs,
    exact p = 0.0001) and **−19.6%** in a pre-registered English replication (12 of 16,
@@ -306,6 +330,22 @@ statistics are paired sign and exact permutation tests — nothing in
 enough to point it at a different agent, which is how any claim in a system prompt should be
 checked before it is installed.
 
+## Units
+
+Token figures in this README are bytes divided by 3.14. That constant was measured against
+this corpus with `tools/b2t_validate.py` and it is **not one number**: least-squares slope
+**3.32 bytes/token for English text, 1.92 for Indonesian** over 2,947 assistant turns. Close
+to right for English prose, wrong by about 60% for Indonesian.
+
+What that does and does not touch:
+
+- **Shares are immune.** (X/K)/(Y/K) = X/Y — every percentage in this repo stands whatever
+  the constant is, and the conclusions rest on the percentages.
+- **Absolute token counts are not.** They move with the language mix of the corpus measured.
+
+`carry.py` therefore reports **bytes** by default; pass `--b2t <bytes-per-token>` with a ratio
+you measured yourself to add a token column, and `--b2t 3.14` to reproduce the figures here.
+
 ## What's here
 
 Every run this repo has ever scored is published, classified, and reconciled in one
@@ -332,7 +372,9 @@ tools/bashcost.py           split the Bash line of the carry table: the command 
 tools/prefix.py             the part carry.py cannot see: system prompt + tool schemas,
                             ~41.4k tokens per turn here — 6x the whole skill listing
 tools/b2t_validate.py       check the bytes-per-token constant against your own corpus:
-                            3.31 for English here, 1.98 for Indonesian — it is not one number
+                            3.32 for English here, 1.92 for Indonesian — it is not one number
+carry.py --history PATH     append this run and report what MOVED since the last one;
+                            shares and counts only, and it sharpens as the file grows
 tools/extract.py            pull carry data out of transcripts (redacted by default)
 tools/simulate.py           robustness suite: jackknife, bootstrap, holdout, drop-top-k
 tools/report.py             read the field ledger: how often the guard fires, and how
@@ -386,7 +428,7 @@ auto-update pattern this repo tells you not to accept.
 
 ```bash
 git clone https://github.com/ipeterpetrus/samewrite && cd samewrite
-python3 tests/test_write_noop_guard.py     # 51 PASS expected
+python3 tests/test_write_noop_guard.py     # 64 PASS expected
 bash hooks/install.sh
 ```
 
