@@ -17,27 +17,49 @@ import argparse, collections, hashlib, json, os, statistics, sys
 B2T = 1 / 3.14
 
 
+def nbytes(x):
+    """UTF-8 BYTES, not characters. The tables label this column `B`, and `len(str)`
+    counts code points — any non-ASCII command, tool result, or schema would be
+    reported smaller than it is billed. Non-strings are measured as their JSON form,
+    which is what actually travels."""
+    if not isinstance(x, str):
+        x = json.dumps(x, ensure_ascii=False)
+    return len(x.encode("utf-8"))
+
+
 def scan(path):
     """Return (turns, [(turn_index, command_len, result_len, command_sha)])."""
     pend, rows, N = {}, [], 0
     with open(path, encoding="utf-8") as f:
         for line in f:                        # not .splitlines(): U+2028 is legal here
-            if '"tool_use"' not in line and '"tool_result"' not in line:
+            # The cheap substring filter used to sit here. It skipped assistant turns that
+            # carry no tool block — which silently undercounted N, and N is what --min-turns
+            # gates on and what `remaining = N - i` weights every carry number by. Parse
+            # every assistant/user line; the filter is only worth it below, per block.
+            if '"assistant"' not in line and '"user"' not in line:
                 continue
             try:
                 o = json.loads(line)
             except Exception:
                 continue
-            t, m = o.get("type"), o.get("message") or {}
+            if not isinstance(o, dict):
+                continue
+            t, m = o.get("type"), o.get("message")
+            if not isinstance(m, dict):
+                m = {}
+            content = m.get("content")
+            if not isinstance(content, list):
+                content = []
             if t == "assistant":
                 N += 1
-                for b in (m.get("content") or []):
+                for b in content:
                     if isinstance(b, dict) and b.get("type") == "tool_use" \
                             and b.get("name") == "Bash":
-                        cmd = (b.get("input") or {}).get("command", "") or ""
-                        pend[b.get("id")] = (N, cmd)
+                        inp = b.get("input")
+                        cmd = (inp or {}).get("command") if isinstance(inp, dict) else None
+                        pend[b.get("id")] = (N, cmd if isinstance(cmd, str) else "")
             elif t == "user":
-                for b in (m.get("content") or []):
+                for b in content:
                     if not isinstance(b, dict) or b.get("type") != "tool_result":
                         continue
                     hit = pend.pop(b.get("tool_use_id"), None)
@@ -45,8 +67,7 @@ def scan(path):
                         continue
                     i, cmd = hit
                     r = b.get("content")
-                    n = len(r if isinstance(r, str) else json.dumps(r))
-                    rows.append((i, len(cmd), n, cmd))
+                    rows.append((i, nbytes(cmd), nbytes(r), cmd))
     return N, rows
 
 
@@ -69,7 +90,7 @@ def accumulate(paths, min_turns=50):
             calls.append((max(N - i, 0), lc, lr))
             if "<<" in cmd:
                 heredoc_n += 1
-                heredoc_b += lc
+                heredoc_b += lc                      # lc sudah dalam BYTE (nbytes)
                 k = hashlib.sha256(cmd.encode()).hexdigest()[:16]
                 dupe[k] += 1
                 dupe_len[k] = lc
@@ -124,14 +145,19 @@ def render(a):
 
 def _selfcheck():
     """One runnable check: carry weights by REMAINING turns, and dupes need 2+."""
-    a = dict(calls=[(10, 100, 200), (1, 100, 200)], heredoc_b=0, heredoc_n=0,
+    # The fixture must DISTINGUISH remaining-turn weighting from per-call counting.
+    # The old one could not: both calls had a 1:2 command/result ratio, so every
+    # weighting scheme printed 33.3/66.7 and the assert proved nothing. Here the
+    # command is carried 10 turns and the result 1, so per-turn gives 90.9/9.1 while
+    # counting calls would give 50/50 — the numbers now move when the weighting does.
+    a = dict(calls=[(10, 100, 0), (1, 0, 100)], heredoc_b=0, heredoc_n=0,
              dupe=collections.Counter({"x": 3, "y": 1}), dupe_len={"x": 50, "y": 9},
              unreadable=0, short=0)
     r = render(a)
-    # 100 B of command against 200 B of result, both carried the same number of
-    # turns -> a third and two thirds. Weighting by remaining turns, not by call
-    # count, is the whole point: swap the two weights and these numbers move.
-    assert "33.3%" in r and "66.7%" in r, r
+    assert "90.9%" in r and "9.1%" in r, r
+    # and byte counting is UTF-8 bytes, not code points: 'é' is one char, two bytes
+    assert nbytes("é") == 2 and nbytes("ok") == 2, nbytes("é")
+    assert nbytes({"a": "é"}) == len(json.dumps({"a": "é"}, ensure_ascii=False).encode()), "json path"
     assert "100 B — a script" in r, r            # 50*(3-1) = 100, y (count 1) excluded
     assert render(dict(calls=[], heredoc_b=0, heredoc_n=0, dupe=collections.Counter(),
                        dupe_len={}, unreadable=2, short=3)).startswith("no Bash calls")

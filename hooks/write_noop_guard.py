@@ -145,7 +145,14 @@ def heredoc_write(cmd):
     m = HEREDOC.match(cmd.strip())
     if not m:
         return None
-    return m.group("path").strip("\"'"), m.group("body") + "\n"
+    path = m.group("path").strip("\"'")
+    # Path yang akan DIEKSPANSI shell bukan path yang ditulis: `cat > "$(printf f)"`
+    # menulis berkas `f`, tapi kita akan membandingkan berkas bernama `$(printf f)`.
+    # Menebak hasil ekspansi = menebak; menolak = melewatkan satu kasus. Melewatkan
+    # aman, salah-tuduh memblokir kerja yang benar.
+    if any(ch in path for ch in "$`*?[]{}~\\") or not path:
+        return None
+    return path, m.group("body") + "\n"
 
 
 def main():

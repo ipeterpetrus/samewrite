@@ -86,6 +86,11 @@ with tempfile.TemporaryDirectory() as d:
           bash("cat > %s <<'EOF'\nline1\nline2\nEOF\nchmod +x %s" % (same, same)), False)
     check("heredoc ke berkas belum ada -> allow",
           bash("cat > %s <<'EOF'\nline1\nline2\nEOF" % missing), False)
+    # path yang akan diekspansi shell: kita tak tahu berkas mana yang benar-benar ditulis
+    check("path ber-substitusi perintah -> allow",
+          bash("cat > \"$(printf %s)\" <<'EOF'\nline1\nline2\nEOF" % same), False)
+    check("path ber-glob -> allow",
+          bash("cat > %s* <<'EOF'\nline1\nline2\nEOF" % same), False)
     check("heredoc ke path sensitif -> allow (jangan jadi oracle)",
           bash("cat > %s/id_rsa <<'EOF'\nline1\nline2\nEOF" % ROOT[0]), False)
     # 8: fail-open

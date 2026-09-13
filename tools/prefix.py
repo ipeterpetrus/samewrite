@@ -21,6 +21,12 @@ import argparse, collections, json, os, statistics, sys
 B2T = 1 / 3.14
 
 
+def nbytes(obj):
+    """UTF-8 BYTES of the JSON form, not code points. Columns here are labelled `B`,
+    and a schema full of non-ASCII would otherwise be reported smaller than it is sent."""
+    return len(json.dumps(obj, ensure_ascii=False).encode("utf-8"))
+
+
 def snapshot(path):
     """First prompt_snapshot carrying real tool definitions, or None."""
     with open(path, encoding="utf-8") as f:
@@ -31,8 +37,10 @@ def snapshot(path):
                 o = json.loads(line)
             except Exception:
                 continue
-            a = o.get("attachment") or {}
-            if a.get("type") != "prompt_snapshot":
+            if not isinstance(o, dict):
+                continue
+            a = o.get("attachment")
+            if not isinstance(a, dict) or a.get("type") != "prompt_snapshot":
                 continue
             t = a.get("tools")
             if isinstance(t, list) and t:
@@ -42,7 +50,7 @@ def snapshot(path):
 
 def accumulate(paths):
     tools = collections.Counter()            # name -> largest definition seen
-    totals, sysb, n = [], [], 0
+    totals, sysb, both, n = [], [], [], 0
     for p in paths:
         try:
             hit = snapshot(p)
@@ -52,15 +60,22 @@ def accumulate(paths):
             continue
         t, sp = hit
         n += 1
-        totals.append(len(json.dumps(t, ensure_ascii=False)))
-        if sp is not None:
-            sysb.append(len(json.dumps(sp, ensure_ascii=False)))
+        tb = nbytes(t)
+        totals.append(tb)
+        # T5: only sessions carrying BOTH parts may enter the "together" figure —
+        # adding a median over all sessions to a median over a subset is a number
+        # that describes no session at all.
+        sb = nbytes(sp) if sp is not None else None
+        if sb is not None:
+            sysb.append(sb)
+            both.append(tb + sb)
         for x in t:
             if isinstance(x, dict):
-                b = len(json.dumps(x, ensure_ascii=False))
                 name = x.get("name", "?")
-                tools[name] = max(tools[name], b)
-    return dict(tools=tools, totals=totals, sysb=sysb, sessions=n)
+                if not isinstance(name, str):     # unhashable / odd shapes must not crash
+                    name = json.dumps(name, ensure_ascii=False)[:60]
+                tools[name] = max(tools[name], nbytes(x))
+    return dict(tools=tools, totals=totals, sysb=sysb, both=both, sessions=n)
 
 
 def render(a):
@@ -72,9 +87,17 @@ def render(a):
     out.append(f"  tool schemas : median {med:>9,.0f} B  ~{med * B2T:>8,.0f} tok")
     if a["sysb"]:
         ms = statistics.median(a["sysb"])
-        out.append(f"  system prompt: median {ms:>9,.0f} B  ~{ms * B2T:>8,.0f} tok")
-        out.append(f"  together     :        {med + ms:>9,.0f} B  ~{(med + ms) * B2T:>8,.0f} tok"
-                   f"  — per turn, every turn")
+        out.append(f"  system prompt: median {ms:>9,.0f} B  ~{ms * B2T:>8,.0f} tok"
+                   f"   ({len(a['sysb'])} of {a['sessions']} session(s))")
+    # "together" berdiri SENDIRI, di luar cabang system-prompt: kalau tak ada sesi yang
+    # membawa kedua bagian, itu fakta yang harus DIKATAKAN, bukan baris yang hilang diam-diam.
+    both = a.get("both") or []
+    if both:
+        mb = statistics.median(both)
+        out.append(f"  together     : median {mb:>9,.0f} B  ~{mb * B2T:>8,.0f} tok"
+                   f"  — per turn, every turn ({len(both)} session(s) carrying both)")
+    else:
+        out.append("  together     : not computed — no session carries both parts")
     out += ["", "## Tool schemas — LARGEST definition seen for each, across sessions",
             "## (so these sum to more than one session's total; a schema grows as the",
             "##  CLI ships new options, and the shares below are of this sum, not of a turn)"]
@@ -88,11 +111,19 @@ def _selfcheck():
     a = accumulate([])
     assert render(a).startswith("no prompt_snapshot"), render(a)
     a = dict(tools=collections.Counter({"Big": 3140, "Small": 314}),
-             totals=[3454.0], sysb=[314.0], sessions=1)
+             totals=[3454.0], sysb=[314.0], both=[3768.0], sessions=1)
     r = render(a)
     assert "1,000 tok" in r and "100 tok" in r, r     # 3140/3.14 and 314/3.14
     assert "90.9%" in r, r                            # 3140 of 3454
     assert r.index("Big") < r.index("Small"), "harus urut besar-ke-kecil"
+    # "together" harus datang dari kohort yang membawa KEDUA bagian, bukan dari
+    # penjumlahan dua median atas himpunan sesi berbeda.
+    assert "1,200 tok" in r, r                        # 3768/3.14, bukan (3454+314)/3.14 kebetulan
+    assert "1 session(s) carrying both" in r, r
+    r2 = render(dict(a, sysb=[], both=[]))
+    assert "not computed" in r2, r2                   # tanpa pasangan: JANGAN mengarang angka
+    # byte = UTF-8, bukan code point
+    assert nbytes("é") == len('"é"'.encode("utf-8")), nbytes("é")
     print("selfcheck OK")
 
 
