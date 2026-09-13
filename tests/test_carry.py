@@ -174,6 +174,16 @@ def main():
                             capture_output=True, text=True).stdout
         check("jam mundur -> delta ditolak", "clock went backwards" in h5, True)
 
+        # Ambang 1.5x harus menggigit DUA ARAH. Korpus yang MENYUSUT drastis sama tak
+        # sebandingnya dengan yang membengkak; uji lama hanya menumbuhkan korpus, jadi
+        # separuh perilakunya tak pernah dibuktikan.
+        hp6 = os.path.join(d, "hist6.jsonl")
+        besar = dict(rot, turns=1000, ts=int(_time.time()) - 3600)
+        open(hp6, "w").write(json.dumps(besar) + "\n")
+        h6 = subprocess.run([sys.executable, CARRY, p, "--min-turns", "1", "--history", hp6],
+                            capture_output=True, text=True).stdout
+        check("korpus MENYUSUT -> delta juga ditolak", "corpus changed" in h6, True)
+
         # TREN: arah jangka panjang butuh SELURUH berkas, bukan dua titik terakhir, dan
         # tak boleh diklaim dari sampel kecil. Slope diuji terhadap kemiringan yang dibuat.
         import time as _t

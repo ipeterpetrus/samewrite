@@ -393,7 +393,7 @@ tools/feed.sh               regenerate docs/FIELD_DATA.md from the ledger, commi
 tools/health.py             is the guard still installed? ledger silence proves nothing on
                             its own, so compare it against session activity
 .claude-plugin/             plugin + marketplace manifests (`/plugin marketplace add`)
-tests/                      160 assertions in six suites, mutation-tested
+tests/                      161 assertions in six suites, mutation-tested
 docs/FINDINGS.md            full numbers, method, the corrections, and what an
                             adversarial panel broke before publication
 ```
