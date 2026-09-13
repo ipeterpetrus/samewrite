@@ -11,7 +11,7 @@ Perbandingan BYTE-EXACT pada byte MENTAH (mode biner): beda whitespace, newline,
 CRLF/LF = perubahan nyata dan lewat. Path bernilai-rahasia dilewati agar jawaban
 deny/allow tak menjadi oracle kesetaraan atas isinya.
 """
-import json, os, stat, sys, time
+import json, os, re, stat, sys, time
 
 MAX_BYTES = 8 * 1024 * 1024   # ponytail: berkas raksasa dilewati, bukan dibaca ke memori
 MAX_STDIN = 64 * 1024 * 1024  # payload lebih besar dari ini: jangan dimuat, langsung allow
@@ -102,6 +102,42 @@ def deny(reason):
     sys.exit(0)
 
 
+# `cat > f <<'EOF'` lewat Bash menulis berkas persis seperti Write, tetapi tidak pernah
+# melewati matcher Write — dan pengukuran arsip menemukan 2.099 tulis-ulang berkas lewat
+# jalur itu dengan changed fraction MEDIAN 0,000. Menutup satu pintu sementara pintu
+# sebelahnya terbuka bukan penegakan, itu dekorasi.
+#
+# Sengaja SEMPIT — tiap syarat di bawah ada karena melanggarnya membuat jawaban SALAH,
+# bukan karena kehati-hatian umum:
+#   - tag WAJIB terkutip (<<'EOF'). Tanpa kutip, shell mengekspansi $VAR dan `cmd` di
+#     dalam body, jadi teks mentah yang kita banding BUKAN yang akan mendarat di disk.
+#   - hanya `>`, bukan `>>`: append dengan isi sama BUKAN no-op.
+#   - perintah harus tunggal. `cat > f <<'EOF' ... EOF` lalu `chmod +x f` adalah satu
+#     panggilan Bash: menolaknya ikut membatalkan chmod, yang bukan no-op.
+# Dua bentuk, dan keduanya menulis berkas: `cat > f` memakai redirect shell, `tee f`
+# memakai argumen. `tee -a` (append) sengaja TIDAK cocok — flag apa pun menggugurkannya.
+HEREDOC = re.compile(
+    r"""^\s*(?:
+            cat\s*>\s*(?!>)                    # cat > f   (timpa saja, bukan >>)
+          | tee\s+(?!-)                        # tee f     (tanpa flag: -a = append)
+        )
+        (?P<path>"[^"]+"|'[^']+'|[^\s<>|&;-][^\s<>|&;]*)
+        \s*<<\s*(?P<q>['"])(?P<tag>[A-Za-z_][\w]*)(?P=q)\s*\n
+        (?P<body>.*?)\n
+        (?P=tag)\s*$                           # tag penutup = akhir perintah
+    """, re.S | re.X)
+
+
+def heredoc_write(cmd):
+    """(path, body) untuk penulisan heredoc yang aman dibandingkan; None selain itu."""
+    if not isinstance(cmd, str) or "<<" not in cmd:
+        return None
+    m = HEREDOC.match(cmd.strip())
+    if not m:
+        return None
+    return m.group("path").strip("\"'"), m.group("body") + "\n"
+
+
 def main():
     if os.environ.get(ESCAPE) == "1":
         allow()
@@ -112,13 +148,22 @@ def main():
         data = json.loads(raw or "{}")
     except Exception:
         allow()
-    if not isinstance(data, dict) or data.get("tool_name") != "Write":
+    if not isinstance(data, dict):
         allow()
+    tool = data.get("tool_name")
     ti = data.get("tool_input") or {}
     if not isinstance(ti, dict):
         allow()
-    path = ti.get("file_path")
-    new = ti.get("content")
+    if tool == "Write":
+        path = ti.get("file_path")
+        new = ti.get("content")
+    elif tool == "Bash":
+        hit = heredoc_write(ti.get("command"))
+        if not hit:
+            allow()
+        path, new = hit
+    else:
+        allow()
     if not path or not isinstance(path, str) or not isinstance(new, str):
         allow()
     if sensitive(path):

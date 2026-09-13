@@ -59,8 +59,35 @@ with tempfile.TemporaryDirectory() as d:
     # 7: tool lain tak tersentuh
     check("tool_name=Edit -> allow",
           run({"tool_name": "Edit", "tool_input": {"file_path": same, "content": "line1\nline2\n"}})[0], False)
-    check("tool_name=Bash -> allow",
+    check("tool_name=Bash tanpa heredoc -> allow",
           run({"tool_name": "Bash", "tool_input": {"command": "ls"}})[0], False)
+
+    # --- jalur Bash heredoc: pintu sebelah yang dulu terbuka lebar ---
+    def bash(cmd):
+        return run({"tool_name": "Bash", "tool_input": {"command": cmd}})[0]
+
+    check("heredoc isi identik -> deny",
+          bash("cat > %s <<'EOF'\nline1\nline2\nEOF" % same), True)
+    check("heredoc isi beda -> allow",
+          bash("cat > %s <<'EOF'\nline1\nline9\nEOF" % same), False)
+    check("tee identik -> deny",
+          bash("tee %s <<'EOF'\nline1\nline2\nEOF" % same), True)
+    # tag TANPA kutip: shell mengekspansi $VAR di body, jadi teks mentah BUKAN yang
+    # mendarat di disk. Membandingkannya akan menjawab pertanyaan yang salah.
+    check("tag tak terkutip -> allow walau teks sama",
+          bash("cat > %s <<EOF\nline1\nline2\nEOF" % same), False)
+    # append dengan isi sama BUKAN no-op: berkas tumbuh.
+    check("append >> -> allow walau isi sama",
+          bash("cat >> %s <<'EOF'\nline1\nline2\nEOF" % same), False)
+    check("tee -a (append) -> allow walau isi sama",
+          bash("tee -a %s <<'EOF'\nline1\nline2\nEOF" % same), False)
+    # menolak perintah majemuk ikut membatalkan chmod-nya, yang bukan no-op.
+    check("perintah majemuk -> allow",
+          bash("cat > %s <<'EOF'\nline1\nline2\nEOF\nchmod +x %s" % (same, same)), False)
+    check("heredoc ke berkas belum ada -> allow",
+          bash("cat > %s <<'EOF'\nline1\nline2\nEOF" % missing), False)
+    check("heredoc ke path sensitif -> allow (jangan jadi oracle)",
+          bash("cat > %s/id_rsa <<'EOF'\nline1\nline2\nEOF" % ROOT[0]), False)
     # 8: fail-open
     check("stdin bukan JSON -> allow",
           subprocess.run(["/usr/bin/python3", G], input="{bukan json",
