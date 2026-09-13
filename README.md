@@ -330,7 +330,9 @@ tools/skills.py             price your skill listing: which entries you have nev
 tools/bashcost.py           split the Bash line of the carry table: the command text you
                             wrote is billed like the output that came back (49/51 here)
 tools/prefix.py             the part carry.py cannot see: system prompt + tool schemas,
-                            ~32.8k tokens per turn here — 4.7x the whole skill listing
+                            ~41.4k tokens per turn here — 6x the whole skill listing
+tools/b2t_validate.py       check the bytes-per-token constant against your own corpus:
+                            3.31 for English here, 1.98 for Indonesian — it is not one number
 tools/extract.py            pull carry data out of transcripts (redacted by default)
 tools/simulate.py           robustness suite: jackknife, bootstrap, holdout, drop-top-k
 tools/report.py             read the field ledger: how often the guard fires, and how
