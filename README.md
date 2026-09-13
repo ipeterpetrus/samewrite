@@ -327,6 +327,8 @@ tools/profiles.py           find every Claude Code profile on the machine; the r
                             tools take a directory, or nothing, instead of one glob
 tools/skills.py             price your skill listing: which entries you have never invoked
                             (cross-check it against the CLI's own /skill-doctor)
+tools/bashcost.py           split the Bash line of the carry table: the command text you
+                            wrote is billed like the output that came back (49/51 here)
 tools/extract.py            pull carry data out of transcripts (redacted by default)
 tools/simulate.py           robustness suite: jackknife, bootstrap, holdout, drop-top-k
 tools/report.py             read the field ledger: how often the guard fires, and how
