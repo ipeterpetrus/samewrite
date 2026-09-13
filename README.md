@@ -46,7 +46,12 @@ Installing the skill or the hook is a separate, optional step further down.
 Run it again next month with `--history ~/logs/carry_history.jsonl` and it stops
 reporting numbers and starts reporting **movement** — which source grew, which shrank,
 over how many turns. The file holds shares and counts only: no paths, no filenames, no
-content. The longer you keep it, the sharper the comparison gets.
+content.
+
+Two things it deliberately does not do. It compares against the **previous record only**,
+not a trend over the whole file — so "the longer you keep it the sharper it gets" would be
+a nicer sentence than it is a true one. And it refuses to report a delta at all when the
+two runs scanned corpora of different sizes, because a change in scope is not movement.
 
 **Start here:** the conclusions are directly below · the measured ranking is in
 [Where the tokens go](#where-the-tokens-go) · what to run on your own logs is in

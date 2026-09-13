@@ -221,9 +221,14 @@ def history(path, a, C):
     sharper every time it runs, because the baseline is real rather than remembered.
     Stores shares and byte counts only: no paths, no filenames, no content.
     """
+    T = a["turns"] or 1
     now = {"ts": int(time.time()), "sessions": a["sessions"], "turns": a["turns"],
            "carry_bytes": C, "scanned": a.get("scanned", 0),
-           "shares": {k: round(100 * v / C, 4) for k, v in a["carry"].most_common()}}
+           "shares": {k: round(100 * v / C, 4) for k, v in a["carry"].most_common()},
+           # Share berjumlah 100%: satu sumber naik MEMAKSA yang lain turun walau perilaku
+           # mereka tak berubah sedikit pun. B/turn tidak terikat konstrain itu, jadi delta
+           # share sendirian bisa menceritakan gerakan yang tak pernah terjadi.
+           "bpt": {k: round(a["size"][k] / T, 2) for k, _ in a["carry"].most_common()}}
     prev = None
     try:
         with open(path, encoding="utf-8") as fh:
@@ -263,10 +268,19 @@ def history(path, a, C):
         if p0 is None:
             rows.append((abs(v), f"  {k:32s} {v:6.2f}%  (new)"))
         elif abs(v - p0) >= 0.05:
-            rows.append((abs(v - p0), f"  {k:32s} {p0:6.2f}% -> {v:6.2f}%  ({v - p0:+.2f})"))
+            b_now = (now.get("bpt") or {}).get(k)
+            b_old = (prev.get("bpt") or {}).get(k)
+            tail = ""
+            if b_now is not None and b_old is not None:
+                arrow = "flat" if abs(b_now - b_old) < 0.5 else f"{b_old:,.0f}->{b_now:,.0f} B/turn"
+                tail = f"   [{arrow}]"
+            rows.append((abs(v - p0),
+                         f"  {k:32s} {p0:6.2f}% -> {v:6.2f}%  ({v - p0:+.2f}){tail}"))
     gone = [k for k in prev["shares"] if k not in now["shares"]]
     out = ["", f"  since last run ({days:.1f} days, "
-               f"{now['turns'] - prev.get('turns', 0):+,} turns):"]
+               f"{now['turns'] - prev.get('turns', 0):+,} turns):",
+           "    share moves are zero-sum — the [B/turn] tag says whether the source itself",
+           "    changed or only its neighbours did."]
     if not rows and not gone:
         out.append("    nothing moved by more than 0.05 points.")
     for _, line in sorted(rows, reverse=True)[:8]:
