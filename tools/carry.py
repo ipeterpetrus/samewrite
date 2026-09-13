@@ -22,6 +22,11 @@ import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import profiles  # multi-profile discovery; see tools/profiles.py
 
+# NOT a universal constant, and this repo no longer applies it silently. Measured with
+# tools/b2t_validate.py on the author's own corpus: 3.31 B/token for English text, 1.98 for
+# Indonesian — a 1.7x spread, because the tokenizer does not span languages. Shares below are
+# immune ((X/K)/(Y/K) = X/Y); absolute token figures are not. So carry is reported in BYTES,
+# and a token column appears only when you pass --b2t with a number you measured yourself.
 B2T = 1 / 3.14          # chars -> tokens, measured on o200k over this corpus. Sizes here
                         # are len(str), i.e. characters, not UTF-8 bytes; identical for
                         # ASCII, and the constant was calibrated on the same len().
@@ -141,7 +146,7 @@ def per_turn(a):
             sorted(rows, key=lambda r: -r[2])]
 
 
-def render(a, markdown=False):
+def render(a, markdown=False, b2t=None):
     C = sum(a["carry"].values())
     if not C:
         # A silent empty result reads like "your logs are clean". Say which files were
@@ -168,17 +173,23 @@ def render(a, markdown=False):
         out.append("\n\\* cache-read 0.1x, cache-write 1.25x, output 5x base input.\n")
         out.append("## Carry by source\n")
         out.append(f"{a['sessions']} sessions, {T:,} turns (median {med}), "
-                   f"carry ~{C * B2T:,.0f} tokens; "
+                   f"carry {C:,} bytes"
+                   + (f" (~{C * b2t:,.0f} tokens at {1/b2t:.2f} B/tok)" if b2t else "")
+                   + "; "
                    f"{a.get('short', 0)} sessions below --min-turns and "
                    f"{a.get('unreadable', 0)} unreadable files skipped. "
                    f"cache_read is {100 * cr / U:.1f}% of billed tokens, output {100 * ot / U:.2f}%.\n")
-        out.append("| source | share of carry | chars/turn |")
+        out.append("| source | share of carry | bytes/turn |")
         out.append("|---|---|---|")
         for k, v in a["carry"].most_common():
             out.append(f"| `{k}` | {100 * v / C:.2f}% | {a['size'][k] / T:,.0f} |")
+        out.append("\nShares are immune to the bytes-per-token constant; absolute token "
+                   "figures are not. Measure yours with `tools/b2t_validate.py` and pass "
+                   "`--b2t` if you want a token column.")
     else:
         out.append(f"# sessions={a['sessions']} turns={T:,} median_turns={med} "
-                   f"carry_tokens~{C * B2T:,.0f}")
+                   f"carry_bytes={C:,}"
+                   + (f" carry_tokens~{C * b2t:,.0f}" if b2t else ""))
         for k, v in a["usage"].most_common():
             out.append(f"  {k:32s} {v:>16,} {100 * v / U:6.2f}%")
         out.append("")
@@ -186,9 +197,16 @@ def render(a, markdown=False):
         for k, pt, pw in per_turn(a):
             out.append(f"  {k:32s} {pt:>16,.0f} {pw:>6.1f}%")
         out.append("")
-        out.append(f"{'source':34s} {'carry_tok':>14s} {'%carry':>8s} {'B/turn':>8s}")
+        hdr = f"{'source':34s} {'carry_B':>16s} {'%carry':>8s} {'B/turn':>8s}"
+        out.append(hdr + (f" {'carry_tok':>14s}" if b2t else ""))
         for k, v in a["carry"].most_common():
-            out.append(f"{k:34s} {v * B2T:>14,.0f} {100 * v / C:7.2f}% {a['size'][k] / T:>8,.0f}")
+            row = f"{k:34s} {v:>16,} {100 * v / C:7.2f}% {a['size'][k] / T:>8,.0f}"
+            out.append(row + (f" {v * b2t:>14,.0f}" if b2t else ""))
+        if not b2t:
+            out.append("")
+            out.append("  carry in BYTES. Shares above are immune to the bytes-per-token "
+                       "constant; token figures are not.")
+            out.append("  Measure yours: tools/b2t_validate.py — then pass --b2t <bytes-per-token>.")
     return "\n".join(out) + "\n"
 
 
@@ -199,13 +217,19 @@ def main():
     ap.add_argument("--markdown", action="store_true")
     ap.add_argument("--min-turns", type=int, default=50,
                     help="ignore sessions shorter than this (default 50)")
+    ap.add_argument("--b2t", type=float, default=None, metavar="BYTES_PER_TOKEN",
+                    help="add a token column using YOUR measured ratio (tools/b2t_validate.py). "
+                         "Omitted by default: the ratio is language-dependent (3.31 English, "
+                         "1.98 Indonesian here) and applying one silently is how every figure "
+                         "moves together without anyone noticing.")
     args = ap.parse_args()
     paths, roots = profiles.resolve(args.files)
     line = profiles.note(paths, roots, bool(args.files))
     if line:
         print(line, file=sys.stderr)   # stderr: --markdown output stays pipeable
     a = accumulate(paths, args.min_turns)
-    sys.stdout.write(render(a, args.markdown))
+    b2t = (1.0 / args.b2t) if args.b2t else None
+    sys.stdout.write(render(a, args.markdown, b2t))
     # exit non-zero when nothing was recognised: a zero-record run is a schema mismatch,
     # not a finding, and a pipeline must be able to tell the two apart.
     # Exit bukan-nol menandai SCHEMA MISMATCH ("tak ada record dikenali"), bukan "carry nol".

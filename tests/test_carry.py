@@ -110,6 +110,24 @@ def main():
                if x.startswith("| `")]
         check("markdown: persentase carry menjumlah 100", round(sum(pct)), 100)
 
+        # Kolom carry utama WAJIB byte mentah, bukan token hasil konversi diam-diam.
+        # Konstanta byte->token bergantung bahasa (3,31 EN vs 1,98 ID di korpus penulis),
+        # jadi menerapkannya tanpa diminta membuat setiap angka bergerak bersama.
+        txt = subprocess.run([sys.executable, CARRY, p, "--min-turns", "1"],
+                             capture_output=True, text=True).stdout
+        check("header carry memakai byte", "carry_B" in txt and "carry_bytes=" in txt, True)
+        check("nol kolom token tanpa --b2t", "carry_tok" in txt, False)
+        raw = [int(x.split()[1].replace(",", "")) for x in txt.splitlines()
+               if x.startswith("Bash ")]
+        tok = subprocess.run([sys.executable, CARRY, p, "--min-turns", "1", "--b2t", "2"],
+                             capture_output=True, text=True).stdout
+        check("--b2t memunculkan kolom token", "carry_tok" in tok, True)
+        rawtok = [int(x.split()[-1].replace(",", "")) for x in tok.splitlines()
+                  if x.startswith("Bash ")]
+        if raw and rawtok:
+            check("kolom byte bukan kolom token", raw[0] != rawtok[0], True)
+            check("token = byte / b2t", abs(rawtok[0] - raw[0] / 2) <= 1, True)
+
         # berkas rusak tak boleh menjatuhkan alat (fail-open seperti guard)
         bad = os.path.join(d, "bad.jsonl")
         open(bad, "w").write("{ini bukan json\n" + turn("ok") + "\n")
