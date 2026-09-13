@@ -23,6 +23,25 @@ jobs:
         run: python3 tests/test_skills.py
       - name: health suite
         run: python3 tests/test_health.py
+      - name: README assertion count matches reality
+        # README menyebut satu angka; angka itu pernah basi (124 vs 160 nyata, 13-Sep).
+        # Klaim yang tak ada penegaknya membusuk diam-diam — di repo yang seluruh isinya
+        # klaim terukur, itu kelas kesalahan yang paling mahal.
+        run: |
+          python3 - <<'EOF'
+          import glob, re, subprocess, sys
+          total = 0
+          for f in sorted(glob.glob("tests/test_*.py")):
+              out = subprocess.run([sys.executable, f], capture_output=True, text=True).stdout
+              m = re.search(r"(\d+) PASS", out)
+              assert m, f"{f}: tak mencetak hitungan PASS"
+              total += int(m.group(1))
+          claim = re.search(r"(\d+) assertions in six suites", open("README.md").read())
+          assert claim, "README tak lagi menyebut jumlah assertion — perbarui uji ini"
+          assert int(claim.group(1)) == total, \
+              f"README bilang {claim.group(1)} assertion, suite menjalankan {total}"
+          print(f"README cocok: {total} assertion")
+          EOF
       - name: end-to-end on synthetic fixture
         run: |
           python3 tools/make_fixture.py /tmp/fx.jsonl --seed 7 --turns 400
