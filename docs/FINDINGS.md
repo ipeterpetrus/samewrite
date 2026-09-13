@@ -18,6 +18,15 @@ Reproduce: `tools/extract.py` + `tools/simulate.py` for the overwrite analysis,
 UTF-8 byte count. The two coincide for ASCII, the chars-to-tokens constant was calibrated on
 the same count, and the shares are unaffected; only the label was wrong.
 
+**Units.** Every token figure in this section was produced by dividing bytes by 3.14. That
+constant was later measured against this corpus with `tools/b2t_validate.py` and found to be
+language-dependent: **3.32 B/token for English text, 1.92 for Indonesian** (least-squares slope
+over 2,947 assistant turns, excluding tool and thinking turns). It is close to right for English
+prose and wrong by about 60% for Indonesian. The **shares** below are unaffected — (X/K)/(Y/K) =
+X/Y — and they are what the conclusions rest on; the absolute token counts are not, and they
+move with the language mix of whatever corpus they were measured on. `carry.py` now reports
+bytes by default; to reproduce the token figures here exactly, pass `--b2t 3.14`.
+
 **Corpus version.** Both tables below come from the 421-session cohort, captured before the
 section 10 run. Section 10 re-ran `tools/carry.py` over a later, larger corpus (1,080 files,
 192,752 turns after the 50-turn filter) and got different shares — 45.11% where this table

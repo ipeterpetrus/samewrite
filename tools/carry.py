@@ -197,10 +197,13 @@ def render(a, markdown=False, b2t=None):
         for k, pt, pw in per_turn(a):
             out.append(f"  {k:32s} {pt:>16,.0f} {pw:>6.1f}%")
         out.append("")
-        hdr = f"{'source':34s} {'carry_B':>16s} {'%carry':>8s} {'B/turn':>8s}"
+        # %carry SENGAJA di kolom-2. Sebelumnya kolom-2 adalah token; sekarang byte, dan
+        # parser posisional lama akan diam-diam melaporkan angka ~3x tanpa satu galat pun.
+        # Dengan persen di sana, `int(field2)` melempar — gagal KERAS, bukan salah senyap.
+        hdr = f"{'source':34s} {'%carry':>8s} {'carry_B':>16s} {'B/turn':>8s}"
         out.append(hdr + (f" {'carry_tok':>14s}" if b2t else ""))
         for k, v in a["carry"].most_common():
-            row = f"{k:34s} {v:>16,} {100 * v / C:7.2f}% {a['size'][k] / T:>8,.0f}"
+            row = f"{k:34s} {100 * v / C:7.2f}% {v:>16,} {a['size'][k] / T:>8,.0f}"
             out.append(row + (f" {v * b2t:>14,.0f}" if b2t else ""))
         if not b2t:
             out.append("")

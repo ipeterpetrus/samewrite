@@ -117,7 +117,13 @@ def main():
                              capture_output=True, text=True).stdout
         check("header carry memakai byte", "carry_B" in txt and "carry_bytes=" in txt, True)
         check("nol kolom token tanpa --b2t", "carry_tok" in txt, False)
-        raw = [int(x.split()[1].replace(",", "")) for x in txt.splitlines()
+        # kolom-2 adalah %carry: parser posisional lama (int di field-2) HARUS melempar
+        try:
+            int([x.split()[1] for x in txt.splitlines() if x.startswith("Bash ")][0])
+            check("parser posisional lama gagal keras", False, True)
+        except (ValueError, IndexError):
+            check("parser posisional lama gagal keras", True, True)
+        raw = [int(x.split()[2].replace(",", "")) for x in txt.splitlines()
                if x.startswith("Bash ")]
         tok = subprocess.run([sys.executable, CARRY, p, "--min-turns", "1", "--b2t", "2"],
                              capture_output=True, text=True).stdout
