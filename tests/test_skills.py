@@ -61,6 +61,17 @@ def main():
         check("nama ber-plugin dan slash polos jatuh ke entri yang sama", rows["plug:beta"], 2)
         check("entri tak terpakai tetap nol", rows["gamma"], 0)
 
+        # Basename yang dipakai DUA plugin tak boleh saling menghangatkan: memanggil
+        # `b:deploy` tidak boleh membuat `a:deploy` tampak terpakai. Ditemukan lewat uji
+        # mutasi — tanpa kasus ini, pemetaan basename yang salah lolos suite.
+        ent2 = [("a:deploy", 100), ("b:deploy", 100), ("solo", 50)]
+        uses2 = {"b:deploy": 3, "solo": 1, "deploy": 7}
+        sess2 = {"b:deploy": {"s1"}, "solo": {"s2"}, "deploy": {"s3"}}
+        r2 = dict((r[0], r[2]) for r in skills.tally(ent2, uses2, sess2))
+        check("basename ambigu: a:deploy tetap dingin", r2["a:deploy"], 0)
+        check("basename ambigu: b:deploy hanya hitung dirinya", r2["b:deploy"], 3)
+        check("basename unik tetap menyerap nama polos", r2["solo"], 1)
+
         out = subprocess.run([sys.executable, SK, p], capture_output=True, text=True).stdout
         check("dingin dihitung dan dihargai", "1/3 entries" in out, True)
         check("keluaran menyebut jalur tindakan", "skillOverrides" in out, True)

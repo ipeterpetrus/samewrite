@@ -75,12 +75,22 @@ def diffstat(cur_b, new_b):
         return None
 
 
-def note(event, **fields):
+def note(event, _target=None, **fields):
     """Catat satu baris JSONL bila SAMEWRITE_LEDGER diset. Sengaja bebas-identitas:
-    tanpa path, tanpa isi, tanpa nama berkas. Gagal menulis tak pernah menghalangi kerja."""
+    tanpa path, tanpa isi, tanpa nama berkas. Gagal menulis tak pernah menghalangi kerja.
+
+    `_target` = berkas yang sedang dinilai. Kalau ledger menunjuk berkas yang SAMA, menulis
+    ke sana akan MENGUBAH berkas yang baru saja dinyatakan tak berubah — pemeriksaan no-op
+    yang justru menghasilkan dua baris baru lalu menolak write-nya."""
     p = os.environ.get(LEDGER_ENV)
     if not p:
         return
+    if _target:
+        try:
+            if os.path.realpath(p) == os.path.realpath(_target):
+                return
+        except Exception:
+            return
     try:
         rec = {"ts": int(time.time()), "host": os.uname().nodename, "event": event}
         rec.update(fields)
@@ -107,6 +117,9 @@ def deny(reason):
 # jalur itu yang isinya SAMA PERSIS. Menutup satu pintu sementara pintu sebelahnya
 # terbuka bukan penegakan, itu dekorasi.
 #
+# ⚠️ TIDAK DIPASANG OLEH `hooks/install.sh`. Installer mendaftarkan matcher `Write` SAJA,
+# dan itu disengaja: lihat angka di bawah. Kode jalur Bash ada dan teruji, tapi menyalakannya
+# butuh menambahkan `Bash` ke matcher secara sadar — bukan efek samping memasang guard ini.
 # ⚠️ JANGKAUAN TERUKUR DI KORPUS PENULIS: **0 dari 1.136**. Kode di bawah benar dan
 # tesnya lulus, tapi ia tak pernah cocok dengan lalu lintas nyata, karena **100% no-op
 # heredoc di arsip punya perintah SESUDAH bloknya** (88,7% perintah lain, 11,3% chmod) —
@@ -199,6 +212,12 @@ def main():
         real = os.path.realpath(path)    # realpath menyelesaikan symlink SEBELUM keputusan
         if os.path.commonpath([root, real]) != root:
             allow()
+        # Nama symlink bisa TAK bernilai-rahasia sementara targetnya rahasia: sebuah tautan
+        # bernama polos yang menunjuk berkas kredensial lolos `sensitive(path)` di atas, lalu
+        # isinya dibaca dan jawaban deny/allow menjadi oracle kesetaraan atas berkas yang hook
+        # lain sengaja larang dibaca. Periksa target yang SUDAH diresolusi juga.
+        if sensitive(real):
+            allow()
     except Exception:
         allow()
     try:
@@ -218,7 +237,7 @@ def main():
     except Exception:
         allow()                          # tak terbaca / biner / izin -> jangan halangi
     if cur == new_b:
-        note("checked", bytes=len(new_b), same=True)
+        note("checked", _target=path, bytes=len(new_b), same=True)
         n = new.count("\n") + (0 if new.endswith("\n") or not new else 1)
         note("denied", bytes=len(new_b), lines=n)
         deny(

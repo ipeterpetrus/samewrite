@@ -101,6 +101,20 @@ with tempfile.TemporaryDirectory() as d:
           bash("cat > %s <<'EOF'\nline1\nline2\nEOF" % globby), False)
     check("path ber-substitusi perintah -> allow",
           bash("cat > \"$(printf %%s)%s\" <<'EOF'\nline1\nline2\nEOF" % same), False)
+    # Tautan bernama AMAN yang menunjuk berkas bernilai-rahasia: namanya lolos penyaring,
+    # targetnya tidak boleh. Tanpa pemeriksaan pada path ter-resolusi, guard akan DENY dan
+    # jawabannya menjadi oracle kesetaraan atas isi berkas itu.
+    link_ok = os.path.join(ROOT[0], "biasa.txt")
+    secret_t = w(ROOT[0], "rahasia_token.txt", "line1\nline2\n")
+    try:
+        if not os.path.lexists(link_ok):
+            os.symlink(secret_t, link_ok)
+        check("tautan bernama aman -> target rahasia -> allow (bukan oracle)",
+              run({"tool_name": "Write", "tool_input": {"file_path": link_ok,
+                   "content": "line1\nline2\n"}})[0], False)
+    except OSError:
+        pass
+
     check("heredoc ke path sensitif -> allow (jangan jadi oracle)",
           bash("cat > %s/id_rsa <<'EOF'\nline1\nline2\nEOF" % ROOT[0]), False)
     # 8: fail-open

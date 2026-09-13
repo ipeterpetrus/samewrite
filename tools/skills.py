@@ -109,9 +109,17 @@ def scan(paths):
 def tally(entries, uses, sess):
     """Count an entry's uses under every name it can be invoked by."""
     rows = []
+    # Basename yang dipakai oleh LEBIH DARI SATU entri tak boleh dipetakan ke salah satunya:
+    # `plugin-a:deploy` akan tampak terpakai begitu `plugin-b:deploy` dipanggil, dan entri
+    # dingin jadi terlihat hangat — persis kesimpulan yang alat ini dipakai untuk menarik.
+    import collections as _c
+    base_count = _c.Counter(n.split(":")[-1] for n, _ in entries)
     for name, size in entries:
         base = name.split(":")[-1]
-        keys = {name, base} | {k for k in uses if k.endswith(":" + base)}
+        keys = {name}
+        if base_count[base] == 1:          # bare/slash name hanya ambigu kalau basename unik
+            keys |= {base}
+            keys |= {k for k in uses if k.endswith(":" + base)}
         n = sum(uses.get(k, 0) for k in keys)
         s = set()
         for k in keys:

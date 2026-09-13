@@ -79,6 +79,11 @@ def scan(path):
                     i, cmd = hit
                     r = b.get("content")
                     rows.append((i, nbytes(cmd), nbytes(r), cmd))
+    # Command yang tak pernah mendapat result (sesi terputus, tool dibatalkan) tetap DIKIRIM
+    # dan tetap di-replay — carry.py menghitungnya sebagai call:Bash. Membuangnya di sini
+    # membuat dua alat melaporkan populasi berbeda atas transkrip yang sama.
+    for i, cmd in pend.values():
+        rows.append((i, nbytes(cmd), 0, cmd))
     return N, rows
 
 

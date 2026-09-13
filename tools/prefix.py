@@ -55,15 +55,42 @@ def snapshot(path):
     return None
 
 
-def accumulate(paths):
+def turns_with_usage(path):
+    """Jumlah turn dengan definisi yang SAMA seperti carry.py: record assistant ber-`usage`.
+    Tanpa ini, kohort prefix.py (semua sesi ber-snapshot) tak sebanding dengan kohort
+    carry.py (default >= 50 turn) — dan angkanya diperbandingkan orang."""
+    n = 0
+    try:
+        fh = open(path, encoding="utf-8")
+    except OSError:
+        return 0
+    with fh:
+        for line in fh:
+            if '"usage"' not in line:
+                continue
+            try:
+                o = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(o, dict) and o.get("type") == "assistant" \
+                    and isinstance((o.get("message") or {}).get("usage"), dict):
+                n += 1
+    return n
+
+
+def accumulate(paths, min_turns=0):
     tools = collections.Counter()            # name -> largest definition seen
-    totals, sysb, both, n = [], [], [], 0
+    totals, sysb, both, n, short, unreadable = [], [], [], 0, 0, 0
     for p in paths:
         try:
             hit = snapshot(p)
         except OSError:
+            unreadable += 1
             continue
         if not hit:
+            continue
+        if min_turns and turns_with_usage(p) < min_turns:
+            short += 1
             continue
         t, sp = hit
         n += 1
@@ -82,14 +109,18 @@ def accumulate(paths):
                 if not isinstance(name, str):     # unhashable / odd shapes must not crash
                     name = json.dumps(name, ensure_ascii=False)[:60]
                 tools[name] = max(tools[name], nbytes(x))
-    return dict(tools=tools, totals=totals, sysb=sysb, both=both, sessions=n)
+    return dict(tools=tools, totals=totals, sysb=sysb, both=both, sessions=n, short=short, unreadable=unreadable)
 
 
 def render(a):
     if not a["sessions"]:
-        return ("no prompt_snapshot found: this archive predates it, or the CLI is not "
+        return (f"no prompt_snapshot found ({a.get('unreadable', 0)} unreadable, "
+                f"{a.get('short', 0)} below --min-turns): this archive predates it, or the CLI is not "
                 "recording one. Nothing measured — that is not the same as nothing there.\n")
-    out = [f"# {a['sessions']} session(s) with a recorded prompt snapshot", ""]
+    sh = a.get("short") or 0
+    out = [f"# {a['sessions']} session(s) with a recorded prompt snapshot"
+           + (f" ({sh} skipped by --min-turns)" if sh else "")
+           + (f" · {a['unreadable']} unreadable" if a.get("unreadable") else ""), ""]
     med = statistics.median(a["totals"])
     out.append(f"  tool schemas : median {med:>9,.0f} B  ~{med * B2T:>8,.0f} tok")
     if a["sysb"]:
@@ -140,6 +171,9 @@ def _selfcheck():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("files", nargs="*")
+    ap.add_argument("--min-turns", type=int, default=0,
+                    help="hanya sesi dengan >= N turn ber-usage (carry.py default 50; di sini "
+                         "0 supaya semua snapshot terlihat — samakan sendiri saat membandingkan)")
     ap.add_argument("--selfcheck", action="store_true")
     args = ap.parse_args()
     if args.selfcheck:
@@ -147,7 +181,7 @@ def main():
         return 0
     if not args.files:
         ap.error("need transcript files (or --selfcheck)")
-    a = accumulate(args.files)
+    a = accumulate(args.files, args.min_turns)
     sys.stdout.write(render(a))
     return 2 if not a["sessions"] else 0
 

@@ -208,7 +208,10 @@ def main():
     sys.stdout.write(render(a, args.markdown))
     # exit non-zero when nothing was recognised: a zero-record run is a schema mismatch,
     # not a finding, and a pipeline must be able to tell the two apart.
-    return 2 if not sum(a["carry"].values()) else 0
+    # Exit bukan-nol menandai SCHEMA MISMATCH ("tak ada record dikenali"), bukan "carry nol".
+    # Sesi sah yang seluruh isinya jatuh di turn terakhir punya carry 0 dan itu hasil yang
+    # benar — meng-exit 2 di sana menyuruh pipeline mengira parsernya rusak.
+    return 2 if not a["sessions"] else 0
 
 
 if __name__ == "__main__":
