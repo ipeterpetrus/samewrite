@@ -103,9 +103,19 @@ def deny(reason):
 
 
 # `cat > f <<'EOF'` lewat Bash menulis berkas persis seperti Write, tetapi tidak pernah
-# melewati matcher Write — dan pengukuran arsip menemukan 2.099 tulis-ulang berkas lewat
-# jalur itu dengan changed fraction MEDIAN 0,000. Menutup satu pintu sementara pintu
-# sebelahnya terbuka bukan penegakan, itu dekorasi.
+# melewati matcher Write — dan pengukuran arsip menemukan 1.136 tulis-ulang berkas lewat
+# jalur itu yang isinya SAMA PERSIS. Menutup satu pintu sementara pintu sebelahnya
+# terbuka bukan penegakan, itu dekorasi.
+#
+# ⚠️ JANGKAUAN TERUKUR DI KORPUS PENULIS: **0 dari 1.136**. Kode di bawah benar dan
+# tesnya lulus, tapi ia tak pernah cocok dengan lalu lintas nyata, karena **100% no-op
+# heredoc di arsip punya perintah SESUDAH bloknya** (88,7% perintah lain, 11,3% chmod) —
+# nol yang berdiri sendiri. Syarat "perintah tunggal" ada demi KEBENARAN: menolak
+# `cat > f <<'EOF' … EOF` yang diikuti `chmod +x f` ikut membatalkan chmod-nya, dan itu
+# bukan no-op. Kebenaran dan jangkauan di sini saling meniadakan.
+# Angka ini DIBIARKAN di sini alih-alih kodenya dihapus diam-diam: yang berikut membaca
+# berhak tahu jalur ini sudah dicoba, dan kenapa ia tak membayar. Jangan pasang matcher
+# Bash atas dasar kode ini tanpa mengukur ulang jangkauannya di korpusmu sendiri.
 #
 # Sengaja SEMPIT — tiap syarat di bawah ada karena melanggarnya membuat jawaban SALAH,
 # bukan karena kehati-hatian umum:
