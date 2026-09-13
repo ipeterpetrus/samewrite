@@ -102,7 +102,11 @@ def main():
         # markdown: tabel valid, persentase menjumlah ~100
         md = subprocess.run([sys.executable, CARRY, p, "--markdown", "--min-turns", "1"],
                             capture_output=True, text=True).stdout
-        pct = [float(x.split("|")[2].strip().rstrip("%")) for x in md.splitlines()
+        # HANYA tabel "Carry by source": dokumen kini memuat tabel lain yang juga
+        # berbaris "| `...`" (per-turn berharga) dan kolom-2-nya BUKAN persen.
+        # Memindai seluruh dokumen membuat tes ini menuduh tabel yang tak bersalah.
+        body = md.split("## Carry by source", 1)[1]
+        pct = [float(x.split("|")[2].strip().rstrip("%")) for x in body.splitlines()
                if x.startswith("| `")]
         check("markdown: persentase carry menjumlah 100", round(sum(pct)), 100)
 
