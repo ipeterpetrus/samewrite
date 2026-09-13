@@ -213,6 +213,36 @@ def render(a, markdown=False, b2t=None):
     return "\n".join(out) + "\n"
 
 
+def trend(records, key, min_n=4):
+    """Arah jangka panjang satu sumber, dan apakah nilai terakhirnya keluar dari kebiasaan.
+
+    Membandingkan dengan record SEBELUMNYA saja hanya bisa bilang "naik sejak kemarin" —
+    dua titik tak punya arah. Dengan seluruh berkas: slope per hari (regresi kuadrat
+    terkecil atas waktu) dan sebaran historis, jadi lonjakan sesaat bisa dibedakan dari
+    pergeseran yang bertahan. Ini bagian yang benar-benar menajam saat berkasnya tumbuh:
+    makin banyak titik, makin sempit sebarannya dan makin bermakna slope-nya.
+    Mengembalikan None di bawah min_n — arah dari tiga titik adalah tebakan berbaju angka.
+    """
+    pts = [(r["ts"], r["shares"][key]) for r in records
+           if isinstance(r.get("shares"), dict) and key in r["shares"] and r.get("ts")]
+    if len(pts) < min_n:
+        return None
+    t0 = pts[0][0]
+    xs = [(t - t0) / 86400.0 for t, _ in pts]      # hari sejak record pertama
+    ys = [v for _, v in pts]
+    n = len(xs)
+    sx, sy = sum(xs), sum(ys)
+    sxx = sum(x * x for x in xs)
+    sxy = sum(x * y for x, y in zip(xs, ys))
+    den = n * sxx - sx * sx
+    slope = (n * sxy - sx * sy) / den if den else 0.0
+    mean = sy / n
+    var = sum((y - mean) ** 2 for y in ys) / n
+    sd = var ** 0.5
+    z = (ys[-1] - mean) / sd if sd > 1e-9 else 0.0
+    return {"n": n, "days": xs[-1], "slope": slope, "mean": mean, "sd": sd, "z": z}
+
+
 def history(path, a, C):
     """Append this run's shares and compare against the previous one.
 
@@ -230,6 +260,7 @@ def history(path, a, C):
            # share sendirian bisa menceritakan gerakan yang tak pernah terjadi.
            "bpt": {k: round(a["size"][k] / T, 2) for k, _ in a["carry"].most_common()}}
     prev = None
+    records = []
     try:
         with open(path, encoding="utf-8") as fh:
             for line in fh:                   # last valid record wins
@@ -242,6 +273,7 @@ def history(path, a, C):
                     continue
                 if isinstance(o, dict) and isinstance(o.get("shares"), dict):
                     prev = o
+                    records.append(o)
     except OSError:
         pass
     try:
@@ -287,6 +319,27 @@ def history(path, a, C):
         out.append("  " + line.strip().ljust(0))
     for k in gone[:3]:
         out.append(f"    {k} disappeared")
+
+    # TREN: butuh seluruh berkas, bukan dua titik terakhir.
+    hist = records + [now]
+    tr = []
+    for k in list(now["shares"])[:12]:
+        t = trend(hist, k)
+        if not t or t["days"] < 0.5:
+            continue
+        per_month = t["slope"] * 30
+        if abs(per_month) >= 0.2 or abs(t["z"]) >= 2.0:
+            tag = "outlier" if abs(t["z"]) >= 2.0 else ""
+            tr.append((abs(per_month), f"    {k:30s} {per_month:+6.2f} pts/month"
+                                       f"  over {t['n']} runs / {t['days']:.0f}d  {tag}".rstrip()))
+    if tr:
+        out.append("")
+        out.append(f"  trend across {len(hist)} runs (slope of share over time):")
+        for _, line in sorted(tr, reverse=True)[:6]:
+            out.append(line)
+    elif len(hist) < 4:
+        out.append("")
+        out.append(f"  trend: {len(hist)} run(s) recorded — needs 4 before direction means anything.")
     return out
 
 

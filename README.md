@@ -48,10 +48,15 @@ reporting numbers and starts reporting **movement** — which source grew, which
 over how many turns. The file holds shares and counts only: no paths, no filenames, no
 content.
 
-Two things it deliberately does not do. It compares against the **previous record only**,
-not a trend over the whole file — so "the longer you keep it the sharper it gets" would be
-a nicer sentence than it is a true one. And it refuses to report a delta at all when the
-two runs scanned corpora of different sizes, because a change in scope is not movement.
+Two records give you a delta; four or more give you a **direction**. Once the file holds
+enough runs it also reports the slope of each source's share over time (points per month)
+and flags a value that sits more than two standard deviations from its own history — so a
+one-off spike reads differently from a shift that is holding. Below four runs it says so
+instead of guessing: direction from three points is a guess wearing a number.
+
+One thing it deliberately refuses: a delta across runs that scanned corpora of different
+sizes. A change in scope is not movement, and reporting it as movement manufactures a
+trend out of a change in glob.
 
 **Start here:** the conclusions are directly below · the measured ranking is in
 [Where the tokens go](#where-the-tokens-go) · what to run on your own logs is in

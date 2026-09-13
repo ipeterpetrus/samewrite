@@ -154,6 +154,26 @@ def main():
                              "--history", hp2], capture_output=True, text=True).stdout
         check("korpus berubah -> delta DITOLAK", "corpus changed" in h3, True)
         check("korpus berubah -> nol angka delta palsu", "since last run" in h3, False)
+
+        # TREN: arah jangka panjang butuh SELURUH berkas, bukan dua titik terakhir, dan
+        # tak boleh diklaim dari sampel kecil. Slope diuji terhadap kemiringan yang dibuat.
+        import time as _t
+        base = int(_t.time()) - 60 * 86400
+        recs = []
+        for i in range(6):
+            recs.append({"ts": base + i * 12 * 86400, "sessions": 10, "turns": 1000 + i * 100,
+                         "carry_bytes": 10 ** 6, "scanned": 100,
+                         "shares": {"Bash": 50 + i * 1.5, "Read": 30 - i * 1.0},
+                         "bpt": {"Bash": 100, "Read": 100}})
+        t = carry.trend(recs, "Bash")
+        check("trend: slope per hari benar", round(t["slope"] * 30, 2), 3.75)
+        check("trend: n dihitung", t["n"], 6)
+        check("trend: <4 record tak mengklaim arah", carry.trend(recs[:3], "Bash"), None)
+        # outlier: nilai terakhir jauh dari kebiasaan
+        flat = [{"ts": base + i * 86400, "shares": {"X": 10.0}} for i in range(6)]
+        flat.append({"ts": base + 7 * 86400, "shares": {"X": 25.0}})
+        to = carry.trend(flat, "X")
+        check("trend: lonjakan terakhir terbaca sebagai outlier", abs(to["z"]) >= 2.0, True)
         rawtok = [int(x.split()[-1].replace(",", "")) for x in tok.splitlines()
                   if x.startswith("Bash ")]
         if raw and rawtok:
