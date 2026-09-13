@@ -135,7 +135,7 @@ def main():
         h1 = subprocess.run([sys.executable, CARRY, p, "--min-turns", "1", "--history", hp],
                             capture_output=True, text=True).stdout
         check("history: run pertama bilang first record", "first record" in h1, True)
-        h2 = subprocess.run([sys.executable, CARRY, p, p2, "--min-turns", "1", "--history", hp],
+        h2 = subprocess.run([sys.executable, CARRY, p, "--min-turns", "1", "--history", hp],
                             capture_output=True, text=True).stdout
         check("history: run kedua melapor sejak-run-terakhir", "since last run" in h2, True)
         hraw = open(hp, encoding="utf-8").read()
@@ -145,6 +145,15 @@ def main():
         check("history tak memuat path absolut apa pun", "/home/" in hraw or "/tmp/" in hraw, False)
         check("history tak memuat isi tool", "zzz" in hraw, False)
         check("history memuat share", '"shares"' in hraw, True)
+        # Delta hanya sah kalau korpusnya sebanding. Run atas 1 berkas lalu 2 berkas
+        # BUKAN pergerakan; tanpa cek ini ia dilaporkan seolah-olah pergerakan.
+        hp2 = os.path.join(d, "hist2.jsonl")
+        subprocess.run([sys.executable, CARRY, p, "--min-turns", "1", "--history", hp2],
+                       capture_output=True, text=True)
+        h3 = subprocess.run([sys.executable, CARRY, p, p2, "--min-turns", "1",
+                             "--history", hp2], capture_output=True, text=True).stdout
+        check("korpus berubah -> delta DITOLAK", "corpus changed" in h3, True)
+        check("korpus berubah -> nol angka delta palsu", "since last run" in h3, False)
         rawtok = [int(x.split()[-1].replace(",", "")) for x in tok.splitlines()
                   if x.startswith("Bash ")]
         if raw and rawtok:

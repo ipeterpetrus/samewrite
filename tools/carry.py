@@ -102,9 +102,10 @@ def bucket(src):
 def accumulate(paths, min_turns=50):
     carry, size, usage = collections.Counter(), collections.Counter(), collections.Counter()
     turns = sessions = 0
-    unreadable = short = 0
+    unreadable = short = scanned = 0
     lengths = []
     for p in paths:
+        scanned += 1
         try:
             N, items, u = scan(p)
         except OSError:
@@ -123,7 +124,7 @@ def accumulate(paths, min_turns=50):
             size[b] += n
     return dict(sessions=sessions, turns=turns, lengths=sorted(lengths),
                 carry=carry, size=size, usage=usage,
-                unreadable=unreadable, short=short)
+                unreadable=unreadable, short=short, scanned=scanned)
 
 
 # Relative price of one token in each bucket, base input = 1.0. A bucket's share of the
@@ -221,7 +222,7 @@ def history(path, a, C):
     Stores shares and byte counts only: no paths, no filenames, no content.
     """
     now = {"ts": int(time.time()), "sessions": a["sessions"], "turns": a["turns"],
-           "carry_bytes": C,
+           "carry_bytes": C, "scanned": a.get("scanned", 0),
            "shares": {k: round(100 * v / C, 4) for k, v in a["carry"].most_common()}}
     prev = None
     try:
@@ -246,6 +247,15 @@ def history(path, a, C):
     if not prev:
         return ["", f"  history: first record written to {os.path.basename(path)} — "
                     "run again later and this section will show what moved."]
+    # Delta hanya berarti kalau KORPUSNYA sebanding. Menjalankan atas satu transkrip lalu
+    # atas seluruh arsip menghasilkan selisih belasan poin yang BUKAN pergerakan apa pun —
+    # dan tanpa cek ini, "since last run" menyajikannya seolah-olah pergerakan.
+    p_scan = prev.get("scanned") or 0
+    n_scan = now["scanned"]
+    if p_scan and n_scan and (max(p_scan, n_scan) / min(p_scan, n_scan)) > 1.5:
+        return ["", f"  corpus changed: {p_scan:,} files scanned last time, {n_scan:,} now.",
+                "    Shares are NOT comparable across different inputs — no delta reported.",
+                "    Point both runs at the same glob if you want movement."]
     days = (now["ts"] - prev.get("ts", now["ts"])) / 86400.0
     rows = []
     for k, v in now["shares"].items():
