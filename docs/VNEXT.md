@@ -1,7 +1,8 @@
-# SameWrite vNext — build report (2026-09-14)
+# SameWrite vNext — build report (2026-09-14/15)
 
-Status line for this iteration is in [§9](#9-release-gate-and-status). Everything below is
-either measured here, labelled `EXTERNALLY_REPORTED`, or labelled `UNTESTED`.
+**CURRENT state is §12 (hardening + confirmatory run).** §1–§9 are the first build (HISTORICAL:
+the mode machinery they describe was removed in §11), §11 the continuation (SUPERSEDED where §12
+differs). Everything is measured here, labelled `EXTERNALLY_REPORTED`, or labelled `UNTESTED`.
 
 ## 1. What changed
 
@@ -289,7 +290,7 @@ same 110 results (0 excluded, all arms 10/10).
 
 ## 10. Files changed
 
-Against `0aec7ce` (`git diff --stat`, after the continuation in §11), all local until the release branch is pushed:
+Against `0aec7ce` (`git diff --stat`, after the continuation in §11; pushed as `release/vnext-1.1.0`, PR #2):
 
 ```
 .claude-plugin/marketplace.json                |   2 +-
@@ -448,3 +449,70 @@ direction and instrument validation, not significance.
 Verdict for this continuation: **NOT_PROVEN** (human-output gain not shown for the zero-hook
 default at n = 8; shown as direction only for the opt-in one-liner). Everything shipped is
 labelled accordingly.
+
+## 12. Hardening + proof pass (2026-09-15) — CURRENT
+
+### 12.1 Remote CI was red: root cause and fix
+
+GitHub Actions on `cc1057e` failed both matrix lanes in `experiments/vnext/selftest.py` with
+`56 PASS / 12 FAIL` — every build fixture's golden (expected ROOT) and symptom (expected SYMPTOM)
+came back `FAIL`. Reproduced exactly in a clean venv (`python -m venv --without-pip`) and in
+`python:3.9-slim` / `python:3.12-slim` containers: **`pytest` is not preinstalled on the runner**,
+`python -m pytest` exits 1 with `No module named pytest`, and the rig folded that return code into
+a model `FAIL`. The developer machine had pytest, so "local CI-equivalent passed" was an
+environment artefact, not evidence.
+
+Fix (commit `786928e`): `requirements-test.txt` (`pytest>=7.4,<9` — 9.x requires Python 3.10, the
+matrix keeps 3.9) installed explicitly in the workflow; `fail-fast: false`; `run_pytest()` /
+`classify_pytest()` return one of three states (passed, failed, infrastructure) with the pytest
+output saved beside the run; `verdict()` emits **`INFRA_ERROR`** for a missing runner, usage or
+internal error, zero tests collected, all tests skipped, CLI failure or timeout; `metrics()` marks
+empty, truncated or usage-less transcripts `transcript_ok=false`. `analyze*.py` exclude and count
+those rows; they never enter a correctness or human_ok tally. Self-tests: 86 (vnext) + 38
+(presentation) + 75 (confirmatory), including missing runner → INFRA_ERROR, model syntax error →
+FAIL, test-file syntax error → INVALID, stale `.pyc` → still ROOT, empty / truncated / usage-less
+transcript, foreign-banner contamination. The container run found a second sensitivity: tests
+hardcoded `/usr/bin/python3` (absent in `python:*-slim`); they now use `sys.executable`.
+
+Result: clean `python:3.9-slim` (3.9.25) and `python:3.12-slim` (3.12.14) containers, repository mounted read-only, `pip install -r requirements-test.txt` only — every suite, all three instrument self-tests, the adapter drift check, the README assertion count, the synthetic end-to-end run and the redaction check pass (`CI_LOCAL_OK`). GitHub Actions on `786928e`: both lanes green on the push run (34877517231) and on the pull-request run (34877521771), i.e. on the PR's synthetic merge commit as well as the branch head.
+
+### 12.2 Skill-body activation (§16)
+
+Probe (`experiments/presentation/activation_probe.py`, `runs/probe1.jsonl`, 6 runs, arm D, haiku-4-5,
+`claude -p`): the body reached the model in **0/2** runs of an ordinary fix prompt, **1/2** when the
+prompt named the skill ("Follow the samewrite skill"), and **2/2** when the prompt started with
+`/samewrite` — in that case Claude Code expands the skill into the user message
+(`<command-name>/samewrite</command-name>` + the body) without a `Skill` tool call, which is why
+the earlier "0 Skill tool calls in 174 runs" count could not see it. All 6 runs fixed the bug
+except one implicit run; the `/samewrite` runs cost the most output tokens (3,266 / 4,356 vs
+2,639–3,439), consistent with a 4.7 kB body being read and followed.
+
+Answers: (1) yes — a Claude Code skill body is loaded only when the model calls the `Skill` tool
+or the user types `/samewrite`; the listing description is the always-on channel; (2) see the probe;
+(3) no — SameWrite's measured savings (no-op writes, the edit rule, tool-output economy, the
+terseness sentence) come from the guard hook and from short always-on text, not from the body;
+(4) yes — the guard is deterministic and the one-sentence SessionStart line is ~170 bytes;
+(5) the listing description (0 extra bytes) and the SessionStart line (one small injection per
+session); nothing here expands per-turn context.
+
+### 12.3 Evidence-driven optimization loop (§17–§20) — what exists, no new runtime
+
+| stage | mechanism (existing) | privacy | runtime cost |
+|---|---|---|---|
+| measure aggregates | Claude Code transcripts + `hooks/write_noop_guard.py` ledger (`SAMEWRITE_LEDGER`: event, bytes, blocks, changed fraction, hashed host) | ledger holds no path, filename or content (tested: `tests/test_write_noop_guard.py` "ledger TIDAK memuat path") | one stat + one read per `Write` |
+| append privacy-safe evidence | `tools/carry.py --history PATH` (shares and counts per run) | no paths, no content (tested: `tests/test_carry.py`); `extract.py` redacts by default (CI "redaction holds") | offline |
+| periodic analysis | `carry.py --history` trend / slope / z-score; `tools/report.py`; `tools/health.py`; `tools/skills.py` | aggregates only | offline |
+| candidate optimization | a policy change written as text (skill) or code (hook) | — | — |
+| A/B or regression proof | `experiments/vnext`, `experiments/presentation` rigs with self-tested oracles and pre-registration | isolated configs, credential copy deleted after the run | paid runs, offline |
+| human-reviewed promotion | pull request; nothing promotes itself | — | — |
+
+No runtime component reads history into the model context; nothing rewrites the skill. The
+phrase this repo may use is "evidence-driven optimization loop", not "self-learning".
+
+### 12.4 Confirmatory presentation run (§9–§13) — pre-registered, fresh fixtures
+
+CONFIRM_RESULT
+
+### 12.5 Final gate
+
+FINAL_GATE

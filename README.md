@@ -121,22 +121,26 @@ has no off-switch to claim.
 
 All isolated: a fresh `CLAUDE_CONFIG_DIR` per run, `claude-haiku-4-5-20251001`, pinned flags,
 mechanical oracles that were proven to turn RED on planted bad fixtures before any paid run, and
-pre-registered contrasts. Losing cases are listed by name in the reports.
+pre-registered contrasts. Infrastructure failures (a missing test runner, a broken transcript) are
+classified `INFRA_ERROR` and excluded, never counted as a model failure — the CI run that first
+exposed this is in [docs/VNEXT.md §12](docs/VNEXT.md). Losing cases are listed by name in the reports.
 
-- **vNext pilot** (`experiments/vnext/`, 11 arms × 10 fixtures, 0 rows excluded): every arm,
+- **vNext pilot — HISTORICAL** (`experiments/vnext/`, 11 arms × 10 fixtures, 0 rows excluded): every arm,
   the bare agent included, reached 10/10 correct — the fixtures could not separate arms on
   correctness; the new skill was cheaper than the old one on 4/10 fixtures (median +1.4%) and
   dearer than a one-sentence prefix on 8/10. Verdict **NOT_PROVEN**. Adding the skill to Ponytail,
   i-have-adhd or both lost no correctness. In these runs the skill *body* was invoked 0 times: under
   `claude -p` only the listing entry reaches the model, which is why the human-output rule also
   lives in the listing description.
-- **Presentation pilot** (`experiments/presentation/`, 8 arms × 8 adversarial cases including a
+- **Presentation pilot — HISTORICAL, superseded by the confirmatory run below** (`experiments/presentation/`, 8 arms × 8 adversarial cases including a
   three-turn task and a contradictory-tests blocker): correctness 7/8 in every arm — the shared miss
   is the blocker, where the model edited the contradictory test in all 8 arms. The human-output
   contract held on 5/8 cases with the new description alone (6/8 before), **7/8** with the one-sentence
   SessionStart injection (`SAMEWRITE_OUTPUT_HOOK=1`, opt-in, +163 bytes per session start), 4/8 for
   the full i-have-adhd hook at twice the injected bytes; requested detail stayed full everywhere.
   Verdict **NOT_PROVEN** for the zero-hook default; direction only for the hook.
+- **Confirmatory presentation run — CURRENT** (`experiments/presentation/PREREGISTRATION_confirm.md`,
+  16 fresh held-out cases, 8 arms, 2 repetitions, frozen before the run): CONFIRM_SUMMARY
 - **Earlier rounds** (`experiments/skill-ab/`, 462 scored runs): the terseness sentence
   replicates in two languages; three always-on blocks did not beat one sentence; the
   systematic-debugging skill cost +67.6% tokens and reached the root cause no more often than the
@@ -193,8 +197,9 @@ Every tool routes through one `scan()`; point it at another agent's JSONL if it 
 usage, tool calls and replay semantics — the carry model is exact only for append-only,
 full-replay contexts.
 
-Run the suites: `for t in tests/test_*.py; do python3 $t; done` — each file stands alone and
-exits non-zero on failure. `python3 experiments/vnext/selftest.py` and
+Run the suites: `python3 -m pip install -r requirements-test.txt` (pytest is the only test-time
+dependency; the runtime is standard library) then `for t in tests/test_*.py; do python3 $t; done` —
+each file stands alone and exits non-zero on failure. `python3 experiments/vnext/selftest.py` and
 `experiments/presentation/selftest_pres.py` prove the benchmark scorers can fail.
 
 Support: none promised. A measurement result with tooling attached, published because the

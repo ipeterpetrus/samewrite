@@ -175,6 +175,21 @@ def verdict(spec, d, out):
 
 
 def run_one(arm, name, rep, cfg, model, timeout):
+    """Pembungkus: exception apa pun di dalam satu run menjadi baris INFRA_ERROR ber-traceback —
+    BUKAN kematian loop utama. Run konfirmatori 14-Sep kehilangan 125 baris karena satu
+    FileNotFoundError (agen menghapus berkas fixture) dilempar lewat fut.result()."""
+    try:
+        return _run_one(arm, name, rep, cfg, model, timeout)
+    except Exception:
+        import traceback
+        return dict(arm=arm, arm_desc=ARMS.get(arm, ("?",))[0], fixture=name, kind=FIXTURES.get(name, {}).get("kind", "?"), rep=rep, model=model,
+                    rc=-2, sec=0, verdict="INFRA_ERROR", human_ok=False, classify_last=classify(""), classify_turns=[],
+                    files_changed=[], files_added=[], diff_add=0, diff_rem=0, out_chars=[], work="",
+                    treatment_ok=False, turns=0, usage={}, weighted_input=0, per_turn=[], injected_bytes=0,
+                    listing_bytes=0, transcript_ok=False, infra_reason="rig exception: " + traceback.format_exc()[-800:])
+
+
+def _run_one(arm, name, rep, cfg, model, timeout):
     spec = FIXTURES[name]
     work = tempfile.mkdtemp(prefix=f"pr-{arm}-{name}-r{rep}-"); d = os.path.join(work, name); os.makedirs(d)
     for fn, body in spec["files"].items():
@@ -224,6 +239,7 @@ def main():
     ap.add_argument("--cfg-base", default=os.path.join(HERE, "cfg_pres"))
     ap.add_argument("--cred", default=os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.expanduser("~/.claude")), ".credentials.json"))
     ap.add_argument("--fixture-set", default="pres", choices=sorted(FIXTURE_SETS))
+    ap.add_argument("--resume", action="store_true", help="lewati job yang sudah punya baris di --out")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     global FIXTURES
@@ -231,6 +247,10 @@ def main():
     arms = a.arms.split(","); names = sorted(FIXTURES) if a.fixtures == "all" else a.fixtures.split(",")
     cli = subprocess.run([CLAUDE, "--version"], capture_output=True, text=True).stdout.strip()
     jobs = [(arm, n, r) for r in range(a.repeat) for n in names for arm in arms]
+    if a.resume and os.path.exists(a.out):          # lanjutkan: lewati (arm, fixture, rep) yang sudah punya baris
+        done = {(json.loads(l)["arm"], json.loads(l)["fixture"], json.loads(l).get("rep", 0)) for l in open(a.out) if l.strip()}
+        jobs = [j for j in jobs if j not in done]
+        print(f"resume: {len(done)} baris ada, {len(jobs)} job tersisa", flush=True)
     cfgs = {j: build_cfg(j[0], a.cfg_base, a.refs, a.cred, a.before, f"{j[1]}-r{j[2]}") for j in jobs}
     print(f"{len(jobs)} run · model={a.model} · cli={cli} · jobs={a.jobs} · one config per run", flush=True)
     try:

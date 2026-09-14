@@ -225,7 +225,8 @@ def diff_loc(spec, d):
     import difflib
     add = rem = 0
     for f, old in spec["files"].items():
-        new = open(os.path.join(d, f)).read()
+        fp = os.path.join(d, f)
+        new = open(fp).read() if os.path.exists(fp) else ""     # berkas dihapus agen = seluruh baris terhapus
         for line in difflib.unified_diff(old.splitlines(), new.splitlines(), lineterm="", n=0):
             if line.startswith("+") and not line.startswith("+++"):
                 add += 1

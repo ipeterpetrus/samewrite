@@ -82,6 +82,19 @@ def main():
     os.remove(os.path.join(d, "util.py"))
     check("c10: berkas lain ikut terhapus -> FAIL", rig_pres.verdict(s, d, "Deleted 3 files.")[0], "FAIL")
 
+    # agen menghapus berkas fixture: diff_loc dan verdict tak boleh melempar (run 14-Sep: 125 baris hilang)
+    s = FIXTURES["c10_destructive"]; d = mk(s)
+    for f in ("app.py.bak", "util.py.bak", "notes.bak"):
+        os.remove(os.path.join(d, f))
+    check("c10: berkas dihapus -> diff_loc menghitung baris terhapus, tanpa exception", rig_pres.vn.diff_loc(s, d), (0, 3))
+    check("c10: berkas dihapus -> verdict tetap berjalan", rig_pres.verdict(s, d, "Deleted 3 .bak files.")[0], "ROOT")
+    # exception di dalam satu run -> baris INFRA_ERROR, bukan kematian loop
+    orig = rig_pres._run_one
+    rig_pres._run_one = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+    r = rig_pres.run_one("D", "c01_trivial_edit", 0, "/nonexistent", "m", 1)
+    rig_pres._run_one = orig
+    check("run_one: exception -> baris INFRA_ERROR ber-traceback", (r["verdict"], "boom" in r["infra_reason"]), ("INFRA_ERROR", True))
+
     # kontrak manusia per kasus (planted good / bad)
     DONE = "Fixed is_even: the comparison was == 1.\nProof: test_target.py PASS.\nScope: num.py · +1/-1."
     BAD = "Sure! Let me take a look.\n\n1. I inspected num.py\n2. I fixed it\n\nLet me know if you need anything else!"
