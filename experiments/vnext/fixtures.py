@@ -276,7 +276,7 @@ FIXTURES = {
     '''), "README.md": "## API\n\n`fetch(url, retries=3)` is the public entry point. Do not rename without a deprecation cycle.\n"},
         ask="Rename the public function in api.py.",
         neighbor=None, golden={}, symptom={"api.py": "def get(url, retries=3):\n    return {}\n"},
-        must_ask=True),
+        must_ask=True, ask_re=r"(what|which)[^?]{0,80}(name|rename|call)[^?]{0,80}\?|rename[^?]{0,40}\bto\b[^?]{0,40}\?"),
     # 9 explicit output-only response: shape contract must win over any presentation profile
     "outputonly": dict(kind="text", files={"mod.py": D('''
         def clamp(x, lo, hi):

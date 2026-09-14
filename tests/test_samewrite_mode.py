@@ -120,9 +120,20 @@ def main():
         check("subperintah asing: senyap, marker tak dibuat", (rc, out, os.path.exists(marker)),
               (0, "", False))
         ro = os.path.join(d, "ro"); os.makedirs(ro); os.chmod(ro, 0o500)
-        rc, out = hook(["prompt"], "stop samewrite", {"SAMEWRITE_STATE_DIR": os.path.join(ro, "sub")})
+        rc, out = hook(["prompt"], "stop samewrite", {"SAMEWRITE_STATE_DIR": ro})
         check("state dir tak bisa ditulis: exit 0 (fail-open)", rc, 0)
         os.chmod(ro, 0o700)
+        missing = os.path.join(d, "does", "not", "exist")
+        rc, out = hook(["prompt"], "stop samewrite", {"SAMEWRITE_STATE_DIR": missing})
+        check("state dir tak ada: TIDAK dibuat (makedirs mengikuti symlink induk), beri tahu",
+              (rc, os.path.exists(missing), "does not exist" in out), (0, False, True))
+        link = os.path.join(d, "link"); target = os.path.join(d, "target"); os.makedirs(target)
+        os.symlink(target, link)
+        hook(["prompt"], "stop samewrite", {"SAMEWRITE_STATE_DIR": link})
+        check("state dir symlink ke dir yang ada: marker di target, marker sendiri bukan symlink",
+              (os.path.exists(os.path.join(target, "samewrite-disabled")),
+               os.path.islink(os.path.join(target, "samewrite-disabled"))), (True, False))
+        hook(["prompt"], "samewrite on", {"SAMEWRITE_STATE_DIR": link})
 
         # guard dan saklar menyelesaikan dir state dengan urutan yang sama
         for e in ({"SAMEWRITE_STATE_DIR": d, "CLAUDE_CONFIG_DIR": "/nope", "SAMEWRITE_ROOT": d},

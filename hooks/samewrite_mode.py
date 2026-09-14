@@ -61,13 +61,18 @@ def parse(prompt):
 
 
 def set_disabled(flag):
+    """True bila state berubah. Direktori state TIDAK dibuat: config dir selalu sudah ada, dan
+    `makedirs` mengikuti symlink induk — cara menulis ke luar direktori yang dipilih (review
+    lintas-famili 14-Sep). Marker sendiri dibuka O_NOFOLLOW."""
     m = marker()
+    if not os.path.isdir(os.path.dirname(m)):
+        return False
     if flag:
-        os.makedirs(os.path.dirname(m), exist_ok=True)
         fd = os.open(m, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         os.close(fd)
     elif os.path.lexists(m):
         os.unlink(m)
+    return True
 
 
 def emit(event, text):
@@ -79,12 +84,13 @@ def on_prompt(data):
     action = parse(data.get("prompt"))
     if action is None:
         return
-    if action == "off":
-        set_disabled(True)
+    if action in ("off", "on") and not set_disabled(action == "off"):
+        emit("UserPromptSubmit", "SAMEWRITE: state dir %s does not exist — nothing switched. "
+             "Set SAMEWRITE_STATE_DIR or CLAUDE_CONFIG_DIR to an existing directory." % state_dir())
+    elif action == "off":
         emit("UserPromptSubmit", "SAMEWRITE OFF — samewrite's rules no longer apply, and its "
              "hooks stand down, until `samewrite on`. No other plugin was changed.")
     elif action == "on":
-        set_disabled(False)
         emit("UserPromptSubmit", "SAMEWRITE ON — " + CORE)
     else:
         emit("UserPromptSubmit", "SAMEWRITE status: %s · core injection at session start: %s · "

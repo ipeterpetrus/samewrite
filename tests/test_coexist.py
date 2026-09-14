@@ -168,8 +168,8 @@ def main():
     check("1 pasang di config kosong: rc 0", r.returncode, 0)
     check("1 tiga entri milik sendiri (Write, UserPromptSubmit, SessionStart)",
           sorted(ev for ev, _, _ in e.own_entries()), ["PreToolUse", "SessionStart", "UserPromptSubmit"])
-    check("1 perintah hook memuat path berspasi yang di-quote",
-          all("bin\\ dir" in c or "'bin dir'" in c or '"bin dir"' in c for _, _, c in e.own_entries()), True)
+    check("1 perintah hook memuat path berspasi yang di-quote (POSIX single-quote)",
+          all("'" in c and "bin dir" in c for _, _, c in e.own_entries()), True)
     # jalankan perintah hook PERSIS seperti tertulis di settings.json lewat sh -c: quoting harus jalan
     cmd = [c for ev, _, c in e.own_entries() if ev == "UserPromptSubmit"][0]
     p = subprocess.run(["sh", "-c", cmd], input='{"prompt":"samewrite status"}', capture_output=True,
@@ -181,6 +181,19 @@ def main():
     r3 = e.sh("uninstall.sh")
     check("1 cabut: rc 0", r3.returncode, 0)
     check("1 cabut: settings kembali kosong", e.read_settings(), {})
+    # kepemilikan = path PERSIS, bukan nama berkas: hook asing bernama sama di dir lain tetap tinggal,
+    # dan perintah asing yang cuma MEMUAT substring nama tidak menahan pemasangan (review 14-Sep)
+    e.write_settings({"hooks": {"PreToolUse": [
+        {"matcher": "Write", "hooks": [{"type": "command", "command": "python /opt/other/write_noop_guard.py"}]},
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": "python /opt/write_noop_guard.py.bak/x"}]}]}})
+    e.sh("install.sh", SAMEWRITE_MODE_HOOK="1")
+    cmds = [h["command"] for m in e.read_settings()["hooks"]["PreToolUse"] for h in m["hooks"]]
+    check("1 substring asing tidak menahan pemasangan guard sendiri",
+          sum(1 for c in cmds if e.dst in c or "'" + e.dst + "'" in c), 1)
+    e.sh("uninstall.sh")
+    left = [h["command"] for m in e.read_settings()["hooks"]["PreToolUse"] for h in m["hooks"]]
+    check("1 cabut: hook asing bernama sama di dir lain TETAP", sorted(left),
+          ["python /opt/other/write_noop_guard.py", "python /opt/write_noop_guard.py.bak/x"])
     row(1, "SameWrite only", "PASS")
 
     # ---------------------------------------------------------------- 2/3. foreign only (samewrite absent)
@@ -188,8 +201,8 @@ def main():
     snap = e.snapshot(); fv = e.foreign_view()
     out = e.hook("prompt", "normal mode")
     check("2/3 samewrite tak terpasang: 'normal mode' nol reaksi, nol berkas", (out, e.snapshot() == snap), ("", True))
-    row(2, "Ponytail only", "PASS (samewrite absent, nothing touched)")
-    row(3, "i-have-adhd only", "PASS (samewrite absent, nothing touched)")
+    row(2, "Ponytail only", "PASS — constructed foreign state; SameWrite absent, nothing touched")
+    row(3, "i-have-adhd only", "PASS — constructed foreign state; SameWrite absent, nothing touched")
 
     # ---------------------------------------------------------------- 4/5/6/26. installed alongside, inactive
     snap0 = e.snapshot(); orig = copy.deepcopy(e.read_settings())
@@ -200,9 +213,9 @@ def main():
     check("4-6 flag asing + ~/.config/ponytail byte-identik", e.snapshot(), snap0)
     check("4-6 tak ada SubagentStart milik samewrite (subagen tak disuntik)",
           any(ev == "SubagentStart" for ev, _, _ in e.own_entries()), False)
-    row(4, "SameWrite + Ponytail installed, inactive", "PASS")
-    row(5, "SameWrite + i-have-adhd installed, inactive", "PASS")
-    row(6, "all three installed", "PASS")
+    row(4, "SameWrite + Ponytail installed, inactive", "PASS — SameWrite-side: foreign settings/flags structurally unchanged")
+    row(5, "SameWrite + i-have-adhd installed, inactive", "PASS — SameWrite-side: foreign settings/flags structurally unchanged")
+    row(6, "all three installed", "PASS — SameWrite-side: foreign settings/flags structurally unchanged")
     row(26, "pre-populated foreign config", "PASS")
 
     # ---------------------------------------------------------------- 7/8/9/10. active together
@@ -213,10 +226,10 @@ def main():
     check("7-10 flag asing tetap sesudah session hook", e.snapshot(), snap0)
     check("7-10 guard menolak Write identik saat semua aktif", e.guard(f, "x\n"), True)
     check("7-10 prompt biasa: hook samewrite senyap (nol injeksi per-turn)", e.hook("prompt", "fix the bug"), "")
-    row(7, "SameWrite active + Ponytail active", "PASS (files/flags)")
-    row(8, "SameWrite active + i-have-adhd active", "PASS (files/flags)")
-    row(9, "Ponytail + i-have-adhd active", "PASS (samewrite silent)")
-    row(10, "all three active", "PASS (files/flags)")
+    row(7, "SameWrite active + Ponytail active", "PASS — SameWrite-side only (foreign hooks run in LIVE block, not here)")
+    row(8, "SameWrite active + i-have-adhd active", "PASS — SameWrite-side only (foreign hooks run in LIVE block, not here)")
+    row(9, "Ponytail + i-have-adhd active", "PASS — SameWrite silent on ordinary prompts")
+    row(10, "all three active", "PASS — SameWrite-side only (foreign hooks run in LIVE block, not here)")
 
     # ---------------------------------------------------------------- 11. activation orders
     e2 = Env(foreign=False)
@@ -251,22 +264,22 @@ def main():
     os.unlink(os.path.join(e.cfg, ".i-have-adhd-always"))
     check("14 adhd off: guard samewrite tetap menolak", e.guard(f, "x\n"), True)
     check("14 adhd off: flag adhd tak dihidupkan lagi", os.path.exists(os.path.join(e.cfg, ".i-have-adhd-always")), False)
-    row(13, "Ponytail off while SameWrite active", "PASS")
-    row(14, "i-have-adhd off while SameWrite active", "PASS")
+    row(13, "Ponytail off while SameWrite active", "PASS — foreign flag removed by the test, SameWrite unaffected")
+    row(14, "i-have-adhd off while SameWrite active", "PASS — foreign flag removed by the test, SameWrite unaffected")
 
     # ---------------------------------------------------------------- 15-19. lifecycle sources
     for n, src in [(15, "startup"), (16, "resume"), (17, "clear"), (18, "compact"), (19, "startup")]:
         out = e.hook("session", source=src, SAMEWRITE_CORE="1")
         check(f"{n} SessionStart source={src}: tepat satu inti", out.count("samewrite:"), 1)
         check(f"{n} source={src}: inti tak ganda saat dijalankan lagi", e.hook("session", source=src, SAMEWRITE_CORE="1").count("samewrite:"), 1)
-    row(15, "session start", "PASS"); row(16, "resume", "PASS"); row(17, "clear", "PASS")
+    row(15, "session start", "PASS — SameWrite hook only; `source` not consulted by design"); row(16, "resume", "PASS — same"); row(17, "clear", "PASS — same")
     row(18, "compaction", "PASS (re-inject once via matcher, none when off)")
     row(19, "plugin reload", "PASS (same path as startup)")
 
     # ---------------------------------------------------------------- 20. subagent spawn
     check("20 tak ada SubagentStart samewrite; hook prompt/session tak dipanggil utk subagen",
           any(ev == "SubagentStart" for ev, _, _ in e.own_entries()), False)
-    row(20, "subagent spawn", "PASS (by design: no SubagentStart injection)")
+    row(20, "subagent spawn", "PASS by construction — no SubagentStart entry registered; no subagent exercised")
 
     # ---------------------------------------------------------------- 21-25. model-behaviour cases
     for n, name in [(21, "explicit user output-only format"), (22, "long-form explanation request"),
@@ -278,6 +291,11 @@ def main():
     check("27 cabut: statusLine asing tetap", e.read_settings()["statusLine"], orig["statusLine"])
     check("27 cabut: settings asing == asli", e.read_settings(), orig)
     check("27 cabut: marker sendiri dibersihkan", os.path.exists(os.path.join(e.cfg, "samewrite-disabled")), False)
+    sd = os.path.join(e.home, "state dir"); os.makedirs(sd)
+    e.hook("prompt", "stop samewrite", SAMEWRITE_STATE_DIR=sd)
+    e.sh("uninstall.sh", SAMEWRITE_STATE_DIR=sd)
+    check("27 cabut dengan SAMEWRITE_STATE_DIR: marker di dir itu ikut dibersihkan",
+          os.path.exists(os.path.join(sd, "samewrite-disabled")), False)
     e3 = Env(foreign=False, settings='{"hooks": {oops')
     raw = open(e3.settings).read()
     r = e3.sh("uninstall.sh")

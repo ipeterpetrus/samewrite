@@ -406,7 +406,7 @@ tools/feed.sh               regenerate docs/FIELD_DATA.md from the ledger, commi
 tools/health.py             is the guard still installed? ledger silence proves nothing on
                             its own, so compare it against session activity
 .claude-plugin/             plugin + marketplace manifests (`/plugin marketplace add`)
-tests/                      285 assertions in nine suites, mutation-tested
+tests/                      290 assertions in nine suites, mutation-tested
 docs/FINDINGS.md            full numbers, method, the corrections, and what an
                             adversarial panel broke before publication
 ```
@@ -431,7 +431,7 @@ minimum correct change, leave evidence that could have failed — as an on-deman
 It **never** reacts to `normal mode`, `stop ponytail`, `stop caveman` or `stop adhd mode`, and
 never touches another plugin's flag, config, hook or status line — Ponytail, Caveman and
 i-have-adhd keep their build and presentation rules; samewrite owns context, edits,
-verification and evidence underneath them. The matrix that proves it (46 deterministic
+verification and evidence underneath them. The matrix that proves it (49 deterministic
 assertions plus a live run of Ponytail's and i-have-adhd's real hooks), the reference pins,
 and the pilot benchmark are in [docs/VNEXT.md](docs/VNEXT.md). **Pilot verdict: NOT_PROVEN** —
 110 isolated runs, every arm at the correctness ceiling, the new skill no cheaper than the old

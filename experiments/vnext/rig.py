@@ -42,9 +42,12 @@ FOREIGN_BANNERS = ["PONYTAIL MODE ACTIVE", "ADHD MODE ACTIVE", "CAVEMAN MODE ACT
                    "samewrite: read to the semantic scope", "superpowers"]
 
 
-def build_cfg(arm, base, refs, cred_src):
-    """Config terisolasi untuk satu lengan. Dibangun ulang tiap kali (tanpa sisa state)."""
-    cfg = os.path.join(base, arm)
+def build_cfg(arm, base, refs, cred_src, tag=""):
+    """Config terisolasi untuk SATU run (lengan + fixture + ulangan). Pilot 14-Sep memakai satu
+    config per LENGAN yang dibagi run paralel — hook ponytail menulis .ponytail-statusline-nudged
+    sekali, jadi run pertama tiap lengan ponytail menerima teks nudge yang run lain tidak
+    (review 14-Sep). Sekarang: satu direktori per job, tanpa state bersama."""
+    cfg = os.path.join(base, arm + (("-" + tag) if tag else ""))
     shutil.rmtree(cfg, ignore_errors=True)
     os.makedirs(os.path.join(cfg, "skills"))
     parts = ARMS[arm][1]
@@ -84,9 +87,14 @@ def build_cfg(arm, base, refs, cred_src):
         del settings["hooks"]
     json.dump(settings, open(os.path.join(cfg, "settings.json"), "w"), indent=2)
     if cred_src and os.path.exists(cred_src):
-        shutil.copyfile(cred_src, os.path.join(cfg, os.path.basename(cred_src)))
-        os.chmod(os.path.join(cfg, os.path.basename(cred_src)), 0o600)
+        dst = os.path.join(cfg, ".credentials.json")   # nama tetap: CLI mencarinya di sini
+        shutil.copyfile(cred_src, dst)
+        os.chmod(dst, 0o600)
+        CRED_COPIES.append(dst)
     return cfg
+
+
+CRED_COPIES = []
 
 
 def transcript_for(cfg, work):
@@ -142,7 +150,7 @@ def verdict(spec, d, out):
     extra = [f for f in os.listdir(d) if f not in spec["files"] and not f.startswith(("_", "."))
              and f != "__pycache__"]
     if kind == "nochange":
-        asked = "?" in out
+        asked = bool(re.search(spec.get("ask_re", r"\?"), out.strip()[-600:], re.I | re.S))
         if changed or extra:
             return "SYMPTOM", changed, extra
         if spec.get("must_ask") and not asked:
@@ -150,9 +158,11 @@ def verdict(spec, d, out):
         return "ROOT", changed, extra
     if kind == "text":
         facts = sum(1 for r in spec["facts"] if re.search(r, out, re.I))
-        ok = facts == len(spec["facts"]) and shape_ok(spec["shape"], out) and not changed
+        ok = facts == len(spec["facts"]) and shape_ok(spec["shape"], out) and not changed and not extra
         return ("ROOT" if ok else "FAIL"), changed, extra
-    if "test_target.py" in changed:
+    if "test_target.py" in changed or extra:
+        # berkas baru (mis. conftest.py yang men-skip semua uji) bisa membuat implementasi rusak
+        # tampak ROOT — tak ada fixture yang butuh berkas baru, jadi setiap tambahan = INVALID
         return "INVALID", changed, extra
     t = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_target.py"],
                        cwd=d, capture_output=True, timeout=180).returncode
@@ -228,12 +238,12 @@ def main():
     arms = a.arms.split(",")
     names = sorted(FIXTURES) if a.fixtures == "all" else a.fixtures.split(",")
     cli = subprocess.run([CLAUDE, "--version"], capture_output=True, text=True).stdout.strip()
-    cfgs = {arm: build_cfg(arm, a.cfg_base, a.refs, a.cred) for arm in arms}
     jobs = [(arm, n, r) for r in range(a.repeat) for n in names for arm in arms]
-    print(f"{len(jobs)} run · model={a.model} · cli={cli} · jobs={a.jobs}", flush=True)
+    cfgs = {(arm, n, r): build_cfg(arm, a.cfg_base, a.refs, a.cred, f"{n}-r{r}") for arm, n, r in jobs}
+    print(f"{len(jobs)} run · model={a.model} · cli={cli} · jobs={a.jobs} · one config dir per run", flush=True)
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=a.jobs) as ex:
-            futs = {ex.submit(run_one, arm, n, r, cfgs[arm], a.model, a.timeout, a.refs): (arm, n, r)
+            futs = {ex.submit(run_one, arm, n, r, cfgs[(arm, n, r)], a.model, a.timeout, a.refs): (arm, n, r)
                     for arm, n, r in jobs}
             for fut in concurrent.futures.as_completed(futs):
                 res = fut.result(); res["cli"] = cli
@@ -245,8 +255,8 @@ def main():
                       f"cr={u.get('cache_read_input_tokens', 0):>7} cc={u.get('cache_creation_input_tokens', 0):>6} "
                       f"out={u.get('output_tokens', 0):>5} treat={'ok' if res.get('treatment_ok') else 'BAD'}", flush=True)
     finally:
-        for cfg in cfgs.values():   # kredensial salinan: hapus, jangan tinggalkan di disk
-            for f in glob.glob(os.path.join(cfg, ".credentials.json")):
+        for f in CRED_COPIES:       # tiap salinan kredensial yang dibuat: hapus, apa pun nama asalnya
+            if os.path.exists(f):
                 os.remove(f)
 
 

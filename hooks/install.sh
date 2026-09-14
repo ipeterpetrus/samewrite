@@ -27,15 +27,22 @@ echo "[3/4] daftarkan hook PreToolUse(Write) di settings.json"
 cp -a "$SET" "$SET.bak.wng.$(date -u +%Y%m%d_%H%M%S)"
 LEDGER="${SAMEWRITE_LEDGER:-$HOME/logs/samewrite.jsonl}"
 mkdir -p "$(dirname "$LEDGER")"
-# printf %q: path berspasi / metakarakter tetap satu argumen saat shell hook menjalankannya
-HOOKCMD="SAMEWRITE_LEDGER=$(printf %q "$LEDGER") $(printf %q "$PY_BIN") $(printf %q "$DST")"
+# Kutip POSIX ('...' dengan ' -> '\'') — bukan printf %q, yang untuk newline memakai $'...' khas bash
+# sedangkan perintah hook dijalankan shell yang tidak kita pilih. Path berspasi/metakarakter aman.
+q() { printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\''/g")"; }
+HOOKCMD="SAMEWRITE_LEDGER=$(q "$LEDGER") $(q "$PY_BIN") $(q "$DST")"
 echo "   ledger: $LEDGER"
-"$PY_BIN" - "$SET" "$HOOKCMD" <<'PY'
-import json,sys
-p, CMD = sys.argv[1], sys.argv[2]
+"$PY_BIN" - "$SET" "$HOOKCMD" "$DST" <<'PY'
+import json,shlex,sys
+p, CMD, DST = sys.argv[1], sys.argv[2], sys.argv[3]
 d = json.load(open(p))
 pre=d.setdefault("hooks",{}).setdefault("PreToolUse",[])
-if any("write_noop_guard.py" in h.get("command","") for m in pre for h in m.get("hooks",[])):
+def owns(cmd):   # milik kita = token yang PERSIS path guard terpasang, bukan substring nama berkas
+    try:
+        return DST in shlex.split(cmd)
+    except ValueError:
+        return False
+if any(owns(h.get("command","")) for m in pre for h in m.get("hooks",[])):
     print("   sudah terpasang — tak ada perubahan"); sys.exit(0)
 pre.append({"matcher":"Write","hooks":[{"type":"command","command":CMD}]})
 json.dump(d,open(p,"w"),indent=2,ensure_ascii=False); open(p,"a").write("\n")
@@ -50,19 +57,24 @@ if [ "${SAMEWRITE_MODE_HOOK:-0}" = "1" ]; then
   echo "[3b/4] pasang saklar mode -> $MODE_DST"
   install -m 0755 "$PKG/samewrite_mode.py" "$MODE_DST"
   CORE_ENV=""; [ "${SAMEWRITE_CORE:-0}" = "1" ] && CORE_ENV="SAMEWRITE_CORE=1 "
-  "$PY_BIN" - "$SET" "${CORE_ENV}$(printf %q "$PY_BIN") $(printf %q "$MODE_DST") prompt" \
-                     "${CORE_ENV}$(printf %q "$PY_BIN") $(printf %q "$MODE_DST") session" <<'PY'
-import json,sys
-p, PROMPT, SESSION = sys.argv[1:4]
+  "$PY_BIN" - "$SET" "${CORE_ENV}$(q "$PY_BIN") $(q "$MODE_DST") prompt" \
+                     "${CORE_ENV}$(q "$PY_BIN") $(q "$MODE_DST") session" "$MODE_DST" <<'PY'
+import json,shlex,sys
+p, PROMPT, SESSION, MODE_DST = sys.argv[1:5]
 d = json.load(open(p))
 hooks = d.setdefault("hooks", {})
-def has(ev, cmd):
-    return any(cmd in h.get("command","") for m in hooks.get(ev, []) for h in m.get("hooks",[]))
+def has(ev, path):
+    def owns(cmd):
+        try:
+            return path in shlex.split(cmd)
+        except ValueError:
+            return False
+    return any(owns(h.get("command","")) for m in hooks.get(ev, []) for h in m.get("hooks",[]))
 changed = False
-if not has("UserPromptSubmit", "samewrite_mode.py"):
+if not has("UserPromptSubmit", MODE_DST):
     hooks.setdefault("UserPromptSubmit", []).append(
         {"hooks":[{"type":"command","command":PROMPT}]}); changed = True
-if not has("SessionStart", "samewrite_mode.py"):
+if not has("SessionStart", MODE_DST):
     hooks.setdefault("SessionStart", []).append(
         {"matcher":"startup|resume|clear|compact","hooks":[{"type":"command","command":SESSION}]}); changed = True
 if changed:

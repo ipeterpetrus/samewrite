@@ -24,14 +24,15 @@ def load(path):
     rows = [json.loads(l) for l in open(path) if l.strip()]
     by = collections.defaultdict(dict)
     for r in rows:
-        by[r["arm"]][r["fixture"]] = r      # 1 repeat per (arm, fixture) in the pilot
+        by[r["arm"]][(r["fixture"], r.get("rep", 0))] = r   # pasangan = (fixture, ulangan)
     return rows, by
 
 
 def main(path, md=False):
     rows, by = load(path)
     arms = sorted(by, key=lambda a: (len(a), a))
-    fixtures = sorted({r["fixture"] for r in rows})
+    fixtures = sorted({(r["fixture"], r.get("rep", 0)) for r in rows})
+    fname = lambda f: f[0] if f[1] == 0 else f"{f[0]}#r{f[1]}"
     excluded = [(r["arm"], r["fixture"], "treatment" if not r.get("treatment_ok") else "rc/transcript")
                 for r in rows if not r.get("treatment_ok") or r.get("rc") != 0 or "transcript" not in r]
     print(f"{len(rows)} run · {len(arms)} arms · {len(fixtures)} fixtures · excluded {len(excluded)}")
@@ -51,7 +52,7 @@ def main(path, md=False):
         n = len(by[a])
         root = sum(1 for r in by[a].values() if r["verdict"] == "ROOT")
         mean = lambda k: (sum(k(r) for r in rs) / len(rs)) if rs else float("nan")
-        vs = " ".join(f"{f[:6]}={by[a][f]['verdict'][:4]}" for f in fixtures if f in by[a])
+        vs = " ".join(f"{fname(f)[:6]}={by[a][f]['verdict'][:4]}" for f in fixtures if f in by[a])
         line = (f"| {a} | {root}/{n} | {mean(lambda r: r['weighted_input']):,.0f} | "
                 f"{mean(lambda r: r['usage'].get('output_tokens', 0)):,.0f} | {mean(lambda r: r['turns']):.1f} | "
                 f"{mean(lambda r: r['bytes_by_source'].get('Read', 0)):,.0f} | "
@@ -68,17 +69,19 @@ def main(path, md=False):
         ry = sum(1 for f in pairs if by[y][f]["verdict"] == "ROOT")
         both = [f for f in pairs if by[x][f]["verdict"] == "ROOT" and by[y][f]["verdict"] == "ROOT"]
         cheaper = [f for f in both if by[x][f]["weighted_input"] < by[y][f]["weighted_input"]]
-        dearer = [f for f in both if f not in cheaper]
+        dearer = [f for f in both if by[x][f]["weighted_input"] > by[y][f]["weighted_input"]]
+        ties = len(both) - len(cheaper) - len(dearer)       # seri dibuang dari uji tanda
         deltas = [by[x][f]["weighted_input"] / by[y][f]["weighted_input"] - 1 for f in both]
         med = sorted(deltas)[len(deltas) // 2] if deltas else float("nan")
+        nn = len(cheaper) + len(dearer)
         print(f"  {x} vs {y} ({label}): n={len(pairs)} ROOT {rx} vs {ry}; both-ROOT {len(both)}: "
-              f"{x} cheaper in {len(cheaper)}/{len(both)} (sign p={sign_p(len(cheaper), len(both)):.3f}), "
-              f"median Δweighted {med:+.1%}")
+              f"{x} cheaper in {len(cheaper)}/{nn}{' (+%d tie)' % ties if ties else ''} "
+              f"(sign p={sign_p(len(cheaper), nn):.3f}), median Δweighted {med:+.1%}")
         lost = [f for f in pairs if by[x][f]["verdict"] != "ROOT" and by[y][f]["verdict"] == "ROOT"]
         if lost:
-            print(f"     correctness LOST by {x} on: {', '.join(lost)}")
+            print(f"     correctness LOST by {x} on: {', '.join(map(fname, lost))}")
         if dearer:
-            print(f"     {x} dearer on: {', '.join(dearer)}")
+            print(f"     {x} dearer on: {', '.join(map(fname, dearer))}")
     return 0
 
 

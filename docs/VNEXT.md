@@ -69,19 +69,19 @@ SameWrite owns exactly: `/samewrite`, phrases `stop samewrite` / `samewrite on|o
 i-have-adhd is theirs; SameWrite does not add a third claimant (test: `tests/test_samewrite_mode.py`
 "abaikan 'normal mode'", plus the live cross-check below).
 
-### Coexistence matrix (master prompt §26) — `tests/test_coexist.py`, 46 assertions (+5 live)
+### Coexistence matrix (master prompt §26) — `tests/test_coexist.py`, 49 assertions (+5 live)
 
 | # | case | result |
 |---|---|---|
 | 1 | SameWrite only | PASS — install/uninstall round-trips to `{}`; hook command runs via `sh -c` with a space-containing path |
 | 2–3 | Ponytail only / i-have-adhd only | PASS — SameWrite absent, nothing touched |
-| 4–6, 26 | installed alongside, inactive; pre-populated foreign config | PASS — foreign hooks, statusLine, permissions, custom keys, flags, `~/.config/ponytail` byte-identical after install |
-| 7–10 | all combinations active | PASS (files/flags) — one core line, no foreign flag changed, guard still denies identical writes, prompt hook silent on ordinary prompts |
+| 4–6, 26 | installed alongside, inactive; pre-populated foreign config | PASS — foreign hooks, statusLine, permissions and custom keys **structurally** unchanged after install (the installer re-serialises `settings.json` with `indent=2`, so formatting is not byte-preserved); foreign flag files and `~/.config/ponytail` byte-identical |
+| 7–10 | all combinations active | PASS, SameWrite-side only — one core line, no foreign flag changed, guard still denies identical writes, prompt hook silent on ordinary prompts. The foreign hooks themselves run only in the live block below; here their state is constructed |
 | 11 | different activation orders | PASS — same hook set either order |
 | 12 | SameWrite off while others active | PASS — only `samewrite-disabled` appears; guard and SessionStart stand down |
-| 13–14 | Ponytail / i-have-adhd off while SameWrite active | PASS — SameWrite unaffected, does not recreate foreign flags |
-| 15–19 | session start / resume / clear / compaction / reload | PASS — exactly one core line per SessionStart, none when off |
-| 20 | subagent spawn | PASS by design — no SubagentStart hook registered |
+| 13–14 | Ponytail / i-have-adhd off while SameWrite active | PASS — the test removes the foreign flag; SameWrite unaffected, does not recreate it |
+| 15–19 | session start / resume / clear / compaction / reload | PASS for SameWrite's own hook — exactly one core line per SessionStart, none when off; the hook does not consult `source`, so these five rows are one behaviour, not five |
+| 20 | subagent spawn | PASS by construction — no SubagentStart entry is registered; no subagent was exercised |
 | 21–25 | explicit output-only format · long-form explanation · destructive · public-API ambiguity · CRITICAL auth change | **EXPERIMENTAL** — benchmark fixtures `outputonly`, `explainlong`, `apiambig`, `authline` (destructive: no fixture) |
 | 27 | existing/custom statusLine; malformed JSON | PASS — preserved on install and uninstall; malformed settings untouched with a warning, rc 1 |
 | 28–29 | OpenCode per-turn transform · Pi before-agent injection | **UNSUPPORTED** — no adapter shipped |
@@ -127,7 +127,7 @@ suite without the clones (fixture surfaces only) and prints `SKIP` for the live 
 | SessionStart matcher `startup\|resume\|clear\|compact` re-inject, fail-silent, frontmatter strip | i-have-adhd hooks/hooks.json:5-11, always-on.mjs:15-44 | **borrowed** for the opt-in core line | MEASURED_BY_SAMEWRITE (tests) / cost EXPERIMENTAL (arm D2) |
 | foreign-preserving uninstall (own-basename filter, malformed JSON → warn, untouched) | ponytail scripts/uninstall.js:43-77; caveman bin/lib/settings.js:195-227 | **borrowed** (`hooks/uninstall.sh`) | MEASURED_BY_SAMEWRITE |
 | rule-copy drift CI + version pin across manifests | ponytail scripts/check-rule-copies.js, check-versions.js:21-30 | **borrowed** (`tools/adapters.py --check`, `tests/test_adapters.py`) | MEASURED_BY_SAMEWRITE |
-| scorer self-test (GOOD→GREEN, BAD→RED) before paid runs | ponytail tests/correctness.test.js:18-35; i-have-adhd tests/test_judge.py | **borrowed** (`experiments/vnext/selftest.py`, 53 checks) | MEASURED_BY_SAMEWRITE |
+| scorer self-test (GOOD→GREEN, BAD→RED) before paid runs | ponytail tests/correctness.test.js:18-35; i-have-adhd tests/test_judge.py | **borrowed** (`experiments/vnext/selftest.py`, 68 checks) | MEASURED_BY_SAMEWRITE |
 | failed-fix counter → stop and re-investigate | superpowers skills/systematic-debugging/SKILL.md:191-212 | **borrowed** as instruction (two failed fixes → `ROOT_CAUSE_REASSESSMENT`) | EXPERIMENTAL (fixtures cannot force two failed fixes) |
 | revert-fix-must-fail verifier check | superpowers verification-before-completion/SKILL.md:84 | **borrowed** as instruction ("plant a mutation, see RED, restore, see GREEN") | EXPERIMENTAL |
 | symbol-first progressive reading; full-file-read stops symbolic re-analysis; batch independent calls | serena system_prompt.yml:12-29, 43-47 | **borrowed** as the ladder wording; explicit deference when a symbol-level tool is loaded | EXPERIMENTAL |
@@ -157,10 +157,10 @@ agent self-assessed). All `EXTERNALLY_REPORTED`.
 | `tests/test_carry.py` | 39 | unchanged |
 | `tests/test_skills.py` | 17 | unchanged |
 | `tests/test_health.py` | 9 | unchanged |
-| `tests/test_samewrite_mode.py` | 55 | parser accepts only own phrases; `normal mode`/`stop ponytail`/… ignored; marker 0600, only file created; guard obeys marker with positive control first; fail-open on bad stdin / unwritable dir; SessionStart core only with `SAMEWRITE_CORE=1` and not when off; version pin |
+| `tests/test_samewrite_mode.py` | 57 | parser accepts only own phrases; `normal mode`/`stop ponytail`/… ignored; marker 0600, only file created; guard obeys marker with positive control first; fail-open on bad stdin / unwritable dir; SessionStart core only with `SAMEWRITE_CORE=1` and not when off; version pin |
 | `tests/test_adapters.py` | 19 | adapters byte-equal to generator; mutated adapter turns `--check` RED; command surface documented = parsed; `normal mode` appears only as a prohibition; versions agree; description ≤ 400 chars |
-| `tests/test_coexist.py` | 46 (+5 live) | matrix above |
-| `experiments/vnext/selftest.py` | 53 | every oracle turns RED on its planted bad fixture (one weak neighbour test was caught and fixed by this: `authline`'s symptom patch initially scored ROOT) |
+| `tests/test_coexist.py` | 49 (+5 live) | matrix above; plus: same-basename foreign hook in another directory survives uninstall, a foreign command merely containing the substring does not suppress install, marker under `SAMEWRITE_STATE_DIR` is removed on uninstall |
+| `experiments/vnext/selftest.py` | 68 | every oracle turns RED on its planted bad fixture (one weak neighbour test was caught and fixed by this: `authline`'s symptom patch initially scored ROOT) |
 
 Verify-the-verifier, in words: the guard "off" test first proves deny fires **without** the marker
 (it did not on the first draft — the file sat outside `SAMEWRITE_ROOT`, so "allowed when off" was
@@ -179,7 +179,7 @@ Two scorer defects were found **by the pilot itself** and fixed before analysis,
 re-scored from the preserved working directories (`rescore.py`; original verdicts kept per row):
 `.pytest_cache` created by the agent's own test run counted as "a file added" (3 correct "no fix
 needed" answers scored SYMPTOM), and the output-only oracle accepted one argument order of a
-correct `clamp` (`min(hi, max(x, lo))` scored FAIL). Both now have self-test cases (58 checks).
+correct `clamp` (`min(hi, max(x, lo))` scored FAIL). Both now have self-test cases; the cross-family review below added three more oracle holes (added files such as a test-skipping `conftest.py`, a bare `?` counting as a question, added files under "do not edit") — all covered now (68 checks). Re-scoring after every fix left all 110 verdicts as reported here.
 
 Per arm (weighted context = input + 1.25·cache_creation + 0.1·cache_read, mean over the arm's 10
 runs; listing B = bytes of the skill listing the CLI injects, a per-turn always-on cost):
@@ -249,7 +249,7 @@ Gate items from master prompt §36, as they stand on this evidence:
 | coexistence tests pass | PASS — 46 deterministic + 5 live assertions |
 | SameWrite never responds to generic `normal mode` | PASS — parser tests + live cross-check |
 | foreign plugin state/config untouched | PASS — byte-hash snapshots before/after every operation |
-| benchmark conditions comparable | PASS — isolated config per arm, pinned model/CLI/flags, 0 excluded rows |
+| benchmark conditions comparable | PASS with one caveat — config isolated per **arm**, not per run: concurrent runs in an arm shared it, and Ponytail's hook writes `.ponytail-statusline-nudged` once, so the first run in each Ponytail arm (E, G, H, J) received its one-time status-line nudge text and the others did not. Pinned model/CLI/flags, 0 excluded rows. `rig.py` now builds one config per run |
 | instruments self-test | PASS — 58 checks; two false-RED defects found by the pilot and fixed before analysis |
 | instruction overhead measured | PASS — +379 B/turn listing (D) vs +251 B (C) vs 0 (A); D2 SessionStart line ≈ 250 B |
 | results include losing cases | PASS — listed by name above |
@@ -264,7 +264,28 @@ that could change this verdict needs ≥ 16 fresh fixtures hard enough to leave 
 smaller model, or tasks with a real hidden-caller / two-failed-fix structure), and would be
 pre-registered separately.
 
-Cross-family review of the diff (codex lane): see the addendum at the end of this section.
+### Cross-family review (codex lane, `codex_review.sh`, diff `0aec7ce..f04ba44`, code paths)
+
+Verdict returned: NEEDS-FIX, 5 HIGH / 9 MED. Disposition:
+
+| finding | disposition |
+|---|---|
+| HIGH `samewrite_mode.py`: `makedirs` follows a symlinked parent before creating the marker | **fixed** — the state directory is never created; missing → notice, no write. Marker itself stays `O_NOFOLLOW`. Test added |
+| HIGH `uninstall.sh`: ownership by basename would delete a foreign hook named `write_noop_guard.py` elsewhere | **fixed** — ownership = the exact installed path token (`shlex.split`), same in `install.sh`'s idempotency check. Test added |
+| HIGH `rig.py`: added files ignored → a `conftest.py` skipping all tests could score ROOT | **fixed** — any unexpected added file → INVALID (build) / FAIL (text). Self-test added. No pilot row had an added file |
+| HIGH `rig.py`: a custom credential filename was not cleaned up | **fixed** — the copy always lands under the CLI's fixed name and every copy is tracked and removed in `finally` |
+| HIGH `rig.py`: one config dir per arm shared by parallel runs | **fixed for future runs** (one directory per run); pilot caveat recorded above |
+| MED `install.sh`: foreign command containing the substring suppresses install | **fixed** with the exact-path check; test added |
+| MED `install.sh`: `printf %q` emits bash-only `$'…'` for newlines | **fixed** — POSIX single-quote escaping |
+| MED `uninstall.sh`: marker removed only from `CLAUDE_CONFIG_DIR` | **fixed** — same resolver as the hooks; test added |
+| MED `analyze.py`: repeats overwrite each other; ties counted as "dearer" | **fixed** — pairs keyed by (fixture, rep); ties dropped from the sign test |
+| MED `rig.py`: `must_ask` satisfied by any `?` | **fixed** — question must ask for the name (`ask_re`); self-test with `No rename was made. Why?` → FAIL |
+| MED `test_coexist.py`: several rows asserted by construction | **accepted, relabelled** in the matrix above; the live block is the only place foreign hooks execute |
+| MED `docs/VNEXT.md`: "byte-identical after install" is false (JSON re-serialised) | **accepted, reworded** to structural preservation |
+| MED `docs/VNEXT.md`: "isolated config per arm" overstated | **accepted, caveat added** to the gate table |
+
+Nothing in the review changed a pilot verdict: rescoring after every oracle fix reproduced the
+same 110 results (0 excluded, all arms 10/10).
 
 ## 10. Files changed
 
@@ -278,37 +299,37 @@ Against `0aec7ce` (`git diff --stat`), all local, nothing pushed:
  README.md                                    |  36 ++++-
  adapters/AGENTS.samewrite.md                 |  56 ++++++++
  adapters/GEMINI.samewrite.md                 |  56 ++++++++
- docs/VNEXT.md                                | 271 +++++++++++++++++++++++++++++++++++++
+ docs/VNEXT.md                                | 335 +++++++++++++++++++++++++++++++++++++++++++
  docs/reference-audits/aider.md               |  44 ++++++
  docs/reference-audits/caveman.md             |  48 +++++++
- docs/reference-audits/i-have-adhd.md         |  46 +++++++
- docs/reference-audits/ponytail.md            |  54 ++++++++
+ docs/reference-audits/i-have-adhd.md         |  46 ++++++
+ docs/reference-audits/ponytail.md            |  54 +++++++
  docs/reference-audits/rtk.md                 |  49 +++++++
  docs/reference-audits/serena.md              |  57 ++++++++
- docs/reference-audits/superpowers.md         |  55 ++++++++
+ docs/reference-audits/superpowers.md         |  55 +++++++
  docs/reference-audits/token-savior.md        |  41 ++++++
- experiments/vnext/PREREGISTRATION.md         |  85 ++++++++++++
- experiments/vnext/README.md                  |  23 ++++
- experiments/vnext/analyze.py                 |  86 ++++++++++++
- experiments/vnext/fixtures.py                | 325 ++++++++++++++++++++++++++++++++++++++++++++
+ experiments/vnext/PREREGISTRATION.md         |  85 +++++++++++
+ experiments/vnext/README.md                  |  23 +++
+ experiments/vnext/analyze.py                 |  89 ++++++++++++
+ experiments/vnext/fixtures.py                | 325 ++++++++++++++++++++++++++++++++++++++++++
  experiments/vnext/rescore.py                 |  22 +++
- experiments/vnext/rig.py                     | 254 ++++++++++++++++++++++++++++++++++
+ experiments/vnext/rig.py                     | 264 ++++++++++++++++++++++++++++++++++
  experiments/vnext/runs/manifest.json         |  58 ++++++++
- experiments/vnext/runs/pilot1.jsonl          | 110 +++++++++++++++
- experiments/vnext/runs/pilot1.rescored.jsonl | 110 +++++++++++++++
+ experiments/vnext/runs/pilot1.jsonl          | 110 ++++++++++++++
+ experiments/vnext/runs/pilot1.rescored.jsonl | 110 ++++++++++++++
  experiments/vnext/runs/smoke.jsonl           |   4 +
- experiments/vnext/selftest.py                | 124 +++++++++++++++++
- hooks/install.sh                             |  38 +++++-
- hooks/samewrite_mode.py                      | 120 +++++++++++++++++
- hooks/uninstall.sh                           |  46 +++++++
+ experiments/vnext/selftest.py                | 133 +++++++++++++++++
+ hooks/install.sh                             |  56 +++++++-
+ hooks/samewrite_mode.py                      | 126 +++++++++++++++++
+ hooks/uninstall.sh                           |  51 +++++++
  hooks/write_noop_guard.py                    |  14 +-
- skills/samewrite/SKILL.md                    |  60 +++++++++
- tests/test_adapters.py                       |  75 +++++++++++
- tests/test_coexist.py                        | 344 +++++++++++++++++++++++++++++++++++++++++++++++
- tests/test_samewrite_mode.py                 | 144 ++++++++++++++++++++
+ skills/samewrite/SKILL.md                    |  60 ++++++++
+ tests/test_adapters.py                       |  75 ++++++++++
+ tests/test_coexist.py                        | 362 +++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_samewrite_mode.py                 | 155 ++++++++++++++++++++
  tests/test_write_noop_guard.py               |   3 +
- tools/adapters.py                            |  61 +++++++++
- 37 files changed, 2925 insertions(+), 10 deletions(-)
+ tools/adapters.py                            |  61 ++++++++
+ 37 files changed, 3066 insertions(+), 13 deletions(-)
 ```
 
 Untouched on purpose: `skills/edit-discipline/SKILL.md`, every `tools/*.py` except the new `adapters.py`, `experiments/skill-ab/`, `docs/FINDINGS.md`, `docs/FIELD_DATA.md`, `LICENSE`.

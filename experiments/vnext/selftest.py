@@ -46,6 +46,9 @@ def main():
             check(f"{name}: symptom -> SYMPTOM", rig.verdict(spec, mk(spec, spec["symptom"]), "")[0], "SYMPTOM")
             check(f"{name}: uji disunting -> INVALID",
                   rig.verdict(spec, mk(spec, dict(spec["golden"], **{"test_target.py": "def test_x(): pass\n"})), "")[0], "INVALID")
+            skipper = "import pytest\ndef pytest_collection_modifyitems(items):\n    for i in items: i.add_marker(pytest.mark.skip)\n"
+            check(f"{name}: conftest.py yang men-skip semua uji + kode tak diubah -> INVALID (bukan ROOT)",
+                  rig.verdict(spec, mk(spec, {"conftest.py": skipper}), "")[0], "INVALID")
         elif spec["kind"] == "nochange":
             need_q = spec.get("must_ask", False)
             check(f"{name}: tak berubah{' + tanya' if need_q else ''} -> ROOT",
@@ -57,6 +60,10 @@ def main():
                   rig.verdict(spec, dd, "Which name? ")[0], "ROOT")
             if need_q:
                 check(f"{name}: tak tanya -> FAIL", rig.verdict(spec, mk(spec), "Renamed it.")[0], "FAIL")
+                check(f"{name}: tanda tanya tanpa keputusan ('No rename was made. Why?') -> FAIL",
+                      rig.verdict(spec, mk(spec), "No rename was made. Why?")[0], "FAIL")
+                check(f"{name}: bertanya nama -> ROOT",
+                      rig.verdict(spec, mk(spec), "What should I rename `fetch` to?")[0], "ROOT")
         else:
             good = {"outputonly": "```python\ndef clamp(x, lo, hi):\n    return min(hi, max(lo, x))\n```",
                     "explainlong": "The _memo cache is keyed by value only.\n\nSo factor is ignored on the "
@@ -69,6 +76,8 @@ def main():
             check(f"{name}: bentuk salah -> FAIL", rig.verdict(spec, mk(spec), bad_shape)[0], "FAIL")
             check(f"{name}: fakta kurang -> FAIL", rig.verdict(spec, mk(spec), bad_fact)[0], "FAIL")
             check(f"{name}: berkas diubah -> FAIL", rig.verdict(spec, mk(spec, {"mod.py": "x\n"}), good)[0], "FAIL")
+            check(f"{name}: berkas ditambah walau 'do not edit any file' -> FAIL",
+                  rig.verdict(spec, mk(spec, {"notes.md": "x\n"}), good)[0], "FAIL")
             if name == "outputonly":
                 for body in ("min(hi, max(x, lo))", "max(lo, min(hi, x))", "min(max(lo, x), hi)", "max(min(x, hi), lo)"):
                     check(f"{name}: urutan argumen lain yang benar {body} -> ROOT",
