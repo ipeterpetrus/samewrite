@@ -3,3 +3,5 @@ __pycache__/
 *.pkl
 experiments/skill-ab/cfg_*/
 experiments/skill-ab/mbpp.jsonl
+experiments/vnext/cfg_vnext/
+experiments/vnext/runs/*.log

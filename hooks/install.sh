@@ -27,19 +27,53 @@ echo "[3/4] daftarkan hook PreToolUse(Write) di settings.json"
 cp -a "$SET" "$SET.bak.wng.$(date -u +%Y%m%d_%H%M%S)"
 LEDGER="${SAMEWRITE_LEDGER:-$HOME/logs/samewrite.jsonl}"
 mkdir -p "$(dirname "$LEDGER")"
-HOOKCMD="bash -c 'SAMEWRITE_LEDGER=$LEDGER exec $PY_BIN $DST'"
+# printf %q: path berspasi / metakarakter tetap satu argumen saat shell hook menjalankannya
+HOOKCMD="SAMEWRITE_LEDGER=$(printf %q "$LEDGER") $(printf %q "$PY_BIN") $(printf %q "$DST")"
 echo "   ledger: $LEDGER"
 "$PY_BIN" - "$SET" "$HOOKCMD" <<'PY'
 import json,sys
 p, CMD = sys.argv[1], sys.argv[2]
 d = json.load(open(p))
 pre=d.setdefault("hooks",{}).setdefault("PreToolUse",[])
-if any(CMD in h.get("command","") for m in pre for h in m.get("hooks",[])):
+if any("write_noop_guard.py" in h.get("command","") for m in pre for h in m.get("hooks",[])):
     print("   sudah terpasang — tak ada perubahan"); sys.exit(0)
 pre.append({"matcher":"Write","hooks":[{"type":"command","command":CMD}]})
 json.dump(d,open(p,"w"),indent=2,ensure_ascii=False); open(p,"a").write("\n")
 print("   entri ditambahkan")
 PY
+
+# Opsional (SAMEWRITE_MODE_HOOK=1): saklar bernama-ruang `stop samewrite` / `samewrite on|off`
+# + injeksi satu kalimat inti saat SessionStart bila SAMEWRITE_CORE=1. Default TIDAK dipasang:
+# tiap byte yang selalu hadir harus membayar dirinya, dan angkanya belum ada (docs/VNEXT.md).
+if [ "${SAMEWRITE_MODE_HOOK:-0}" = "1" ]; then
+  MODE_DST="$(dirname "$DST")/samewrite_mode.py"
+  echo "[3b/4] pasang saklar mode -> $MODE_DST"
+  install -m 0755 "$PKG/samewrite_mode.py" "$MODE_DST"
+  CORE_ENV=""; [ "${SAMEWRITE_CORE:-0}" = "1" ] && CORE_ENV="SAMEWRITE_CORE=1 "
+  "$PY_BIN" - "$SET" "${CORE_ENV}$(printf %q "$PY_BIN") $(printf %q "$MODE_DST") prompt" \
+                     "${CORE_ENV}$(printf %q "$PY_BIN") $(printf %q "$MODE_DST") session" <<'PY'
+import json,sys
+p, PROMPT, SESSION = sys.argv[1:4]
+d = json.load(open(p))
+hooks = d.setdefault("hooks", {})
+def has(ev, cmd):
+    return any(cmd in h.get("command","") for m in hooks.get(ev, []) for h in m.get("hooks",[]))
+changed = False
+if not has("UserPromptSubmit", "samewrite_mode.py"):
+    hooks.setdefault("UserPromptSubmit", []).append(
+        {"hooks":[{"type":"command","command":PROMPT}]}); changed = True
+if not has("SessionStart", "samewrite_mode.py"):
+    hooks.setdefault("SessionStart", []).append(
+        {"matcher":"startup|resume|clear|compact","hooks":[{"type":"command","command":SESSION}]}); changed = True
+if changed:
+    json.dump(d,open(p,"w"),indent=2,ensure_ascii=False); open(p,"a").write("\n")
+    print("   entri UserPromptSubmit + SessionStart ditambahkan")
+else:
+    print("   sudah terpasang — tak ada perubahan")
+PY
+  printf '{"prompt":"samewrite status"}' | "$PY_BIN" "$MODE_DST" prompt | grep -q "SAMEWRITE status" \
+    && echo "   saklar mode menjawab: OK" || { echo "   GAGAL: saklar mode bisu"; exit 1; }
+fi
 
 echo "[4/4] verifikasi konsumen — guard dijalankan lewat jalur nyata"
 export SAMEWRITE_ROOT="$(dirname "$DST")"

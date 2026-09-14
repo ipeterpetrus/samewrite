@@ -1,6 +1,6 @@
 {
   "name": "samewrite",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Edit-discipline skill from a measured study of 1,316 Claude Code transcripts: when to anchor an Edit instead of rewriting a file, and where a long session's tokens actually go. Ships the skill only — the PreToolUse hook stays a deliberate, separate install.",
   "author": {
     "name": "ipeterpetrus",

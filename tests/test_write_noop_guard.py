@@ -5,12 +5,15 @@ import json, os, subprocess, sys, tempfile, time
 
 REP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "report.py")
 G = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks", "write_noop_guard.py")
+STATE = tempfile.mkdtemp(prefix="sw-state-")
+
 PASS = FAIL = 0
 ROOT = [os.getcwd()]                          # diisi tempdir saat tes berjalan
 
 
 def run(payload, env=None):
     e = dict(os.environ); e.pop("SAMEWRITE_ALLOW_NOOP", None)
+    e.setdefault("SAMEWRITE_STATE_DIR", STATE)   # marker `samewrite off` milik profil nyata tak boleh ikut
     e["SAMEWRITE_ROOT"] = ROOT[0]              # guard dibatasi ke pohon kerja; tes menyetelnya
     if env: e.update(env)
     p = subprocess.run(["/usr/bin/python3", G], input=json.dumps(payload),

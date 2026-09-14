@@ -23,6 +23,14 @@ jobs:
         run: python3 tests/test_skills.py
       - name: health suite
         run: python3 tests/test_health.py
+      - name: samewrite mode hook suite
+        run: python3 tests/test_samewrite_mode.py
+      - name: adapters drift + command surface + version pins
+        run: python3 tests/test_adapters.py
+      - name: coexistence matrix (Ponytail / i-have-adhd / Caveman surfaces)
+        run: python3 tests/test_coexist.py
+      - name: benchmark instruments self-test (GOOD -> GREEN, BAD -> RED, no model calls)
+        run: python3 experiments/vnext/selftest.py
       - name: README assertion count matches reality
         # README menyebut satu angka; angka itu pernah basi (124 vs 160 nyata, 13-Sep).
         # Klaim yang tak ada penegaknya membusuk diam-diam — di repo yang seluruh isinya
@@ -36,7 +44,7 @@ jobs:
               m = re.search(r"(\d+) PASS", out)
               assert m, f"{f}: tak mencetak hitungan PASS"
               total += int(m.group(1))
-          claim = re.search(r"(\d+) assertions in six suites", open("README.md").read())
+          claim = re.search(r"(\d+) assertions in \w+ suites", open("README.md").read())
           assert claim, "README tak lagi menyebut jumlah assertion — perbarui uji ini"
           assert int(claim.group(1)) == total, \
               f"README bilang {claim.group(1)} assertion, suite menjalankan {total}"

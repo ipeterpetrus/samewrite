@@ -257,7 +257,8 @@ are the useful part.
 | `hooks/write_noop_guard.py` | Claude Code `PreToolUse` hook protocol — JSON on stdin with `tool_name`/`tool_input`, a `hookSpecificOutput.permissionDecision` on stdout | **Claude Code only** as written; the logic is 60 lines and the contract is one function |
 | `tools/carry.py`, `skills.py`, `extract.py`, `simulate.py` | transcript JSONL with per-turn `usage` and `tool_use`/`tool_result` blocks | any agent that logs those — see below |
 | `experiments/skill-ab/` | a headless agent invocation and a per-session config directory | any CLI agent with both |
-| `skills/edit-discipline/` | nothing — it is Markdown with YAML front matter | any agent that reads a skill file; the plugin manifests are Claude Code's format |
+| `skills/edit-discipline/`, `skills/samewrite/` | nothing — Markdown with YAML front matter | any agent that reads a skill file; `adapters/` carries the same body in AGENTS.md / GEMINI.md form (INSTRUCTION_ONLY, untested there); the plugin manifests are Claude Code's format |
+| `hooks/samewrite_mode.py` | Claude Code `UserPromptSubmit` / `SessionStart` hook protocol | **Claude Code only**; opt-in via `SAMEWRITE_MODE_HOOK=1 bash hooks/install.sh`; owns one file, `samewrite-disabled` |
 | `tools/profiles.py` | `CLAUDE_CONFIG_DIR` or a `<profile>/projects/<project>/<session>.jsonl` layout | Claude Code's layout; pass a directory or file list for any other |
 | everything | **Python 3.9+, standard library only** | `tiktoken` is optional in `extract.py` (falls back to bytes/3.14); `pytest` is only used by the experiment fixtures |
 
@@ -371,7 +372,19 @@ not evidence; a number that appears only in them is a lead.
 ```
 hooks/write_noop_guard.py   PreToolUse(Write) — deny writes identical to disk
 hooks/install.sh            one command, idempotent, backs up settings.json
-skills/edit-discipline/     when to anchor-edit vs rewrite whole (Claude Code skill)
+skills/samewrite/           vNext core (1.1.0): context ladder, ask-only-if-material,
+                            minimum correct change, bounded retries, exit receipt —
+                            canonical source; on demand, ~330 chars always-on
+skills/edit-discipline/     when to anchor-edit vs rewrite whole (Claude Code skill; kept)
+hooks/samewrite_mode.py     opt-in switch: `stop samewrite` / `samewrite on|off|status`,
+                            SessionStart one-liner only with SAMEWRITE_CORE=1
+hooks/uninstall.sh          remove only SameWrite-owned hook entries; foreign ones stay
+tools/adapters.py           generate adapters/ (AGENTS.md / GEMINI.md form) from the
+                            canonical skill; `--check` fails CI on drift
+experiments/vnext/          arms A-J benchmark rig, self-tested oracles, pre-registration
+docs/VNEXT.md               the vNext build report: reference pins, coexistence matrix,
+                            support matrix, pilot numbers, release-gate verdict
+docs/reference-audits/      path:line audits of the nine reference repositories
 tools/carry.py              carry by source over your own transcripts — the table above
 tools/profiles.py           find every Claude Code profile on the machine; the reason the
                             tools take a directory, or nothing, instead of one glob
@@ -393,7 +406,7 @@ tools/feed.sh               regenerate docs/FIELD_DATA.md from the ledger, commi
 tools/health.py             is the guard still installed? ledger silence proves nothing on
                             its own, so compare it against session activity
 .claude-plugin/             plugin + marketplace manifests (`/plugin marketplace add`)
-tests/                      161 assertions in six suites, mutation-tested
+tests/                      285 assertions in nine suites, mutation-tested
 docs/FINDINGS.md            full numbers, method, the corrections, and what an
                             adversarial panel broke before publication
 ```
@@ -410,7 +423,20 @@ delete it.
 
 ## Install the skill
 
-The [`edit-discipline`](skills/edit-discipline/SKILL.md) skill — anchor an Edit under ~25%
+Since 1.1.0 the plugin ships **two** skills. [`samewrite`](skills/samewrite/SKILL.md) is the
+vNext core — read to the semantic scope, ask only if the ambiguity is material, make the
+minimum correct change, leave evidence that could have failed — as an on-demand body behind a
+~330-character listing entry. Its controls are namespaced and nothing else: `/samewrite on`,
+`/samewrite off`, `/samewrite status`, or the phrase `stop samewrite` on a line of its own.
+It **never** reacts to `normal mode`, `stop ponytail`, `stop caveman` or `stop adhd mode`, and
+never touches another plugin's flag, config, hook or status line — Ponytail, Caveman and
+i-have-adhd keep their build and presentation rules; samewrite owns context, edits,
+verification and evidence underneath them. The matrix that proves it (46 deterministic
+assertions plus a live run of Ponytail's and i-have-adhd's real hooks), the reference pins,
+and the pilot benchmark are in [docs/VNEXT.md](docs/VNEXT.md).
+
+The [`edit-discipline`](skills/edit-discipline/SKILL.md) skill is kept unchanged — the new
+body cites it for the fraction rule — so nothing installed against 1.0.0 changes meaning. It — anchor an Edit under ~25%
 changed, rewrite over ~40%, and the one sentence that beat every kilobyte block it was
 tested against — installs as a Claude Code plugin:
 
