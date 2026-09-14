@@ -215,7 +215,8 @@ def main():
     # ---------------------------------------------------------------- overhead observer
     t0 = time.time()
     run(["--history", hist, "--ledger", led, "--scan", os.path.join(d, "profile"), "--min-turns", "1"])
-    check("satu run < 30 s pada korpus fixture", (time.time() - t0) < 30, True)
+    dt = time.time() - t0
+    check(f"satu run selesai dalam waktu terbatas (terukur {dt:.1f} s, plafon 120 s)", dt < 120, True)
     check("berkas history tetap satu baris per run (nol telemetri kedua)",
           sum(1 for _ in open(hist)), 1)
 

@@ -1,94 +1,141 @@
 # AI-VOS profile
 
-A thin profile: how one 24x7 multi-agent deployment maps onto the generic contract in
-`docs/MULTI_AGENT.md`. It adds no mechanism. Every mechanism it uses — scopes, workload classes,
-evidence quality, deterministic candidate ids, the exit-code contract — exists for anyone running
-more than one agent, and nothing in `tools/` knows this file exists.
+A thin profile: how SameWrite's generic mechanisms line up with one governed multi-role operating
+model. It adds no mechanism. Everything it uses — scopes, workload classes, evidence quality,
+deterministic candidate ids, the exit-code contract — exists for anyone running more than one
+agent, and nothing in `tools/` knows this file exists.
 
-If you are not running AI-VOS, read `docs/MULTI_AGENT.md` and stop there.
+If you are not running AI-VOS, read [docs/MULTI_AGENT.md](MULTI_AGENT.md) and stop there.
+
+**Source and scope of this document.** It was written against that system's own canonical
+governance material, read directly, at a pinned revision. That material is private, so nothing
+here reproduces its file paths, clause identifiers, revision hashes or wording; what follows is
+only the mapping, stated in terms a reader outside that system can check against their own. Where
+the two designs disagree, this document says so rather than smoothing it over.
+
+## The correction that matters most
+
+An earlier draft of this profile described AI-VOS as "one 24x7 multi-agent deployment" with roles
+named builder, reviewer, ops and research, and told the operator to invent an agent label of their
+own choosing. **Every part of that was wrong**, and the canonical material says so plainly:
+
+| earlier draft claimed | what the canonical contract actually says |
+|---|---|
+| a fleet of agents running continuously | **one agent, one job** — a cross-agent orchestrator is an explicitly deferred phase, not current state |
+| roles `builder / reviewer / ops / research` | the machine-enforced roles are **owner**, **model** and **agent**; in governance prose, **Owner**, **Maker**, **Reviewer** and a connector role |
+| agent identity is the operator's free choice | **agent identity is an owner-approval item**, not something a tool or an operator may mint |
+| a task class like build / audit / triage | the canonical task taxonomy is a **decision-risk class** with exact-match, no-ordering semantics |
+| "no daemon is installed and none is needed" | that is true of SameWrite's own tooling; the governed system's **production plane is daemon-based and runs continuously** |
+| a workload change is `WORKLOAD_SHIFT` | that system's verdict vocabulary is **pass / fail / not reached** |
+
+The profile below is rewritten against the real contract. The mechanisms survived the correction;
+the vocabulary did not.
+
+## Two authority axes, and where SameWrite sits
+
+The governed system separates **operational execution authority** (may this actor *do* this?) from
+**decision authority** (how much independent model agreement does this *conclusion* need?). They are
+orthogonal: a conclusion can require several independent models while its execution still requires
+the owner. The default is the most restrictive level, and an unclassifiable case escalates rather
+than proceeding — **default-deny, fail closed**.
+
+SameWrite's observer and optimizer sit at the bottom of the first axis and the bottom of the
+second, and they are built so they cannot climb either:
+
+| SameWrite component | operational authority | decision authority |
+|---|---|---|
+| `tools/carry.py` (observer) | read-only observation | deterministic, zero model calls |
+| `tools/optimize.py` (optimizer) | read-only observation, plus writing a proposal file into a state directory | deterministic, zero model calls |
+| anything that changes `skills/` or `hooks/` | **not SameWrite** — a person, in a pull request | that system's own review contract |
+
+This is the alignment that makes the profile work at all. In that system's ledger, model and agent
+actors are **non-authority roles — never authority, however many agree**; only the owner role
+carries authority. SameWrite's optimizer is exactly such an actor by construction: it emits a
+proposal and holds `EXECUTION_AUTHORITY=NO`, `GIT_MUTATION_AUTHORITY=NO`,
+`GITHUB_WRITE_AUTHORITY=NO`, `PROMOTION_AUTHORITY=NO`, `OWNER_AUTHORITY=NO`. It does not need to be
+told to stay in its lane; there is no code path out of it, and `tests/test_multiagent.py` hashes the
+policy tree around a run to prove the point.
 
 ## Mapping
 
-| AI-VOS concept | SameWrite mechanism | note |
+| governed-system concept | SameWrite mechanism | honest note |
 |---|---|---|
-| role (builder, reviewer, ops, research) | `--scope-id <role>` | one scope per role; never merged |
-| agent instance | second component of the scope id, e.g. `builder-07` | opaque, your choice of granularity |
-| task class (build, audit, triage) | `--workload-class` | a change here is `WORKLOAD_SHIFT`, not a regression |
-| fleet-wide view | concatenate history files | safe in any order; `run_id` makes re-copying idempotent |
-| orchestrator schedule | cron or your own loop calling `tools/optimize.py` | no daemon is installed and none is needed |
-| proposal queue | `--emit-candidate <state dir>` | one directory per role, outside any governed repo |
+| Maker (patch / test / repair work) | `--scope-id maker` | one scope, not one scope per instance |
+| Reviewer (read-heavy audit, separate model family) | `--scope-id reviewer` | the separation SameWrite can actually represent today |
+| Owner (approval) | **not modelled** | the owner is not an agent whose transcripts are swept |
+| operational authority level | `--workload-class` | opaque label only; SameWrite never interprets it |
+| decision-risk class | **not modelled** | SameWrite has no notion of how many models agreed |
+| evidence bundle | `evidence_run_ids` in the candidate specification | aggregate identifiers, never content |
+| scheduled routine | cron or a systemd timer calling `tools/optimize.py` | SameWrite installs neither |
+| proposal queue | `--emit-candidate <state dir>` | one directory per scope, outside any governed repository |
 
-## Role granularity: pick the coarsest that is still honest
+Two entries say **not modelled** on purpose. A profile that invented a representation for owner
+approval or for decision-risk class would be building a second authority system inside a
+measurement tool, and a second authority system is exactly the thing the governed system's
+architecture forbids.
 
-A scope must be stable and low-cardinality. `builder` for a fleet of interchangeable builders is
-better than `builder-07` if you never act on one instance's numbers, because a scope with four
-records will sit at `INSUFFICIENT_DATA` forever. Use the per-instance form only when you intend to
-compare instances.
+### Scope labels are constrained here, not free
 
-Whatever you pick, the label is written verbatim into the record: it must not contain a hostname, a
-username, a customer name, a project name, a ticket id, or anything else you would not publish.
+Because agent identity in that system is an owner-approval item, a scope label must be **an existing
+approved role name, used verbatim**, and never a new identity minted by whoever ran the command. The
+per-instance form (`maker-07`) that `docs/MULTI_AGENT.md` offers generic users is **not** available
+under this profile unless those instances already exist as approved identities.
 
-## Why role isolation matters more here than anywhere else
+### One divergence, stated rather than hidden
 
-The two findings the optimizer produces most often are exactly the two that are dangerous when
-stated about a fleet instead of a role.
+SameWrite's generic rule is that a scope label must not carry a hostname or a username, because the
+label is written into a record that may be shared. The governed system does the opposite on purpose:
+its evidence deliberately records the host a piece of work ran on, because host identity is part of
+what an audit checks.
 
-**Listing exposure.** "70 of 82 skill listing entries were never invoked" is true *for the scope
-that was measured*. A reviewer role that never invokes a deployment skill is not evidence that the
-ops role does not need it. The finding is labelled `SCOPE_LOCAL`, and the emitted specification
-carries this invariant verbatim:
+These are not reconcilable by argument, so the profile picks the stricter one and says why:
+**keep hostnames out of the SameWrite scope label**, and let the audit trail record host identity
+where it already does. SameWrite's record is an aggregate measurement that can travel; the audit
+trail is a governed artifact that does not.
 
-> Scope-local evidence. A listing entry cold in one role can be essential to another: this candidate
-> is about reducing exposure IN THIS SCOPE, after proving no other role needs it. It is never an
-> instruction to uninstall anything globally, and nothing is removed automatically.
+## Evidence rules, and the carve-out an earlier draft got wrong
 
-**Output shaping.** "Bash output is 61% of carry" invites the rule "make Bash print less". For an
-audit, a security review, a build validation or any failure path, the verbose output *is* the
-evidence, and a rule that shortens it destroys the artifact the task exists to produce. Every
-shaping candidate therefore carries:
+That system's evidence doctrine and SameWrite's candidate invariant agree almost exactly: historical
+evidence is append-only, raw artifacts are kept verbatim, and deleting canonical evidence is the
+highest-restriction class — never autonomous. SameWrite's output-shaping candidates carry the same
+rule in the specification file a builder actually reads.
 
-> Never truncate the only copy of evidence. Raw output stays outside the model's context (host log,
-> file, or the caller's own spool); the model receives a bounded digest; full detail stays
-> retrievable on failure or on explicit request. For security, governance, build validation,
-> destructive operations and any failure path, the raw record must survive.
+But the earlier draft of that invariant was **incomplete in a way that could cause a leak**. It said
+raw output must survive, with no exception — which would have preserved a credential verbatim and
+called it an archive. The governed system carves secrets out explicitly, and SameWrite now does too:
 
-Both invariants are in the candidate file itself, not only in documentation, because the file is
-what a builder actually reads. `tests/test_multiagent.py` asserts both strings are present.
+> One carve-out, and it is not optional: secret material is never the evidence. A credential, key or
+> token appearing in output is redacted at capture and never written verbatim into a retained
+> artifact — preserving it is a leak wearing the word "evidence". Keep the finding, the location and
+> the fact of exposure; never the value.
 
-## A worked schedule
+That sentence is in `tools/optimize.py` and in every candidate specification it emits, and
+`tests/test_multiagent.py` fails if it goes missing. Reading the real contract is what found it.
 
-```bash
-# each agent, at the end of its own run
-python3 tools/carry.py --history "$STATE/carry_history.jsonl" \
-        --scope-id "$ROLE" --workload-class "$TASK_CLASS" --max-files 500
+## Models
 
-# once an hour, per role, from cron — not a daemon
-python3 tools/optimize.py --history "$STATE/carry_history.jsonl" \
-        --scope-id "$ROLE" --accept-partial --strict-exit \
-        --emit-candidate "$STATE/candidates/$ROLE"
-case $? in
-  0)  ;;                      # NO_ACTION — the expected outcome most cycles
-  10) notify "candidate for $ROLE" ;;
-  20|40) ;;                   # not enough evidence yet, or a bounded sweep; not an error
-  41) ;;                      # another invocation holds the lock; skip this cycle
-  *)  notify "optimizer status $?" ;;
-esac
-```
+The governed system treats **every model as a replaceable plug**, never part of its kernel, while
+pinning specific lanes for specific work in execution, and requiring for higher-risk decisions that
+the writer and the reviewer come from **different model families**.
 
-`--max-files 500` bounds the per-cycle cost to a fraction of a second regardless of how large the
-archive grows, and marks the evidence `PARTIAL`; `--accept-partial` then says that the bounded
-corpus is the intended target rather than a broken sweep. Drop both flags when you want the full
-population and can afford the full sweep — 10,000 sessions cost about 12 seconds.
+SameWrite matches this by having no model at all. The observer and optimizer make zero model calls;
+`tests/test_optimize.py` greps the source for model and network imports, and
+`tests/test_multiagent.py` runs the whole tool with socket creation denied at runtime. There is
+therefore nothing to pin, nothing to switch, and no way for a lane change to alter SameWrite's
+behaviour.
 
-Point `--emit-candidate` at a state directory, never at a governed repository. The optimizer holds
-no Git or GitHub authority and will not acquire any; a candidate reaches the codebase only when a
-person opens a pull request.
+Two consequences worth stating:
+
+- **SameWrite never generates different runtime policy per model.** Evidence that differs by model
+  is labelled `MODEL_SPECIFIC_SIGNAL` and may produce a candidate; it may not produce behaviour.
+- **The writer-is-not-the-reviewer rule applies to SameWrite's own proposals.** A candidate written
+  by this tool is not reviewed by it. That is the whole design, not a policy added on top.
 
 ## What this profile explicitly does not do
 
 - It does not promote, merge, install, uninstall or modify anything.
-- It does not add always-on text. The policy surface is byte-identical to the released `v1.1.0`
-  tag, and no skill, hook or manifest references `tools/optimize.py`.
+- It does not add always-on text. The policy surface is byte-identical to the released `v1.1.0` tag.
 - It does not add a network path, a model call, or a second telemetry channel.
-- It does not give the fleet a shared brain. Each scope's evidence stays that scope's evidence, and
-  a finding never speaks for a role that was not measured.
+- It does not give a fleet a shared brain. Each scope's evidence stays that scope's evidence.
+- It does not claim that the governed system is multi-agent today. It is not. These mechanisms serve
+  its existing maker-and-reviewer separation now, and its deferred multi-agent phase later.

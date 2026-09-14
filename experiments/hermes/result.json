@@ -1,0 +1,16 @@
+{
+  "repo": "NousResearch/hermes-agent",
+  "commit": "1ad89ac018f26a4f21817ebf37bb09f508656d63",
+  "version": "0.21.3",
+  "measured": {
+    "prompt_total_bytes": 1267,
+    "body_bytes_on_disk": 4417,
+    "unused_body_cost_bytes": 0,
+    "level0_samewrite_bytes": 80,
+    "level1_loaded_bytes": 4503,
+    "canonical_desc_chars": 391,
+    "adapter_desc_chars": 49
+  },
+  "pass": 11,
+  "fail": 0
+}

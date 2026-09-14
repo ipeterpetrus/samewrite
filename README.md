@@ -25,8 +25,10 @@ hook, and the measurement tools behind every number here — including the exper
 ```
 
 Or copy `skills/samewrite/` into `~/.claude/skills/`. That is the whole skill: one listing entry
-(~370 characters, carried by every turn) and a 4.7 kB body loaded when you type `/samewrite` or when
-the model decides to invoke it.
+of **415 bytes** (~104 tokens), carried by every turn, and a 4.7 kB body loaded only when you type
+`/samewrite` or the model decides to invoke it. Measured, not estimated — and in headless
+`claude -p` runs the body was invoked 0 times in 174 runs, so for those the 415 bytes is the whole
+cost.
 
 Optional, separate on purpose — the guard that denies a `Write` identical to what is already on
 disk (60 lines, fail-open, no network):
@@ -91,6 +93,67 @@ Three channels, honestly labelled:
 costs nothing per turn and the edit rule — identical → do not write; under ~25% changed → Edit; over
 ~40% → rewrite — lives in `samewrite`.
 
+## Why SameWrite?
+
+Several good projects sit next to this one and ask different questions. None of them is a
+competitor, and the differences are easier to use than to argue about:
+
+- **Ponytail** asks: what is the smallest implementation that works?
+- **i-have-adhd** asks: how should the interaction feel?
+- **rtk** asks: how can command output be reduced before it is read?
+- **Serena** asks: how do we navigate code semantically instead of reading whole files?
+
+**SameWrite asks: what is the cheapest path to a correct, verified result — and can the
+optimization prove it pays for itself?** That second clause is the whole difference. Everything
+here is measured, the measurements are reproducible from this repository, and the experiments that
+lost are published next to the ones that won.
+
+## Experiments that lose stay published
+
+This is a feature, not an apology. A repository that only shows its wins cannot be checked, and a
+token-efficiency claim that has never been allowed to fail is not evidence.
+
+| experiment | result | kept because |
+|---|---|---|
+| a 4.7 kB always-on instruction block vs one sentence | **−0.8%, p = 0.86** — the big block bought nothing | it is the reason the skill body is on-demand and the listing entry is 415 bytes |
+| the optional human-output hook | **NOT_PROVEN** over 256 pre-registered runs | it stayed opt-in and off by default instead of shipping on a hunch |
+| vNext cost improvement over the previous skill | **within noise** | correctness was non-inferior, so the release shipped on correctness, not on a cost claim |
+| `bash-output-shaping`, the strongest candidate the optimizer found | **REJECTED — duplicated by platform behaviour** | 30,731 real Bash results: median 449 B, p90 2,246 B, **none above 30 kB**. The host already caps and spills to a file. See [docs/CANDIDATES.md](docs/CANDIDATES.md) |
+| the AI-VOS role matrix, 80 runs on Opus 5 | **NOT_PROVEN** | two byte-identical arms differed by more than any effect measured, so the honest answer is that this rig cannot resolve it at this sample size |
+
+## How it compares
+
+Nine projects, read at pinned commits by read-only audits kept in
+[`docs/reference-audits/`](docs/reference-audits/). Every cell below is either something an audit
+states or a dash meaning **the audit does not say** — a dash is not a "no". No project is ranked
+against another here, because no experiment in this repository compares them head to head.
+
+Legend: ● audited yes · ○ audited no · – not in the audit
+
+| | primary job | always-on cost | mech. hooks | measures itself | evidence loop | presentation | build minimalism | tool-output filtering | symbol navigation | per-scope isolation |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **samewrite** | cheapest correct, verified change | **415 B** (measured) | ● `PreToolUse(Write)` deny-if-identical | ● pre-registered, scorers self-tested, in CI | ● offline, proposes only | ● one output rule | ○ | ○ | ○ | ● scope / workload |
+| [Ponytail](https://github.com/DietrichGebert/ponytail) | YAGNI build ladder | 6,637 B file; injected subset – | ○ text injection only | ● 3 arms × 5 tasks × 3 models, scorer self-test in CI | – | ● self-limited | ● 7-rung ladder | – | – | ○ propagates, not isolates |
+| [i-have-adhd](https://github.com/ayghri/i-have-adhd) | ADHD-shaped answers | 7,207 B file; **zero unless a flag file exists** | ○ SessionStart only | ● 84 judged rows; its own gate says FAILED | – | ● | – | ○ | – | ○ no subagent propagation |
+| [Caveman](https://github.com/JuliusBrussee/caveman) | terse prose | ~1–1.5k tok/turn (**upstream's own caveat**) | ○ injection + mode regex | ● 3 arms, tiktoken; scorer not self-tested | – | ● | ● separate skill | – | – | per-session |
+| [rtk](https://github.com/rtk-ai/rtk) | shrink command output | 8 lines | ● `PreToolUse(Bash)` rewrite, permission-aware | ◐ scorer is `bytes/4`, its own counter untested | – | – | – | ● core, never-worse guard, raw spool | – | – |
+| [Serena](https://github.com/oraios/serena) | symbol-level navigation | – | ● read-burst counter → one deny / 120 s | ○ "Why Not Benchmarks?"; agent self-assessed | ● cross-session memories | – | – | ● length ladders | ● the defining feature | per-session / per-project |
+| [superpowers](https://github.com/obra/superpowers) | skill library + router | **3,308 B (~800 tok)**, re-injected after `/clear` and `/compact` | ○ one read-only SessionStart | ○ evals live outside the repo | ● plan ledger, failure counters | ● partial | – | ○ file handoff, not filtering | – | ● strongest: subagents inherit nothing |
+| [token-savior](https://github.com/Mibayy/token-savior) | symbol index + memory | – | ● three gates, but off / unbundled / inert | ◐ in-repo benchmarks measure index speed; headline retracted by its own README | ● bandit + prefetch | – | – | ◐ PostToolUse, **additive — does not shrink the current turn** | ● | – |
+| [aider](https://github.com/Aider-AI/aider) | pair programming with a repo map | 1,024-token repo-map budget | ○ no hooks | ● Exercism harness; no known-good/bad scorer fixture | – | – | – | ○ "no truncation anywhere" | ● tree-sitter + PageRank | – |
+
+Three things this table will not do:
+
+- **Claim anyone's numbers were verified.** Every audit carries the same line: quoted figures are
+  *self-reported and were not re-run*. That includes the numbers in samewrite's own hero table
+  until you run `tests/` and `experiments/` yourself, which is why both ship.
+- **Treat a file size as a context cost.** Caveman's 7.0 kB and Ponytail's 6.6 kB skill files are
+  *level-filtered before injection*, and neither audit gives the filtered size. Only samewrite's
+  415 B and superpowers' 3,308 B are measured injected bytes.
+- **Hide the audits' limits.** Seven of eight are `SCOPED`: they did not read every file. Only the
+  i-have-adhd audit is `FULL`. Caveman's proxy directories — exactly where its −33% input-token
+  claim would live — were not opened.
+
 ## Works with other agent skills
 
 samewrite composes; it does not compete.
@@ -147,10 +210,22 @@ hidden reasoning tokens are not observable and are not claimed.
 | host | status |
 |---|---|
 | Claude Code 2.1.270 (skill, hooks, installer) | VERIFIED — headless runs, clean-install and 1.0.0 → 1.1.0 upgrade acceptance |
-| Codex / OpenCode via `adapters/AGENTS.samewrite.md` | INSTRUCTION_ONLY — generated from the skill, not run there |
+| Hermes Agent 0.21.3 (`1ad89ac`) — skill via `adapters/hermes/` | VERIFIED — installed into an isolated profile, discovered, listed, loaded, invoked and uninstalled; 11/11 checks |
+| Hermes Agent — observer / optimizer | UNTESTED — they run there (ordinary offline Python, exit 0) but have no reader for Hermes session files, so they measure nothing |
+| Hermes Agent — Claude Code hooks | NOT_APPLICABLE — `PreToolUse` / `SessionStart` are Claude Code contracts; Hermes' `pre_tool_call` shell hooks are a different surface and none is installed |
+| Codex / OpenCode via `adapters/AGENTS.samewrite.md` | INSTRUCTION_ONLY — a verification run on `gpt-5.6-sol` was attempted and returned **10/10 `INFRA_ERROR` (account usage limit)**, so the channel is UNTESTED, not passing and not failing |
 | Gemini CLI via `adapters/GEMINI.samewrite.md` | INSTRUCTION_ONLY |
 | Pi / OMP | UNSUPPORTED |
 | Windows paths | UNTESTED (POSIX paths with spaces and metacharacters are tested) |
+
+**Hermes Agent.** SameWrite's canonical skill is installed and loaded by Hermes without
+transformation; the generated adapter differs from the Claude file in one field only, because
+Hermes truncates a skill description to 60 characters in its system prompt and the canonical
+description is 391. Measured in an isolated profile with no API key set: an **unused** SameWrite
+skill costs **80 bytes** in the system prompt and **0 bytes** of body — progressive loading is
+real, not claimed. Loading it on demand pulls 4,503 bytes. Reproduce with
+`experiments/hermes/acceptance_hermes.py`. Claude Code's hooks are Claude-specific and are not
+installed into Hermes.
 
 ## Safety / correctness
 
@@ -184,7 +259,7 @@ experiments/                skill-ab (462 runs) · vnext (110) · presentation (
 experiments/scale/          how the sweep scales (1k and 10k sessions) and why there is no index
 docs/VNEXT.md               build report · docs/RELEASE_NOTES_1.1.0.md · _1.2.0.md · docs/reference-audits/
 docs/MULTI_AGENT.md         many agents, running all the time · docs/AI_VOS_PROFILE.md (one profile)
-tests/                      400 assertions in eleven suites, mutation-tested; CI on Python 3.9 and 3.12
+tests/                      415 assertions in eleven suites, mutation-tested; CI on Python 3.9 and 3.12
 ```
 
 Measure your own sessions — nothing installed, nothing written:
@@ -204,6 +279,15 @@ nothing into any model's context and never edits `skills/`, `hooks/` or configur
 secret planted in a transcript, a listing and the ledger is proved absent from every output
 (`tests/test_optimize.py`). Full workflow and data contract: [docs/EVIDENCE_LOOP.md](docs/EVIDENCE_LOOP.md);
 open candidates: [`experiments/candidates/`](experiments/candidates/). Nothing promotes itself.
+
+## Multi-agent / AI-VOS
+
+SameWrite 1.2 can isolate evidence by role and workload while keeping the observer entirely outside
+the model's context — proven empirically, not asserted: across 80 runs of a role matrix on Opus 5,
+zero observer artefacts appeared in any transcript.
+
+Generic contract: [docs/MULTI_AGENT.md](docs/MULTI_AGENT.md). One worked profile:
+[docs/AI_VOS_PROFILE.md](docs/AI_VOS_PROFILE.md).
 
 Running more than one agent, or running them continuously? Records carry a `--scope-id`, and
 populations from different scopes are counted and named but never averaged; evidence that came from

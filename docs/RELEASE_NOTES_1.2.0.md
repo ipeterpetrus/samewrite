@@ -47,8 +47,91 @@ release changes nothing for you except three new flags you will never type.
   `PARTIAL`); a history record above 1 MB is not appended at all; control bytes in a source label
   are stripped in one place before they can reach a terminal, a JSON file or a specification.
 
+## Hermes Agent: verified
+
+SameWrite's canonical skill is loaded by **Hermes Agent 0.21.3** (`NousResearch/hermes-agent`,
+commit `1ad89ac`) without transformation. Verified in an isolated profile with no API key set —
+installed, discovered, listed, loaded, invoked, uninstalled; 11/11 checks
+(`experiments/hermes/acceptance_hermes.py`).
+
+| measured on Hermes | value |
+|---|---|
+| unused skill, cost in the system prompt | **80 B** |
+| unused skill, body bytes in context | **0** — progressive loading is real |
+| loaded on demand | 4,503 B |
+
+One host difference is handled mechanically rather than ignored: Hermes truncates a skill
+description to 60 characters in its system prompt, and the canonical description is 391. Shipping
+the canonical file unchanged would silently lose its routing tail exactly where routing happens, so
+`tools/adapters.py` generates a Hermes target whose **body is byte-identical** and whose
+description is 49 characters. CI fails on drift.
+
+Claude Code's hooks are Claude-specific and are **not** installed into Hermes. The observer and
+optimizer run there — they are ordinary offline Python — but they have no reader for Hermes session
+files, so they measure nothing and are labelled `UNTESTED` rather than supported.
+
+## The two strongest candidates, and why neither shipped
+
+Full evidence in [docs/CANDIDATES.md](CANDIDATES.md).
+
+- **`bash-output-shaping` — REJECTED.** Bash is 62% of carry, so bounding it looked like the best
+  available change. Measuring 30,731 real Bash results ended it: median 449 B, p90 2,246 B,
+  **maximum 28,989 B, and not one above 30 kB**. The host already caps Bash output and spills the
+  remainder to a file. Bash dominates carry by *accumulation across thousands of small results*,
+  not by size — a different problem, and a rule shaped for the wrong one would have cost always-on
+  bytes and bought nothing.
+- **`listing-prune` — DEFERRED.** The measurement is real: 70 of 82 listing entries were never
+  invoked, 24,002 B, 80% of the listing. But that is **2.30% of total carry**, below the
+  `NEGLIGIBLE` threshold fixed before the numbers were read and far below this rig's measured
+  noise; the cold entries belong to *other* plugins, not to SameWrite; and an entry cold in one
+  role can be essential to another. It ships as a recommendation you can run yourself
+  (`python3 tools/skills.py --markdown`), which is a legitimate outcome rather than a fallback.
+
+## Measured on AI-VOS-shaped work: NOT_PROVEN, and the reason is worth more than a number
+
+200 model runs on `claude-opus-5` across ten role-shaped fixtures (builder, reviewer, ops,
+governance, research), pre-registered in `experiments/aivos/PREREGISTRATION.md` before the first
+run existed. Full write-up: [experiments/aivos/RESULTS.md](../experiments/aivos/RESULTS.md).
+
+**Every quality gate is non-inferior** — correctness, safety, evidence completeness and authority
+compliance. Zero baited destructive commands executed. Zero files written by a role forbidden to
+write. **Observer isolation passed**: zero observer artefacts in 80 transcripts, and a sentinel
+value placed in the environment was proved not to reach the model at all.
+
+**The cost verdict is `NOT_PROVEN`, and the experiment explains why rather than shrugging.** The
+skill file is byte-identical at 1.1.0 and 1.2.0, so two arms in the matrix present the model with
+the same bytes — which turns them into a measurement of the rig's own noise. Three such
+null-vs-null comparisons read **−5.6%**, **+15.1%** and **−6.4%**. The middle one reached
+**p = 0.021** between treatments that cannot differ, and did not replicate. The candidate was
+cheaper than bare on 8 of 10 fixtures (p = 0.109) with a median of −1.7%, which is smaller than
+that noise.
+
+Two methodological defects were found and fixed in the process, and both are the kind that
+manufacture results:
+
+- **arm was perfectly confounded with wall-clock time** in the first matrix (jobs submitted
+  arm-major drain in blocks), which alone produced a 15% "difference" between identical arms;
+  fixed by randomising run order under a recorded seed;
+- **the second-channel rig scored a quota wall as a model failure** — ten `INFRA_ERROR` runs
+  reported as "0/5 correct". Fixed; the GPT-5.6 Sol channel is reported as `UNTESTED`, never
+  estimated from the Claude numbers.
+
 ## Two defects found and fixed at the root
 
+- **Proposal churn from a settling estimator.** A trend candidate's identity was bucketed on the
+  *magnitude* of the fitted slope. A slope fitted over a growing window decays even when the world
+  stops moving, so each decay step crossed a bucket and minted a new proposal: 39 new files during
+  a plateau in which nothing changed. Identity is now the *direction*, so one sustained movement is
+  one proposal and a reversal is a new one. A 30-day, 9,000-invocation simulation now produces
+  **zero** new proposals in its settled tail.
+- **The same movement reported twice.** A share vector sums to 100, so one source rising *is*
+  another falling. The optimizer emitted both as independent candidates, doubling every proposal
+  for zero information. The complement is now named inside the surviving finding's evidence instead
+  of opening a second file.
+- **An evidence rule that would have preserved a leak.** The invariant said raw evidence must
+  survive, with no exception — which would have kept a credential verbatim and called it an
+  archive. Reading a real governance contract found the omission. Secret material is now carved
+  out explicitly, in the specification text a builder actually reads.
 - **A crash destroyed two records, not one.** A machine dying mid-append leaves a line with no
   newline; the next writer appended straight onto the fragment, so the torn record took a good one
   with it. The writer now checks for the missing newline first. Proved by mutation: revert the check
@@ -93,10 +176,20 @@ ZERO_NETWORK=PASS                 static grep, in-process socket denial, and the
 PRIVACY=PASS                      canary in a transcript, a listing and the ledger: absent from
                                   report, JSON and candidate files
 NO_AUTOMATIC_MUTATION=PASS        skills/, hooks/, .claude-plugin/ hashed around a run
-TESTS=PASS                        400 assertions in eleven suites, clean python:3.9-slim and
-                                  python:3.12-slim, offline
-MUTATION=PASS                     10 invariants: each goes RED when its implementation is broken
+TESTS=PASS                        415 assertions in eleven suites, clean python:3.9-slim and
+                                  python:3.12-slim, both run with --network none
+MUTATION=PASS                     12 invariants: each goes RED when its implementation is broken
                                   and GREEN against the real source
+HERMES_SKILL=VERIFIED             Hermes Agent 0.21.3 (1ad89ac), isolated profile, 11/11
+HERMES_OBSERVER=UNTESTED          runs there; no reader for Hermes session files
+CORRECTNESS=NON_INFERIOR          80 runs, four arms, ten role-shaped fixtures
+SAFETY=NON_INFERIOR               zero baited destructive commands executed
+EVIDENCE_COMPLETENESS=PASS        governance fixtures require verbatim identifiers
+AUTHORITY_COMPLIANCE=PASS         zero writes by a role forbidden to write
+SAVINGS_CLASS=NOT_PROVEN          effect smaller than the measured null-vs-null noise
+BASH_CANDIDATE=REJECTED           duplicated by platform behaviour; 30,731 results measured
+LISTING_CANDIDATE=DEFERRED        2.30% of carry, below the pre-set floor; user configuration
+SOL_CHANNEL=UNTESTED              10/10 INFRA_ERROR, account usage limit; never estimated
 ```
 
 ## Known limitations

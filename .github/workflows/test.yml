@@ -38,6 +38,10 @@ jobs:
         run: python3 tests/test_multiagent.py
       - name: mutation suite (every AI-VOS invariant must go RED when its implementation is broken)
         run: python3 tests/test_mutation.py
+      - name: fixtures + oracles for the AI-VOS role matrix are well formed
+        run: python3 experiments/aivos/fixtures_aivos.py
+      - name: long-run observer (evidence ladder + a scheduler that must go quiet; no model needed)
+        run: python3 experiments/aivos/longrun.py --days 20 --cycles 5 --plateau 8
       - name: sweep scaling harness (small size in CI; the 1k/10k numbers are in docs/MULTI_AGENT.md)
         run: python3 experiments/scale/scan_scale.py --sizes 200
       - name: benchmark instruments self-test (GOOD -> GREEN, BAD -> RED, no model calls)

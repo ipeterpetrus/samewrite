@@ -81,7 +81,11 @@ EVIDENCE_INVARIANT = (
     "Never truncate the only copy of evidence. Raw output stays outside the model's context (host "
     "log, file, or the caller's own spool); the model receives a bounded digest; full detail stays "
     "retrievable on failure or on explicit request. For security, governance, build validation, "
-    "destructive operations and any failure path, the raw record must survive.")
+    "destructive operations and any failure path, the raw record must survive. "
+    "ONE CARVE-OUT, and it is not optional: secret material is never the evidence. A credential, "
+    "key or token appearing in output is redacted at capture and never written verbatim into a "
+    "retained artifact — preserving it is a leak wearing the word 'evidence'. Keep the finding, "
+    "the location and the fact of exposure; never the value.")
 SCOPE_INVARIANT = (
     "Scope-local evidence. A listing entry cold in one role can be essential to another: this "
     "candidate is about reducing exposure IN THIS SCOPE, after proving no other role needs it. It "
@@ -362,19 +366,39 @@ def analyse(live, hist, ledger, cold, scope="default", accept_partial=False):
         keys = set()
         for r in hist["comparable"]:
             keys.update(r.get("shares", {}))
+        moves = []
         for k in sorted(keys):
             t = carry.trend(hist["comparable"], k, min_n=MIN_HISTORY_FOR_TREND)
-            if not t:
+            if t and abs(t["slope"] * 30.0) >= TREND_MIN_SLOPE:
+                moves.append((k, t["slope"] * 30.0, t))
+        reported = []
+        for k, per_month, t in sorted(moves, key=lambda x: -abs(x[1])):
+            # A share vector sums to 100, so one source rising IS another falling. Reporting both
+            # is the SAME movement twice: it doubles every proposal for zero information, and a
+            # reader who sees two files assumes two problems. Keep the larger mover, name the
+            # complement inside its evidence.
+            mirror = next((rk for rk, rp in reported
+                           if abs(rp + per_month) <= max(0.01 * abs(rp), 0.05)), None)
+            if mirror:
+                for f in out:
+                    if f["id"] == "trend-" + re.sub(r"[^a-z0-9]+", "-", mirror.lower()).strip("-"):
+                        f["evidence"] += f"; {k} moves by the same amount in the other direction, " \
+                                         f"which is the same movement, not a second one"
                 continue
-            per_month = t["slope"] * 30.0
-            if abs(per_month) >= TREND_MIN_SLOPE:
+            reported.append((k, per_month))
+            if True:
                 cid = "trend-" + re.sub(r"[^a-z0-9]+", "-", k.lower()).strip("-")
                 spike = (" — but the last value sits z=%+.1f from its own history, so this slope "
                          "may be one spike rather than a shift" % t["z"]) if abs(t["z"]) >= TREND_MIN_Z else ""
                 out.append(finding(cid, "CANDIDATE", f"{k} share is moving",
                                    f"{per_month:+.1f} pp/month over {t['n']} records in scope {scope!r}, "
                                    f"last value z={t['z']:+.1f}{spike}", scope=scope,
-                                   bucket=bucket_of(abs(per_month)),
+                                   # DIRECTION, not magnitude. A fitted slope decays as its window
+                                   # grows even when the world stopped moving, so bucketing the
+                                   # magnitude mints a fresh proposal every time the estimator
+                                   # settles. One sustained movement is one proposal; a REVERSAL
+                                   # is a new one, which is exactly when a human should look again.
+                                   bucket=1 if per_month > 0 else -1,
                                    hypothesis=f"the change in {k} is a shift, not a spike, and has a cause worth naming",
                                    metric=f"slope of {k} share", effect="unknown until measured",
                                    risk="a trend can come from the workload, not from SameWrite",

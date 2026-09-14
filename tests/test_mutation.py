@@ -195,10 +195,45 @@ CASES = [
      assert chr(27) not in out and chr(7) not in out, "byte kendali lolos ke laporan"
      """),
 
+    ("identitas tren stabil: jendela membesar bukan usulan baru",
+     [("optimize.py", "                                   bucket=1 if per_month > 0 else -1,",
+       "                                   bucket=bucket_of(abs(per_month)),")],
+     """
+     # Deret harus NAIK lalu MENDATAR. Deret linier sempurna punya kemiringan yang sama di
+     # jendela mana pun, jadi ia tak bisa membedakan identitas-dari-arah dari
+     # identitas-dari-besaran: fixture degenerat yang membuat mutan lolos.
+     def hist_of(n):
+         rows = []
+         for i in range(n):
+             share = 30.0 + min(i, 3) * 12.0        # naik 4 titik, lalu datar
+             rows.append(rec(100 + i*86400*7, {"Bash": share, "Read": 100.0 - share}, scope="t"))
+         return {"comparable": rows, "total": n, "in_scope": n, "rejected": {}, "dropped": [],
+                 "time_order": "ok"}
+     ids = set()
+     for n in (4, 6, 8, 10, 12):
+         f = [x for x in optimize.analyse(None, hist_of(n), None, None, scope="t")
+              if x["id"] == "trend-bash"]
+         if f:
+             ids.add(f[0]["candidate_id"])
+     assert len(ids) == 1, f"penaksir yang mengendap mencetak {len(ids)} usulan utk satu gerakan"
+     """),
+
+    ("cermin share: satu gerakan tidak dilaporkan dua kali",
+     [("optimize.py", "            if mirror:\n", "            if False:\n")],
+     """
+     rows = [rec(100 + i*86400*7, {"Bash": 30.0 + i*8.0, "Read": 70.0 - i*8.0}, scope="t")
+             for i in range(6)]
+     h = {"comparable": rows, "total": 6, "in_scope": 6, "rejected": {}, "dropped": [],
+          "time_order": "ok"}
+     tr = [x for x in optimize.analyse(None, h, None, None, scope="t")
+           if x["id"].startswith("trend-")]
+     assert len(tr) == 1, f"{len(tr)} kandidat tren untuk satu gerakan komplementer"
+     """),
+
     ("tren: kemiringan adalah sinyal, z hanya menandai lonjakan",
      [("optimize.py",
-       "            if abs(per_month) >= TREND_MIN_SLOPE:",
-       "            if abs(per_month) >= TREND_MIN_SLOPE and abs(t['z']) >= TREND_MIN_Z:")],
+       '            if t and abs(t["slope"] * 30.0) >= TREND_MIN_SLOPE:',
+       '            if t and abs(t["slope"] * 30.0) >= TREND_MIN_SLOPE and abs(t["z"]) >= TREND_MIN_Z:')],
      """
      rows = [rec(100 + i*86400*7, {"Bash": 30.0 + i*8, "Read": 70.0 - i*8}, scope="s")
              for i in range(6)]

@@ -235,6 +235,39 @@ def main():
     w, e, _fail = optimize.emit_candidates([far], out2)
     check("bukti yang benar-benar bergerak: kandidat baru ditulis", (len(w), len(e)), (1, 0))
 
+    # ------------------------------------------------------------ 8b. identitas tren stabil
+    def hist_of(n, step=8.0):
+        rows = [rec(100 + i * 86400 * 7, {"Bash": 30.0 + i * step, "Read": 70.0 - i * step},
+                    scope="t") for i in range(n)]
+        return {"comparable": rows, "total": n, "in_scope": n, "rejected": {}, "dropped": [],
+                "time_order": "ok"}
+
+    ids = []
+    for n in (4, 6, 8, 10, 12):
+        f = [x for x in optimize.analyse(None, hist_of(n), None, None, scope="t")
+             if x["id"] == "trend-bash"]
+        ids.append(f[0]["candidate_id"] if f else None)
+    # Kemiringan yang dicocokkan pada jendela yang MEMBESAR meluruh walau dunianya berhenti
+    # bergerak. Identitas yang mengikuti besarannya akan mencetak usulan baru tiap kali penaksir
+    # mengendap — churn yang lahir dari alat ukur, bukan dari dunia.
+    check("gerakan yang sama, jendela membesar -> SATU identitas kandidat", len(set(ids)), 1)
+    down = [rec(100 + i * 86400 * 7, {"Bash": 80.0 - i * 8.0, "Read": 20.0 + i * 8.0}, scope="t")
+            for i in range(6)]
+    hd = {"comparable": down, "total": 6, "in_scope": 6, "rejected": {}, "dropped": [],
+          "time_order": "ok"}
+    fdown = [x for x in optimize.analyse(None, hd, None, None, scope="t")
+             if x["id"] == "trend-bash"][0]
+    check("PEMBALIKAN arah -> identitas BARU (saat manusia memang harus melihat lagi)",
+          fdown["candidate_id"] != ids[0], True)
+
+    # Vektor share berjumlah 100: satu sumber naik BERARTI sumber lain turun. Melaporkan keduanya
+    # adalah gerakan yang sama dua kali.
+    ftr = [x for x in optimize.analyse(None, hist_of(6), None, None, scope="t")
+           if x["id"].startswith("trend-")]
+    check("cermin tak dilaporkan sebagai kandidat kedua", len(ftr), 1)
+    check("gerakan komplemen tetap DISEBUT di bukti, bukan dibuang diam-diam",
+          "other direction" in ftr[0]["evidence"], True)
+
     # ------------------------------------------------------------ 9. ikatan bukti
     spec = open(os.path.join(out2, f1["candidate_id"], "HYPOTHESIS.md"), encoding="utf-8").read()
     for token in ("candidate_id:", "scope_id:", "threshold_schema_version:", "optimizer_version:",
@@ -242,6 +275,12 @@ def main():
         check(f"spesifikasi mengikat bukti: {token}", token in spec, True)
     check("spesifikasi membawa invarian bukti (anti-truncate)",
           "Never truncate the only copy of evidence" in spec, True)
+    # Aturan pelestarian bukti TANPA pengecualian rahasia akan mengawetkan token yang bocor dan
+    # menyebutnya arsip. Kanonik AI-VOS memisahkan keduanya; spesifikasi harus ikut.
+    check("invarian bukti membawa pengecualian rahasia (bukan mengawetkan kebocoran)",
+          "secret material is never the evidence" in spec, True)
+    check("pengecualian rahasia menyebut apa yang TETAP disimpan",
+          "never the value" in spec, True)
     check("spesifikasi membawa invarian scope (anti-uninstall)",
           "never an instruction to uninstall anything globally" in spec, True)
 
@@ -315,7 +354,11 @@ def main():
     dt = time.time() - t0
     check("baris 8 MB dilewati DAN dihitung", a["oversize"], 1)
     check("baris raksasa membuat bukti PARTIAL, bukan diam-diam lengkap", a["quality"], "PARTIAL")
-    check("baris patologis tak meledakkan waktu (<20 s)", dt < 20, True)
+    # Plafon LONGGAR dengan sengaja. Yang dijaga invarian ini adalah ledakan kompleksitas (O(n^2)
+    # pada baris 8 MB = MENIT), bukan beberapa detik. Ambang ketat pada mesin yang sedang sibuk
+    # menghasilkan uji yang gagal acak — dan uji yang gagal acak akan diabaikan, lalu berhenti
+    # menjaga apa pun. Angka ANGGARAN yang sesungguhnya diukur di experiments/scale/scan_scale.py.
+    check(f"baris patologis tak meledakkan waktu (terukur {dt:.1f} s, plafon 120 s)", dt < 120, True)
     rc, out = run(["--history", empty, "--ledger", empty, "--scan", os.path.join(d, "profile"),
                    "--min-turns", "1"])
     check("laporan menyebut baris yang dilewati", "oversized" in out, True)
@@ -399,7 +442,7 @@ def main():
     recs, _, _ = optimize.load_history(big)
     dt = time.time() - t0
     check("20k record terbaca", len(recs), 20000)
-    check("20k record < 20 s (anggaran terdaftar)", dt < 20, True)
+    check(f"20k record dalam waktu terbatas (terukur {dt:.1f} s, plafon 120 s)", dt < 120, True)
     check("history 20k run masih < 50 MB di disk", os.path.getsize(big) < 50 * 10 ** 6, True)
 
     print(f"\n{P} PASS / {F} FAIL")
