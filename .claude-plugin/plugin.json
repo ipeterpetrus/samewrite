@@ -1,7 +1,7 @@
 {
   "name": "samewrite",
   "version": "1.1.0",
-  "description": "Edit-discipline skill from a measured study of 1,316 Claude Code transcripts: when to anchor an Edit instead of rewriting a file, and where a long session's tokens actually go. Ships the skill only — the PreToolUse hook stays a deliberate, separate install.",
+  "description": "Token-efficient coding-agent skill for Claude Code: reduce context, tool noise, unnecessary edits and retries while preserving correctness and evidence. One canonical skill (samewrite) with a hidden edit-discipline compatibility alias, an optional no-op-write guard hook, and the measurement tools behind every number in the README.",
   "author": {
     "name": "ipeterpetrus",
     "url": "https://github.com/ipeterpetrus"
@@ -12,9 +12,10 @@
   "keywords": [
     "token-optimization",
     "context-engineering",
-    "edit-discipline",
+    "coding-agents",
+    "claude-code",
     "measurement",
-    "claude-code"
+    "evidence"
   ],
   "skills": "./skills"
 }

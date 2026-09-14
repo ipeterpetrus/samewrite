@@ -1,24 +1,19 @@
 # samewrite
 
-**A token-efficiency skill for coding agents: less context, less tool noise, fewer unnecessary
-edits and retries — with result-first human output and evidence-first verification. Measured,
-not promised.**
+**Token-efficient coding-agent skill for Claude Code: reduce context, tool noise, unnecessary
+edits and retries while preserving correctness and evidence.** One canonical skill, one optional
+hook, and the measurement tools behind every number here — including the experiments that lost.
 
-Built from 1,316 Claude Code transcripts (237,541 assistant turns), 462 scored A/B runs, and two
-pre-registered pilots of the skill itself (110 + 64 isolated runs). Every number below carries
-its label: **MEASURED** (this repo, method published), **OBSERVED** (seen, not controlled),
-**DESIGNED** (built, not yet measured), **EXPERIMENTAL** (pilot only, not a claim).
-
-| what | number | label |
+| measured fact | number | how |
 |---|---|---|
-| where a session's tokens go | Bash + Read results **63.8%** of carry, injected scaffolding 15.3%, prose 5.6%, Write/Edit 9.5% | MEASURED, 1,316 transcripts |
-| one terseness sentence vs no instruction | **−22.7%** output tokens (14/16 pairs, p = 0.0001); English replication **−19.6%** (12/16, p = 0.0070); 100% facts kept | MEASURED, pre-registered |
-| the same intent as a 4.7 kB always-on block | **−0.8%** vs the sentence (p = 0.86) — the kilobytes do not pay | MEASURED, pre-registered |
-| adding an always-on process skill | **+51…+84%** tokens, costlier in 17/18, 18/18, 6/6, 12/12, 4/4, 16/16 pairs | MEASURED, six rounds |
-| overwrites byte-identical to disk | **20.8%** (154/741) — the guard hook denies them | MEASURED |
-| the popular "≤3 change blocks → Edit" rule | **net negative**; changed-fraction rule keeps 84% of the oracle saving | MEASURED, 20 held-out splits |
-| the vNext skill vs the previous one on total context | cheaper on 4/10 fixtures, median +1.4% — **not proven cheaper** | EXPERIMENTAL, 110 runs |
-| human-output layer (result first, no filler, detail on request) | confirmatory run on 16 fresh cases × 2 reps: contract met 23/32 with the description alone, 24/32 with the opt-in one-sentence session hook (sign p = 1.0), 23/32 for the full i-have-adhd hook at 2× the injected bytes; correctness 25–26/32 in every arm | EXPERIMENTAL — **NOT_PROVEN** as an improvement; 256 runs |
+| where a session's tokens actually go | Bash + Read results **63.8%** of carry; injected scaffolding 15.3%; prose 5.6%; Write/Edit 9.5% | 1,316 Claude Code transcripts, 237,541 turns |
+| overwrites byte-identical to what is on disk | **20.8%** (154/741) — the guard hook denies them | same corpus |
+| one terseness sentence vs no instruction | **−22.7%** output tokens, English replication **−19.6%**, facts kept 100% | pre-registered A/B, 16 pairs each |
+| the same intent as a 4.7 kB always-on block | **−0.8%** over the sentence (p = 0.86) | pre-registered A/B |
+| this skill vs the previous SameWrite on correctness and cost | non-inferior: 26 vs 25 correct of 32; cost within noise | confirmatory run, 16 fresh cases × 2 reps |
+
+> **Status:** 1.1.0 is a release **candidate** on [PR #2](https://github.com/ipeterpetrus/samewrite/pull/2).
+> The marketplace path below installs whatever `main` carries — 1.0.0 until the PR is merged.
 
 ## Install
 
@@ -28,152 +23,146 @@ its label: **MEASURED** (this repo, method published), **OBSERVED** (seen, not c
 ```
 
 Or copy `skills/samewrite/` into `~/.claude/skills/`. That is the whole skill: one listing entry
-(~370 characters, carried by every turn) and a 4.7 kB body loaded only when invoked.
+(~370 characters, carried by every turn) and a 4.7 kB body loaded when you type `/samewrite` or when
+the model decides to invoke it.
 
 Optional, separate on purpose — the guard that denies a `Write` identical to what is already on
-disk (read the 60 lines first; it is fail-open and never sends anything anywhere):
+disk (60 lines, fail-open, no network):
 
 ```bash
 git clone https://github.com/ipeterpetrus/samewrite && cd samewrite
 python3 tests/test_write_noop_guard.py     # 64 PASS expected
 bash hooks/install.sh                      # registers PreToolUse(Write); backs up settings.json
-bash hooks/uninstall.sh                    # removes only samewrite's entry, nothing else
+bash hooks/uninstall.sh                    # removes only samewrite's entries, nothing else
 ```
 
-## What it saves
+Upgrading from 1.0.0: `/plugin update samewrite@samewrite`. `/edit-discipline` keeps working as a
+hidden alias; rerunning `hooks/install.sh` recognises the 1.0.0 hook entry and adds nothing.
 
-The lever order matters more than any single rule. In an append-only, full-replay context
-everything you send is billed again on every later turn, so cost is `size × turns remaining` —
-the transcript, not the answer, is the bill.
+## 30 seconds
 
-| lever | effect | label |
-|---|---|---|
-| end the session sooner | −41…−54% of carry when one session becomes two | MEASURED |
-| read a range, not a file; ask Bash for the answer, not the log | Read results 21.3%, Bash 42.5% of carry — the skill's first rule | MEASURED share; effect of the rule EXPERIMENTAL |
-| prune the skill listing you never invoke | ≈ −3% (72.9% of one listing was never invoked) | MEASURED |
-| one terseness sentence | −19.6…−22.7% output tokens | MEASURED |
-| do not write files identical to disk | −0.077%, free | MEASURED |
-| anchored Edit under ~25% changed, rewrite over ~40% | +0.07% over the rule it replaces | MEASURED |
-| root cause before a third speculative patch; verify with a check that can fail | fewer repair loops | DESIGNED |
+```text
+you:   test_target.py fails. Fix the bug.
+
+agent: Fixed clamp: min/max were swapped.
+       Proof: test_target.py PASS.
+       Scope: mod.py · +1/-1.
+```
+
+```text
+you:   /samewrite refactor the retry loop in fetch.py
+
+agent: (loads the samewrite body once, then works: reads the symbol and its callers, not the
+        file; asks only if the change would alter the public API; ends after its proof)
+```
+
+## Three ways to run it
+
+| setup | what you get | cost | evidence |
+|---|---|---|---|
+| **A. SameWrite core** — recommended default | context / edit / retry discipline; result-first answers by description | ~370 chars per turn (listing), body on demand | correctness and cost non-inferior to 1.0.0 (confirmatory run) |
+| **B. core + compact human-output hook** — `bash hooks/install.sh --human-output` (or `SAMEWRITE_OUTPUT_HOOK=1`) | one sentence at every session start: result first, numbered steps only for your actions, no filler | ~170 bytes per session start | **NOT_PROVEN** to improve the benchmark (24/32 vs 23/32, p = 1.0); safe, cheap, a preference |
+| **C. SameWrite + i-have-adhd** | i-have-adhd's full interaction profile on top | i-have-adhd's ~7 kB per session start | supported coexistence; 23/32 on the same benchmark — not shown to outperform A or B |
+
+None of these is "better". Pick the one you like; the numbers are in [Benchmarks](#benchmarks).
 
 ## How it works
 
-`skills/samewrite/SKILL.md` is the one canonical runtime. On invocation the model gets six short
-sections: **context** (expand only to answer an open question; symbol-level tools first when
-present), **ask only if material** (CLEAR / MINOR / MATERIAL / CONFLICT), **minimum correct change**
-(reuse → stdlib → platform → installed dependency → deletion → new code; never trim security,
-validation, compatibility), **root cause with bounded retries** (two failed fixes → stop and
-reassess), **verification scaled by risk × uncertainty** (plant a mutation, see RED, restore, see
-GREEN), and **output** (below). Nothing is injected every turn; nothing is persisted; there is no
-mode to switch.
+`skills/samewrite/SKILL.md` is the one canonical runtime. Its body has six short sections:
+**context** (expand only to answer an open question; symbol-level tools first when present), **ask
+only if material** (CLEAR / MINOR / MATERIAL / CONFLICT), **minimum correct change** (reuse → stdlib →
+platform → installed dependency → deletion → new code; never trim security, validation or
+compatibility), **root cause with bounded retries** (two failed fixes → stop and reassess),
+**verification scaled by risk × uncertainty** (plant a mutation, see RED, restore, see GREEN), and
+**output** (lead with the result, blocker or next action; numbered steps only for actions the human
+must take; state only when it changed; no preamble, recap or generic closer; expand fully on request).
 
-`hooks/write_noop_guard.py` is the only deterministic piece: byte-exact comparison on raw bytes,
-secret-looking paths skipped (the deny/allow answer is an equality oracle), 8 MiB cap, fail-open.
+Three channels, honestly labelled:
 
-`edit-discipline`, the 1.0.0 skill, is kept as a hidden compatibility alias (`/edit-discipline`
-still works; it is not in the model's listing, so it costs nothing per turn).
+| channel | always on? | measured behaviour |
+|---|---|---|
+| listing description | yes, every turn (~370 chars) | routing hint; the only always-on text |
+| `SKILL.md` body | no — loads on `/samewrite` or when the model invokes it | in 256 headless runs the model never invoked it on its own; `/samewrite` loads it every time |
+| deterministic hooks | opt-in, separate install | the no-op-write guard; the optional one-sentence output hook |
 
-## Human-friendly output
-
-The skill's output rule, in full: lead with the result, blocker, or next action; numbered steps
-only for actions the human must take; report state only when it changed, matters to a decision,
-or blocks; errors as the exact failing line, what was observed, one next action; no preamble, no
-recap, no generic closer — a complete task ends after its proof; expand fully when explanation,
-analysis, a report or detail is requested, and when safety needs the warning.
-
-```text
-Fixed the duplicate write path.
-Proof: targeted test + typecheck PASS.
-Scope: writer.ts · +4/-2.
-```
-
-```text
-BLOCKED — auth test still returns 200 instead of 401.
-Observed: shared middleware is bypassed by the legacy route.
-Next: inspect the legacy route registration.
-```
-
-The reference for this style is [i-have-adhd](https://github.com/ayghri/i-have-adhd); samewrite
-takes the human benefit in ~10% of the text and deliberately drops "restate state every turn"
-(state is reported only when it changed or matters). Whether that holds is an EXPERIMENTAL result,
-see [Benchmarks](#benchmarks).
+`edit-discipline`, the 1.0.0 skill, is a hidden compatibility alias (`disable-model-invocation`): it
+costs nothing per turn and the edit rule — identical → do not write; under ~25% changed → Edit; over
+~40% → rewrite — lives in `samewrite`.
 
 ## Works with other agent skills
 
 samewrite composes; it does not compete.
 
-| skill | governs | samewrite's stance |
+| skill | governs | verified composition |
 |---|---|---|
-| [Ponytail](https://github.com/DietrichGebert/ponytail) | what gets built (YAGNI ladder) | follows its ladder when active, never restates it; never touches `.ponytail-active`, `/ponytail`, `normal mode` |
-| [i-have-adhd](https://github.com/ayghri/i-have-adhd) | human-facing interaction style | a stronger presentation profile wins by precedence; samewrite never uses `stop adhd mode` or `normal mode` |
-| [Caveman](https://github.com/JuliusBrussee/caveman) | terse wording | same precedence rule; samewrite's text avoids Caveman's trigger words |
-| [rtk](https://github.com/rtk-ai/rtk) | Bash output filtering | disjoint hooks (PreToolUse Bash vs Write) |
-| [Serena](https://github.com/oraios/serena) | symbol-level navigation | the skill defers to symbol tools on code files when they are loaded |
+| [Ponytail](https://github.com/DietrichGebert/ponytail) | implementation minimalism / YAGNI | follows its ladder when active, never restates it; no correctness loss when stacked; never touches `.ponytail-active`, `/ponytail`, `normal mode` |
+| [i-have-adhd](https://github.com/ayghri/i-have-adhd) | interaction / presentation profile | a stronger presentation profile wins by precedence; no correctness loss when stacked |
+| [Caveman](https://github.com/JuliusBrussee/caveman) | terse response style | same precedence rule; samewrite's text avoids Caveman's trigger words |
+| [rtk](https://github.com/rtk-ai/rtk) | source-side Bash output filtering | disjoint hooks (PreToolUse Bash vs Write) |
+| [Serena](https://github.com/oraios/serena) | symbol-level code navigation | the skill defers to symbol tools on code files when they are loaded |
 
 Proven deterministically (`tests/test_coexist.py`): install and uninstall leave foreign hooks,
 status lines, permissions, custom keys and flag files structurally untouched; install twice is a
 no-op; malformed `settings.json` is left alone with a warning; the real Ponytail and i-have-adhd
 hooks run next to the installed skill without either side changing the other. Ponytail and
-i-have-adhd both use `normal mode` as an off-switch; samewrite is not a third claimant — it
-has no off-switch to claim.
+i-have-adhd both use `normal mode` as an off-switch; samewrite has no off-switch to claim.
 
 ## Benchmarks
 
+Four kinds of evidence, answering four different questions:
+
+| kind | what it answers | size | where |
+|---|---|---|---|
+| transcript observations | where tokens go, what a session carries | 1,316 transcripts | [docs/FINDINGS.md](docs/FINDINGS.md) |
+| controlled A/B | does an instruction change output tokens / outcomes | 462 scored runs, pre-registered | `experiments/skill-ab/` |
+| historical pilots (superseded) | instrument validation; direction only | 110 + 64 runs | `experiments/vnext/`, `experiments/presentation/` |
+| **current confirmatory** | is this release non-inferior, and does the output hook help | **256 runs**, 16 fresh cases × 8 arms × 2 reps, frozen before the run | `experiments/presentation/PREREGISTRATION_confirm.md`, [docs/VNEXT.md §12](docs/VNEXT.md) |
+
 All isolated: a fresh `CLAUDE_CONFIG_DIR` per run, `claude-haiku-4-5-20251001`, pinned flags,
-mechanical oracles that were proven to turn RED on planted bad fixtures before any paid run, and
-pre-registered contrasts. Infrastructure failures (a missing test runner, a broken transcript) are
-classified `INFRA_ERROR` and excluded, never counted as a model failure — the CI run that first
-exposed this is in [docs/VNEXT.md §12](docs/VNEXT.md). Losing cases are listed by name in the reports.
+mechanical oracles proven to turn RED on planted bad fixtures before any paid run. Infrastructure
+failures (a missing test runner, a broken transcript) are `INFRA_ERROR` — excluded and counted,
+never a model failure. Losing cases are listed by name.
 
-- **vNext pilot — HISTORICAL** (`experiments/vnext/`, 11 arms × 10 fixtures, 0 rows excluded): every arm,
-  the bare agent included, reached 10/10 correct — the fixtures could not separate arms on
-  correctness; the new skill was cheaper than the old one on 4/10 fixtures (median +1.4%) and
-  dearer than a one-sentence prefix on 8/10. Verdict **NOT_PROVEN**. Adding the skill to Ponytail,
-  i-have-adhd or both lost no correctness. In these runs the skill *body* was invoked 0 times: under
-  `claude -p` only the listing entry reaches the model, which is why the human-output rule also
-  lives in the listing description.
-- **Presentation pilot — HISTORICAL, superseded by the confirmatory run below** (`experiments/presentation/`, 8 arms × 8 adversarial cases including a
-  three-turn task and a contradictory-tests blocker): correctness 7/8 in every arm — the shared miss
-  is the blocker, where the model edited the contradictory test in all 8 arms. The human-output
-  contract held on 5/8 cases with the new description alone (6/8 before), **7/8** with the one-sentence
-  SessionStart injection (`SAMEWRITE_OUTPUT_HOOK=1`, opt-in, +163 bytes per session start), 4/8 for
-  the full i-have-adhd hook at twice the injected bytes; requested detail stayed full everywhere.
-  Verdict **NOT_PROVEN** for the zero-hook default; direction only for the hook.
-- **Confirmatory presentation run — CURRENT** (`experiments/presentation/PREREGISTRATION_confirm.md`,
-  16 fresh held-out cases, 8 arms, 2 repetitions, frozen before the run, 256 runs, 0 excluded): correctness
-  25–26/32 in every arm; the human-output contract 23/32 with the description alone, 24/32 with the
-  one-sentence SessionStart hook (2 wins, 1 loss, p = 1.0 — the pilot's 7/8 vs 5/8 did not replicate),
-  23/32 for i-have-adhd's full hook; hook cost median +1.7% (not significant); stacking with Ponytail,
-  i-have-adhd or both lost no correctness. Pre-registered promotion gate for the hook: **NOT met** — it
-  stays opt-in (`SAMEWRITE_OUTPUT_HOOK=1 bash hooks/install.sh`), off by default. Three cases were floors
-  in every arm (one-command follow-up, out-of-workspace blocker, public-API rename without alias) and
-  six were ceilings; the report names them.
-- **Earlier rounds** (`experiments/skill-ab/`, 462 scored runs): the terseness sentence
-  replicates in two languages; three always-on blocks did not beat one sentence; the
-  systematic-debugging skill cost +67.6% tokens and reached the root cause no more often than the
-  plain arm.
+**Confirmatory result (current).** Correctness 25–26/32 in every arm, the bare agent included — this
+release is non-inferior to 1.0.0 (26 vs 25). The human-output contract (result first, numbered
+actions for the human, blocker named, detail on request, no filler) was met on 23/32 runs with the
+description alone, 24/32 with the one-sentence SessionStart hook (2 wins, 1 loss, p = 1.0), 23/32
+with i-have-adhd's full hook at twice the injected bytes. Hook cost median +1.7%, not significant.
+Stacking with Ponytail, i-have-adhd or both lost no correctness. The pre-registered promotion gate
+for the hook was **not met**; it stays opt-in. Three cases were floors in every arm (a one-command
+follow-up, an out-of-workspace blocker, a public-API rename without alias) and six were ceilings.
 
-Method, retractions and every correction: [docs/FINDINGS.md](docs/FINDINGS.md) ·
-[docs/VNEXT.md](docs/VNEXT.md) (reference audits of nine repositories at pinned commits,
-coexistence matrix, support matrix, release-gate verdict) · pre-registrations next to each rig.
+**Historical pilots.** vNext pilot: every arm 10/10 correct (ceiling); the new skill not cheaper than
+the old (4/10 fixtures). Presentation pilot: 7/8 vs 5/8 for the hook — it did not replicate above.
 
-Limits, honestly: one author's sessions, one model family for the transcript corpus, one small
-model for the pilots (n = 8–10 per arm — direction, not significance); shares are the claim,
-absolute token counts move with language (bytes/3.14 ≈ tokens for English, wrong by ~60% for
-Indonesian). Other hosts (Codex, OpenCode, Gemini CLI) get the same body via `adapters/` but are
-INSTRUCTION_ONLY and untested there.
+**Limits.** One author's sessions for the transcript corpus; one small model for the pilots and the
+confirmatory run (2 reps: direction, not fine-grained significance); shares are the claim, absolute
+token counts move with language (bytes/3.14 ≈ tokens for English, wrong by ~60% for Indonesian);
+hidden reasoning tokens are not observable and are not claimed.
+
+## Support matrix
+
+| host | status |
+|---|---|
+| Claude Code 2.1.270 (skill, hooks, installer) | VERIFIED — headless runs, clean-install and 1.0.0 → 1.1.0 upgrade acceptance |
+| Codex / OpenCode via `adapters/AGENTS.samewrite.md` | INSTRUCTION_ONLY — generated from the skill, not run there |
+| Gemini CLI via `adapters/GEMINI.samewrite.md` | INSTRUCTION_ONLY |
+| Pi / OMP | UNSUPPORTED |
+| Windows paths | UNTESTED (POSIX paths with spaces and metacharacters are tested) |
 
 ## Safety / correctness
 
-- The guard is fail-open on every error path and reads only the file about to be overwritten;
-  files whose path looks secret-bearing are skipped entirely.
+- The guard is fail-open on every error path, reads only the file about to be overwritten, and
+  skips paths that look secret-bearing (the deny/allow answer is an equality oracle).
 - No network, no telemetry, no auto-update: pin a commit, read the diff, update on purpose.
 - The skill never trims security, trust-boundary validation, required error handling, data
-  integrity, accessibility, compatibility or explicit requirements to save tokens, and expands
-  when safety needs the warning.
-- `PreToolUse` cannot see `@file` mentions, heredocs, `tee` or `sed -i`; the skill covers those
-  by instruction only. A `Write` after a `Read` of the same file can bypass the hook on Claude
-  Code 2.1.245+ (reproduced; mechanism unverified).
+  integrity, accessibility, compatibility or explicit requirements to save tokens.
+- `PreToolUse` cannot see `@file` mentions, heredocs, `tee` or `sed -i`; the skill covers those by
+  instruction only. A `Write` after a `Read` of the same file can bypass the hook on Claude Code
+  2.1.245+ (reproduced; mechanism unverified).
+- Measurement stays offline and private: the guard ledger and `carry.py --history` hold sizes and
+  shares only — no paths, prompts or content; nothing reads history into the model context; nothing
+  rewrites the skill. Evidence-driven optimization, not self-learning.
 
 ## Development
 
@@ -181,14 +170,14 @@ INSTRUCTION_ONLY and untested there.
 skills/samewrite/           the canonical runtime (edit here; adapters/ is generated from it)
 skills/edit-discipline/     hidden compatibility alias for 1.0.0 installs
 hooks/write_noop_guard.py   PreToolUse(Write) — deny writes identical to disk
-hooks/install.sh · uninstall.sh   idempotent, foreign-preserving, exact-path ownership
+hooks/install.sh · uninstall.sh   idempotent, foreign-preserving, exact-path ownership; --human-output
 tools/adapters.py           generate adapters/ (AGENTS.md / GEMINI.md form); --check fails CI on drift
 tools/carry.py · skills.py · prefix.py · bashcost.py · b2t_validate.py · extract.py · simulate.py
                             measure your own transcripts (read-only, stdlib only)
-experiments/                skill-ab (462 runs) · vnext (110) · presentation (64) — rigs, fixtures,
-                            self-tests, pre-registrations, every run ever scored
-docs/VNEXT.md               build report · docs/reference-audits/ nine pinned audits
-tests/                      219 assertions in eight suites, mutation-tested; CI on Python 3.9 and 3.12
+experiments/                skill-ab (462 runs) · vnext (110) · presentation (64 pilot + 256 confirmatory)
+                            — rigs, fixtures, self-tests, pre-registrations, every run ever scored
+docs/VNEXT.md               build report · docs/RELEASE_NOTES_1.1.0.md · docs/reference-audits/
+tests/                      224 assertions in eight suites, mutation-tested; CI on Python 3.9 and 3.12
 ```
 
 Measure your own sessions — nothing installed, nothing written:
@@ -197,17 +186,16 @@ Measure your own sessions — nothing installed, nothing written:
 python3 tools/carry.py --markdown          # carry by source, every Claude Code profile found
 python3 tools/skills.py --markdown         # which listing entries you never invoked
 python3 tools/prefix.py ~/.claude/projects/*/*.jsonl --min-turns 50   # system prompt + tool schemas
+python3 tools/carry.py --history ~/carry_history.jsonl   # append this run; report what moved
 ```
 
-`carry.py --history PATH` turns repeated runs into movement (shares and counts only, no content).
-Every tool routes through one `scan()`; point it at another agent's JSONL if it logs per-turn
-usage, tool calls and replay semantics — the carry model is exact only for append-only,
-full-replay contexts.
+The optimization loop this repo practises: measure (`carry.py`, the guard ledger) → compare history
+(`--history`) → name the largest carry source → write a candidate change → pre-register and
+benchmark it (`experiments/`) → promote by pull request. Nothing promotes itself.
 
 Run the suites: `python3 -m pip install -r requirements-test.txt` (pytest is the only test-time
-dependency; the runtime is standard library) then `for t in tests/test_*.py; do python3 $t; done` —
-each file stands alone and exits non-zero on failure. `python3 experiments/vnext/selftest.py` and
-`experiments/presentation/selftest_pres.py` prove the benchmark scorers can fail.
+dependency; the runtime is standard library) then `for t in tests/test_*.py; do python3 $t; done`.
+`experiments/*/selftest*.py` prove the benchmark scorers can fail.
 
 Support: none promised. A measurement result with tooling attached, published because the
 negative findings are useful.

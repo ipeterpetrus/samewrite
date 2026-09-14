@@ -4,7 +4,8 @@
     "pilot": "pre-registered contrasts, n=1 per arm x fixture; direction/instrument validation only",
     "calibration": "pipeline smoke; never an effect estimate",
     "confirmatory": "pre-registered fresh held-out fixtures, 2 repetitions, frozen design; analysis-eligible for the promotion gate",
-    "probe": "targeted discovery, not an effect estimate"
+    "probe": "targeted discovery, not an effect estimate",
+    "portability_smoke": "non-promotional portability check on a stronger model; frozen fixtures and scorer; never replaces the confirmatory conclusion"
   },
   "files": [
     {
@@ -77,6 +78,24 @@
       "unit": "runs",
       "sha256": "ac0c76b6c70864db9eb50e8c7bd9d2b76112e3245c3ec91a477dcf80d2f96d68",
       "note": "skill-body activation under claude -p: implicit / named / /samewrite prompts, arm D, 2 reps each"
+    },
+    {
+      "path": "stronger1.jsonl",
+      "evidence_class": "portability_smoke",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 16,
+      "unit": "runs",
+      "arms": [
+        "D",
+        "Dh"
+      ],
+      "fixtures": 8,
+      "repetitions": 1,
+      "model": "claude-sonnet-5",
+      "cli": "2.1.270",
+      "sha256": "95288818f29156196183c928cdf62b0f7f015b36ab10fc10a2baa51d0afd484e",
+      "result": "D 7/8 ROOT 7/8 human_ok; Dh 7/8 ROOT 6/8 human_ok; both missed c06_ambiguous; consistent with NOT_PROVEN"
     }
   ]
 }

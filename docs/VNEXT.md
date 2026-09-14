@@ -1,6 +1,6 @@
 # SameWrite vNext — build report (2026-09-14/15)
 
-**CURRENT state is §12 (hardening + confirmatory run).** §1–§9 are the first build (HISTORICAL:
+**CURRENT state is §13 (release-candidate pass) on top of §12 (hardening + confirmatory run).** §1–§9 are the first build (HISTORICAL:
 the mode machinery they describe was removed in §11), §11 the continuation (SUPERSEDED where §12
 differs). Everything is measured here, labelled `EXTERNALLY_REPORTED`, or labelled `UNTESTED`.
 
@@ -290,53 +290,67 @@ same 110 results (0 excluded, all arms 10/10).
 
 ## 10. Files changed
 
-Against `0aec7ce` (`git diff --stat`, after the continuation in §11; pushed as `release/vnext-1.1.0`, PR #2):
+Against `0aec7ce` (`git diff --stat` at the release-candidate head; branch `release/vnext-1.1.0`, PR #2):
 
 ```
-.claude-plugin/marketplace.json                |   2 +-
- .claude-plugin/plugin.json                     |   2 +-
- .github/workflows/test.yml                     |  10 +-
- .gitignore                                     |   4 +
- README.md                                      | 699 +++++++++++----------------------------------
- adapters/AGENTS.samewrite.md                   |  62 ++++
- adapters/GEMINI.samewrite.md                   |  62 ++++
- docs/VNEXT.md                                  | 444 ++++++++++++++++++++++++++++
- docs/reference-audits/aider.md                 |  44 +++
- docs/reference-audits/caveman.md               |  48 ++++
- docs/reference-audits/i-have-adhd.md           |  46 +++
- docs/reference-audits/ponytail.md              |  54 ++++
- docs/reference-audits/rtk.md                   |  49 ++++
- docs/reference-audits/serena.md                |  57 ++++
- docs/reference-audits/superpowers.md           |  55 ++++
- docs/reference-audits/token-savior.md          |  41 +++
- experiments/presentation/PREREGISTRATION.md    |  63 ++++
- experiments/presentation/analyze_pres.py       |  62 ++++
- experiments/presentation/fixtures_pres.py      | 196 +++++++++++++
- experiments/presentation/rig_pres.py           | 219 ++++++++++++++
- experiments/presentation/runs/manifest.json    |  40 +++
- experiments/presentation/runs/pres1.jsonl      |  64 +++++
- experiments/presentation/runs/smoke.jsonl      |   4 +
- experiments/presentation/selftest_pres.py      | 107 +++++++
- experiments/presentation/skill_before/SKILL.md |  60 ++++
- experiments/vnext/PREREGISTRATION.md           |  85 ++++++
- experiments/vnext/README.md                    |  23 ++
- experiments/vnext/analyze.py                   |  89 ++++++
- experiments/vnext/fixtures.py                  | 325 +++++++++++++++++++++
- experiments/vnext/rescore.py                   |  22 ++
- experiments/vnext/rig.py                       | 270 +++++++++++++++++
- experiments/vnext/runs/manifest.json           |  58 ++++
- experiments/vnext/runs/pilot1.jsonl            | 110 +++++++
- experiments/vnext/runs/pilot1.rescored.jsonl   | 110 +++++++
- experiments/vnext/runs/smoke.jsonl             |   4 +
- experiments/vnext/selftest.py                  | 133 +++++++++
- hooks/install.sh                               |  39 ++-
- hooks/uninstall.sh                             |  51 ++++
- skills/edit-discipline/SKILL.md                |  62 +---
- skills/samewrite/SKILL.md                      |  66 +++++
- tests/test_adapters.py                         |  87 ++++++
- tests/test_coexist.py                          | 311 ++++++++++++++++++++
- tools/adapters.py                              |  61 ++++
- 43 files changed, 3808 insertions(+), 592 deletions(-)
+.claude-plugin/marketplace.json                     |   6 +-
+ .claude-plugin/plugin.json                          |   9 +-
+ .github/workflows/test.yml                          |  15 +-
+ .gitignore                                          |   5 +
+ README.md                                           | 679 ++++++++++------------------------------
+ adapters/AGENTS.samewrite.md                        |  62 ++++
+ adapters/GEMINI.samewrite.md                        |  62 ++++
+ docs/RELEASE_NOTES_1.1.0.md                         |  62 ++++
+ docs/VNEXT.md                                       | 673 +++++++++++++++++++++++++++++++++++++++
+ docs/reference-audits/aider.md                      |  44 +++
+ docs/reference-audits/caveman.md                    |  48 +++
+ docs/reference-audits/i-have-adhd.md                |  46 +++
+ docs/reference-audits/ponytail.md                   |  54 ++++
+ docs/reference-audits/rtk.md                        |  49 +++
+ docs/reference-audits/serena.md                     |  57 ++++
+ docs/reference-audits/superpowers.md                |  55 ++++
+ docs/reference-audits/token-savior.md               |  41 +++
+ experiments/presentation/PREREGISTRATION.md         |  63 ++++
+ experiments/presentation/PREREGISTRATION_confirm.md |  70 +++++
+ experiments/presentation/activation_probe.py        |  69 ++++
+ experiments/presentation/analyze_confirm.py         | 125 ++++++++
+ experiments/presentation/analyze_pres.py            |  62 ++++
+ experiments/presentation/fixtures_confirm.py        | 441 ++++++++++++++++++++++++++
+ experiments/presentation/fixtures_pres.py           | 196 ++++++++++++
+ experiments/presentation/reconstruct.py             |  77 +++++
+ experiments/presentation/rig_pres.py                | 274 ++++++++++++++++
+ experiments/presentation/runs/confirm1.jsonl        | 256 +++++++++++++++
+ experiments/presentation/runs/manifest.json         | 101 ++++++
+ experiments/presentation/runs/pres1.jsonl           |  64 ++++
+ experiments/presentation/runs/probe1.jsonl          |   6 +
+ experiments/presentation/runs/smoke.jsonl           |   4 +
+ experiments/presentation/runs/stronger1.jsonl       |  16 +
+ experiments/presentation/selftest_confirm.py        | 150 +++++++++
+ experiments/presentation/selftest_pres.py           | 107 +++++++
+ experiments/presentation/skill_before/SKILL.md      |  60 ++++
+ experiments/vnext/PREREGISTRATION.md                |  85 +++++
+ experiments/vnext/README.md                         |  23 ++
+ experiments/vnext/analyze.py                        |  91 ++++++
+ experiments/vnext/fixtures.py                       | 325 +++++++++++++++++++
+ experiments/vnext/rescore.py                        |  22 ++
+ experiments/vnext/rig.py                            | 312 ++++++++++++++++++
+ experiments/vnext/runs/manifest.json                |  58 ++++
+ experiments/vnext/runs/pilot1.jsonl                 | 110 +++++++
+ experiments/vnext/runs/pilot1.rescored.jsonl        | 110 +++++++
+ experiments/vnext/runs/smoke.jsonl                  |   4 +
+ experiments/vnext/selftest.py                       | 169 ++++++++++
+ hooks/install.sh                                    |  63 +++-
+ hooks/uninstall.sh                                  |  57 ++++
+ requirements-test.txt                               |   3 +
+ skills/edit-discipline/SKILL.md                     |  62 +---
+ skills/samewrite/SKILL.md                           |  66 ++++
+ tests/acceptance_upgrade.sh                         | 105 +++++++
+ tests/test_adapters.py                              |  87 +++++
+ tests/test_coexist.py                               | 329 +++++++++++++++++++
+ tests/test_health.py                                |   2 +-
+ tests/test_write_noop_guard.py                      |  12 +-
+ tools/adapters.py                                   |  61 ++++
+ 57 files changed, 5669 insertions(+), 595 deletions(-)
 ```
 
 Untouched on purpose: every `tools/*.py` except the new `adapters.py`, `experiments/skill-ab/`, `docs/FINDINGS.md`, `docs/FIELD_DATA.md`, `LICENSE`.
@@ -450,7 +464,7 @@ Verdict for this continuation: **NOT_PROVEN** (human-output gain not shown for t
 default at n = 8; shown as direction only for the opt-in one-liner). Everything shipped is
 labelled accordingly.
 
-## 12. Hardening + proof pass (2026-09-15) — CURRENT
+## 12. Hardening + proof pass (2026-09-15) — CURRENT evidence
 
 ### 12.1 Remote CI was red: root cause and fix
 
@@ -602,3 +616,72 @@ sentence stays opt-in (`SAMEWRITE_OUTPUT_HOOK=1`), off by default; the default r
 description-only skill, whose correctness and cost are non-inferior to the previous SameWrite (D vs B:
 26 vs 25 ROOT, 23 vs 22 human_ok). The Owner may still merge as an experimental release with these
 labels; this report does not call it merge-ready.
+
+## 13. Release-candidate pass (2026-09-14/15) — CURRENT release state
+
+### 13.1 Gate revision
+
+`HUMAN_OUTPUT=PROVEN` is no longer a core-release gate: the confirmatory experiment answered its
+question (no demonstrated advantage, p = 1.0) and the feature stays opt-in. The 1.1.0 core gate is
+correctness, safety, token objective non-inferior, CI, install, upgrade 1.0.0 → 1.1.0, uninstall,
+coexistence, claims = evidence, metadata consistent, README current. The negative human-output
+result is preserved unchanged (D 23/32, Dh 24/32, i-have-adhd 23/32, P2 promotion NO).
+
+### 13.2 Gaps found and fixed
+
+| gap | fix |
+|---|---|
+| `plugin.json` / `marketplace.json` still described SameWrite as the edit-discipline skill | descriptions rewritten to the 1.1.0 identity (token-efficient coding-agent skill; alias mentioned; guard stays a separate install); keywords updated; `claude plugin validate` passes |
+| PR #2 title still said "two pre-registered pilots (experimental, NOT_PROVEN)" | retitled; the negative result lives in the body |
+| README opened on methodology; the "~10% of the text" ratio was never measured | first screen = promise, five measured facts, candidate status, install, 30-second example, three usage profiles; the ratio sentence removed; evidence split into transcript observations / controlled A/B / historical pilots / current confirmatory |
+| upgrade hazard: the 1.0.0 hook entry (`bash -c '… exec <python> <path>'`) was not recognised as SameWrite's, so `install.sh` would have added a second guard entry and `uninstall.sh` would have left the old one | ownership now matches the exact path token or the path as a whitespace-bounded word inside a nested command string; tests added (`tests/test_coexist.py`), acceptance below |
+| opt-in ergonomics | `bash hooks/install.sh --human-output` (alias of `SAMEWRITE_OUTPUT_HOOK=1`), `--no-guard`, `--help`; unknown flags exit 64; no new runtime, state or policy |
+| release notes | `docs/RELEASE_NOTES_1.1.0.md` (draft; no tag or GitHub Release until `main` carries the candidate) |
+
+### 13.3 Acceptance (fresh config; never the developer profile)
+
+`tests/acceptance_upgrade.sh` (manual, not CI: needs a logged-in CLI, spends five small model calls;
+the credentials file is copied, never read, and deleted at the end). Fresh temporary HOME and
+`CLAUDE_CONFIG_DIR` seeded with a foreign statusLine, a foreign SessionStart hook, a foreign
+PreToolUse(Bash) hook and a custom key. **PRE-MERGE LOCAL PLUGIN ACCEPTANCE** — the marketplace is
+the repository checkout, because `main` still serves 1.0.0. Result **14/14 PASS**:
+
+1. 1.0.0 baseline (a `git archive 0aec7ce` snapshot added as a local marketplace): `edit-discipline`
+   listed, `samewrite` absent; 1.0.0's `install.sh` writes one guard entry in its old quoted form.
+2. Upgrade to the candidate: exactly one `samewrite@samewrite` plugin; listing shows `samewrite`
+   once and no `edit-discipline` entry (the alias adds no listing carry); 1.1.0's `install.sh`
+   answers "already installed" — still one guard entry; a second install is byte-identical;
+   `--human-output` adds exactly one SessionStart entry; foreign hooks, statusLine and custom key
+   structurally intact (Claude Code's own `enabledPlugins` / `extraKnownMarketplaces` bookkeeping
+   ignored in the comparison).
+3. Behaviour on the upgraded config: an ordinary fix prompt fixes the bug; the output hook line
+   appears exactly once in that session's transcript; `/samewrite` loads the canonical body exactly
+   once; `/edit-discipline` still loads the alias body.
+4. `uninstall.sh` removes both samewrite entries (including the 1.0.0-form one) and nothing else;
+   `plugin uninstall` leaves no samewrite plugin.
+
+Two earlier runs of this script failed on the script itself, not the product: plugin skills are
+listed namespaced (`samewrite:edit-discipline`), and Claude Code adds `enabledPlugins` /
+`extraKnownMarketplaces` to `settings.json` on install — both now accounted for.
+
+### 13.4 Portability smoke on a stronger model (not promotional)
+
+`claude-sonnet-5`, 8 representative confirmatory fixtures, D vs Dh, 1 repetition, frozen fixtures
+and scorer (`runs/stronger1.jsonl`): D 7/8 correct · 7/8 human_ok; Dh 7/8 · 6/8; both missed
+`c06_ambiguous` (edited instead of asking); mean cost 63.7k vs 64.2k; mean output 1,498 vs 1,397
+tokens. Consistent with the confirmatory conclusion: no advantage for the hook, no regression for
+the skill. `STRONGER_MODEL_VALIDATION=PASS` as a portability check only.
+
+### 13.5 Interactive TTY
+
+`INTERACTIVE_TTY=NOT_AUTOMATED` — automating a tmux-driven interactive `claude` session is blocked
+by this machine's no-kill policy for interactive Claude sessions; headless acceptance above covers
+install, discovery, `/samewrite` loading once, ordinary work and one-per-session hook injection.
+
+### 13.6 Adversarial review
+
+Relative links in README / VNEXT / release notes all resolve; "self-learning" appears only as a
+negation; no `1.0.0`-era product wording remains outside the alias and the upgrade notes; version
+1.1.0 unchanged; SHAs in the report refer to commits on the branch; no credentials in benchmark
+artefacts (credential copies are deleted after every run; transcripts hold no key material);
+Windows remains UNTESTED and says so.

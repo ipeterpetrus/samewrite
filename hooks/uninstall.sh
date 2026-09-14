@@ -11,7 +11,7 @@ DST="${SAMEWRITE_DST:-$HOME/scripts/write_noop_guard.py}"     # sama dengan inst
 [ -f "$SET" ] || { echo "tak ada $SET — tak ada yang dicabut"; exit 0; }
 cp -a "$SET" "$SET.bak.samewrite-uninstall.$(date -u +%Y%m%d_%H%M%S)"
 "$PY_BIN" - "$SET" "$DST" <<'PY'
-import json, os, shlex, sys
+import json, os, re, shlex, sys
 p = sys.argv[1]
 try:
     d = json.load(open(p))
@@ -24,9 +24,15 @@ def own(cmd):
     if str(cmd).rstrip().endswith("# samewrite-output-hook"):   # hook SessionStart satu-kalimat (opsional)
         return True
     try:
-        return any(tok in OWN for tok in shlex.split(str(cmd)))
+        toks = shlex.split(str(cmd))
     except ValueError:
         return False
+    for t in toks:
+        if t in OWN:
+            return True
+        if " " in t and t not in OWN and any(re.search(r"(^|\s)" + re.escape(o) + r"(\s|$)", t) for o in OWN):
+            return True                              # bentuk 1.0.0: bash -c '... exec <python> <DST>'
+    return False
 removed = 0
 hooks = d.get("hooks")
 if isinstance(hooks, dict):

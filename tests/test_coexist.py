@@ -183,6 +183,24 @@ def main():
     check("1 output hook: pasang dua kali idempoten", open(e5.settings).read() == b5, True)
     e5.sh("uninstall.sh")
     check("1 output hook: cabut mengembalikan settings asing == asli", e5.read_settings(), orig5)
+    # bentuk entri 1.0.0 (bash -c '... exec <python> <DST>') dikenali sebagai milik sendiri: upgrade tak
+    # menambah entri kedua, uninstall mencabutnya; --human-output = SAMEWRITE_OUTPUT_HOOK=1
+    e6 = Env(foreign=True); orig6 = copy.deepcopy(e6.read_settings())
+    old_cmd = "bash -c 'SAMEWRITE_LEDGER=%s exec %s %s'" % (e6.ledger, sys.executable, e6.dst)
+    d6 = e6.read_settings(); d6["hooks"]["PreToolUse"].append({"matcher": "Write", "hooks": [{"type": "command", "command": old_cmd}]})
+    e6.write_settings(d6)
+    r = e6.sh("install.sh")
+    check("1 upgrade: entri bentuk 1.0.0 dikenali -> 'sudah terpasang', nol entri kedua",
+          ("sudah terpasang" in r.stdout, len([1 for m in e6.read_settings()["hooks"]["PreToolUse"] for h in m["hooks"] if "write_noop_guard.py" in h["command"]])), (True, 1))
+    e6.sh("uninstall.sh")
+    check("1 upgrade: uninstall mencabut entri bentuk 1.0.0, sisa == asing asli", e6.read_settings(), orig6)
+    r = subprocess.run(["bash", os.path.join(HOOKS, "install.sh"), "--human-output"], capture_output=True, text=True, timeout=120, env=e6.env())
+    ss6 = [h["command"] for m in e6.read_settings()["hooks"]["SessionStart"] for h in m["hooks"]]
+    check("1 --human-output == SAMEWRITE_OUTPUT_HOOK=1 (satu entri output hook)", sum(c.endswith("# samewrite-output-hook") for c in ss6), 1)
+    r = subprocess.run(["bash", os.path.join(HOOKS, "install.sh"), "--bogus"], capture_output=True, text=True, timeout=60, env=e6.env())
+    check("1 argumen tak dikenal -> rc 64", r.returncode, 64)
+    e6.sh("uninstall.sh")
+    check("1 cabut sesudah --human-output: settings == asing asli", e6.read_settings(), orig6)
     row(1, "SameWrite only", "PASS")
 
     # ---------------------------------------------------------------- 2/3. foreign only
