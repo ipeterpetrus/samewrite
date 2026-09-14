@@ -33,6 +33,10 @@ echo "[1/4] suite regresi…"
 tail -1 /tmp/wng_test.out
 
 echo "[2/4] pasang guard -> $DST"
+# `install` tidak membuat direktori induk (dan `-D` hanya ada di GNU coreutils, bukan di macOS).
+# Tujuan bawaannya $HOME/scripts, yang di mesin baru TIDAK ADA — jadi pemasangan gagal persis pada
+# jalur yang README suruh pakai. Baris ledger di bawah sudah melakukan ini; guard-nya terlewat.
+mkdir -p "$(dirname "$DST")" || { echo "BATAL: tak bisa membuat $(dirname "$DST")"; exit 1; }
 install -m 0755 "$PKG/write_noop_guard.py" "$DST"
 
 echo "[3/4] daftarkan hook PreToolUse(Write) di settings.json"

@@ -321,6 +321,25 @@ def main():
     print("\n  matriks §26:")
     for n, name, st in sorted(MATRIX):
         print(f"   {n:>2}. {name:<45} {st}")
+    # Setiap uji lain menimpa SAMEWRITE_DST ke direktori yang dibuatnya sendiri, jadi tujuan
+    # BAWAAN ($HOME/scripts) tak pernah dijalankan sekali pun — dan di sanalah bug-nya: `install`
+    # tak membuat direktori induk, sehingga jalur yang README suruh pakai gagal di mesin baru.
+    # Ditemukan oleh acceptance publik, bukan oleh suite ini. Sekarang dijaga di sini.
+    with tempfile.TemporaryDirectory() as home:
+        cfg = os.path.join(home, ".claude")
+        os.makedirs(cfg)
+        open(os.path.join(cfg, "settings.json"), "w").write("{}")
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith(("CLAUDE", "SAMEWRITE"))}
+        env.update(HOME=home, CLAUDE_CONFIG_DIR=cfg, SAMEWRITE_PYTHON=sys.executable)
+        r = subprocess.run(["bash", os.path.join(ROOT, "hooks", "install.sh")],
+                           capture_output=True, text=True, env=env, timeout=600)
+        landed = os.path.exists(os.path.join(home, "scripts", "write_noop_guard.py"))
+        check("install.sh works on a FRESH home where ~/scripts does not exist",
+              (r.returncode, landed), (0, True))
+        if not landed:
+            print("      " + (r.stdout + r.stderr).strip()[-200:])
+
     print(f"\n{P} PASS / {F} FAIL")
     return 1 if F else 0
 

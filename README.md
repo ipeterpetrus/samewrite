@@ -277,7 +277,7 @@ experiments/                skill-ab (462 runs) · vnext (110) · presentation (
 experiments/scale/          how the sweep scales (1k and 10k sessions) and why there is no index
 docs/VNEXT.md               build report · docs/RELEASE_NOTES_1.1.0.md · _1.2.0.md · docs/reference-audits/
 docs/MULTI_AGENT.md         many agents, running all the time · docs/AI_VOS_PROFILE.md (one profile)
-tests/                      415 assertions in eleven suites, mutation-tested; CI on Python 3.9 and 3.12
+tests/                      416 assertions in eleven suites, mutation-tested; CI on Python 3.9 and 3.12
 ```
 
 Measure your own sessions — nothing installed, nothing written:
