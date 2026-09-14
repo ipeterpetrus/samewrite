@@ -155,12 +155,31 @@ print(sum(1 for e in d.get('hooks', {}).get('SessionStart', []) for h in e.get('
   UN="$(dirname "$SRC")/uninstall.sh"
   if [ -f "$UN" ]; then
     env -i HOME="$W/home" PATH="$PATH" CLAUDE_CONFIG_DIR="$CFG" bash "$UN" >/dev/null 2>&1
+    # Count samewrite's OWN hook entries only. Claude Code writes its plugin registration
+    # (`enabledPlugins`, `extraKnownMarketplaces`) into the same file, and those contain the string
+    # "samewrite" while belonging to the CLI, not to us — `/plugin uninstall` owns them.
+    # hooks/uninstall.sh must not touch them, so counting raw string hits calls correct behaviour
+    # a failure.
     LEFT=$("$PY" -c "
 import json, sys
-blob = json.dumps(json.load(open(sys.argv[1])))
-print(blob.count('write_noop_guard') + blob.lower().count('samewrite'))
+d = json.load(open(sys.argv[1]))
+n = 0
+for event, entries in (d.get('hooks') or {}).items():
+    for e in entries or []:
+        for h in e.get('hooks', []) or []:
+            c = h.get('command', '')
+            if 'write_noop_guard' in c or 'samewrite' in c.lower():
+                n += 1
+print(n)
 " "$CFG/settings.json")
-    chk "uninstall removes only samewrite's own entries" "$LEFT" "0"
+    chk "uninstall removes every samewrite hook entry" "$LEFT" "0"
+    FOREIGN=$("$PY" -c "
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(int(bool(d.get('enabledPlugins')) and bool(d.get('extraKnownMarketplaces'))))
+" "$CFG/settings.json")
+    chk "uninstall leaves the CLI's own plugin registration alone (that is /plugin's job)" \
+        "$FOREIGN" "1"
   fi
 else
   bad "hooks/install.sh not found inside the installed plugin"
