@@ -1,8 +1,10 @@
 # samewrite
 
-**Token-efficient coding-agent skill for Claude Code: reduce context, tool noise, unnecessary
-edits and retries while preserving correctness and evidence.** One canonical skill, one optional
-hook, and the measurement tools behind every number here — including the experiments that lost.
+**Token-efficient coding-agent skill that reduces avoidable context, tool noise, edits and retries
+while preserving correctness — and measures whether the optimization actually pays.** One canonical
+skill, one optional hook, and the measurement tools behind every number here.
+
+**Measured, not promised. Losing experiments stay published.**
 
 | measured fact | number | how |
 |---|---|---|
@@ -12,10 +14,12 @@ hook, and the measurement tools behind every number here — including the exper
 | the same intent as a 4.7 kB always-on block | **−0.8%** over the sentence (p = 0.86) | pre-registered A/B |
 | this skill vs the previous SameWrite on correctness and cost | non-inferior: 26 vs 25 correct of 32; cost within noise | confirmatory run, 16 fresh cases × 2 reps |
 
-> **Status:** 1.1.0 is on `main` and is what the marketplace path below installs. 1.2.0 is in
-> review: the skill and hooks are byte-identical to 1.1.0, and everything in it is the measurement
-> layer hardened for many agents running continuously ([release notes](docs/RELEASE_NOTES_1.2.0.md)).
-> Upgrading from 1.0.0 is covered in [Install](#install).
+> **Status:** 1.2.0 is on `main` and is what the marketplace path below installs. The skill and
+> hooks it ships are byte-identical to 1.1.0 — everything new is the measurement layer, hardened for
+> many agents running continuously, and it adds **zero** bytes to what a model reads
+> ([release notes](docs/RELEASE_NOTES_1.2.0.md)). Its headline experiment came back
+> **NOT_PROVEN**: overall token savings were not established, and that result is published rather
+> than buried. Upgrading from 1.0.0 or 1.1.0 is covered in [Install](#install).
 
 ## Install
 
@@ -102,6 +106,8 @@ competitor, and the differences are easier to use than to argue about:
 - **i-have-adhd** asks: how should the interaction feel?
 - **rtk** asks: how can command output be reduced before it is read?
 - **Serena** asks: how do we navigate code semantically instead of reading whole files?
+- **Hermes Agent** is a different kind of neighbour — an agent runtime and skill ecosystem, not a
+  competing policy. SameWrite's skill runs inside it (verified below).
 
 **SameWrite asks: what is the cheapest path to a correct, verified result — and can the
 optimization prove it pays for itself?** That second clause is the whole difference. Everything
@@ -141,6 +147,7 @@ Legend: ● audited yes · ○ audited no · – not in the audit
 | [superpowers](https://github.com/obra/superpowers) | skill library + router | **3,308 B (~800 tok)**, re-injected after `/clear` and `/compact` | ○ one read-only SessionStart | ○ evals live outside the repo | ● plan ledger, failure counters | ● partial | – | ○ file handoff, not filtering | – | ● strongest: subagents inherit nothing |
 | [token-savior](https://github.com/Mibayy/token-savior) | symbol index + memory | – | ● three gates, but off / unbundled / inert | ◐ in-repo benchmarks measure index speed; headline retracted by its own README | ● bandit + prefetch | – | – | ◐ PostToolUse, **additive — does not shrink the current turn** | ● | – |
 | [aider](https://github.com/Aider-AI/aider) | pair programming with a repo map | 1,024-token repo-map budget | ○ no hooks | ● Exercism harness; no known-good/bad scorer fixture | – | – | – | ○ "no truncation anywhere" | ● tree-sitter + PageRank | – |
+| [Hermes Agent](https://github.com/NousResearch/hermes-agent) | agent runtime + skill ecosystem — a **host**, not a competing policy | **80 B** per unused skill (measured here, 0.21.3 / `1ad89ac`) | ● `pre_tool_call` shell hooks can block and rewrite | – | ● per-skill usage, memories | – | – | – | – | per-profile |
 
 Three things this table will not do:
 
@@ -153,6 +160,17 @@ Three things this table will not do:
 - **Hide the audits' limits.** Seven of eight are `SCOPED`: they did not read every file. Only the
   i-have-adhd audit is `FULL`. Caveman's proxy directories — exactly where its −33% input-token
   claim would live — were not opened.
+
+## What is proven, what is not, and what is untested
+
+Three levels, kept apart on purpose. Blurring them is the failure mode this repository exists to
+avoid.
+
+| level | claims |
+|---|---|
+| **measured** | Bash + Read share of carry in the measured corpus · 20.8% of overwrites byte-identical to disk · the terseness experiment's −22.7% output tokens · Hermes: 80 B listing and **0 B** unused body · quality non-inferior on the tested fixtures · the observer adds **zero** default model-context bytes |
+| **NOT_PROVEN** | overall end-to-end SameWrite token savings. Observed −1.7%, cheaper on 8 of 10 fixtures, p = 0.109, and smaller than the rig's own measured null-vs-null variance |
+| **UNTESTED** | GPT-5.6 Sol portability (the attempt returned 10/10 infrastructure errors) · the observer over native Hermes session history |
 
 ## Works with other agent skills
 

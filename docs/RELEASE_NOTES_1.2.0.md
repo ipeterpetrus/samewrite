@@ -4,6 +4,11 @@
 measurement layer learning to survive a population of agents that never stops — several roles, tens
 of parallel writers, crashes, clock skew, bounded sweeps and a scheduler calling it every cycle.
 
+**Released for the evidence layer, not for a savings number.** The end-to-end token question came
+back `NOT_PROVEN` and stays that way in public. What is measured and does hold: zero added
+model-context bytes, quality non-inferior on every gate, Hermes skill support verified, and two of
+the optimizer's own candidates rejected on their own evidence.
+
 **Nothing a model reads has changed.** `skills/samewrite/SKILL.md`, `skills/edit-discipline/SKILL.md`
 and every hook are byte-identical to the `v1.1.0` tag; the only file in the always-on surface that
 differs is the version string in the plugin manifests. If you use SameWrite from one machine, this
@@ -200,7 +205,18 @@ changing it is a decision with a paper trail. The scheduler contract has been te
 concurrent emitters, not with a real fleet running for weeks. And the optimizer still proposes
 nothing that anyone has promoted: both candidates from 1.1.0 remain unimplemented and unmeasured.
 
-## Not in this release
+## What this release does not claim
 
-No tag, no GitHub release, no merge. Nothing self-modifies, nothing self-promotes, and the
-optimizer holds no Git or GitHub authority.
+**Overall token-cost improvement: NOT_PROVEN.** The observed effect was −1.7%, cheaper on 8 of 10
+fixtures (p = 0.109), and the rig's own measured null-vs-null variance is larger than that. No
+percentage saving is claimed anywhere, and none should be quoted from this release.
+
+`GPT-5.6 Sol` portability: **UNTESTED** — the attempt returned 10/10 infrastructure errors on an
+account usage limit, and an untested channel is never estimated from a tested one. The Hermes
+observer is **UNTESTED**: it runs there, but it has no reader for Hermes session files, so it
+measures nothing. Hermes *skill* support is VERIFIED; that is a different claim and the two are
+kept apart deliberately.
+
+Nothing self-modifies and nothing self-promotes. The optimizer holds no execution, Git, GitHub,
+promotion or owner authority, and a candidate reaches the codebase only when a person opens a pull
+request.
