@@ -2,7 +2,9 @@
   "generated_from": "the data files themselves, 2026-09-14",
   "evidence_classes": {
     "pilot": "pre-registered contrasts, n=1 per arm x fixture; direction/instrument validation only",
-    "calibration": "pipeline smoke; never an effect estimate"
+    "calibration": "pipeline smoke; never an effect estimate",
+    "confirmatory": "pre-registered fresh held-out fixtures, 2 repetitions, frozen design; analysis-eligible for the promotion gate",
+    "probe": "targeted discovery, not an effect estimate"
   },
   "files": [
     {
@@ -35,6 +37,46 @@
       "unit": "runs",
       "sha256": "a4f5bcd342792cfc743ff8544d32e4f4b271834d590caa085fc8badcd954206d",
       "note": "run before the filler-closer pattern was added to the classifier"
+    },
+    {
+      "path": "confirm1.jsonl",
+      "evidence_class": "confirmatory",
+      "preregistered": true,
+      "analysis_eligible": true,
+      "n": 256,
+      "unit": "runs (c12 = 3 model calls each)",
+      "arms": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "Dh",
+        "Eh",
+        "Fh",
+        "Gh"
+      ],
+      "repetitions": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "cli": "2.1.270",
+      "design_frozen_at_commit": "786928ec0614bab4d7d6bc4188a3dc4530072dcd",
+      "instrument_sha256_prefix_at_freeze": {
+        "fixtures_confirm.py": "8f98df32db1f0f79",
+        "analyze_confirm.py": "3f670cb4134c3cf3",
+        "rig_pres.py": "047717ceee2e3a04",
+        "fixtures_pres.py": "00859995f20b6f07"
+      },
+      "sha256": "9db04036e320d2ceb43718d425597d4d2ce227f2e14add1dca806d0f38ed577d",
+      "provenance_note": "71 rows recorded live by the first rig invocation; that invocation's recording loop died on a worker exception (agent deleted fixture files on c10) while the pool kept running: 121 completed runs were re-scored from their preserved working directories and transcripts (reconstruct.py, rows carry reconstructed=true; rc unknown, set 0 when the run was complete), 4 runs killed mid-flight were discarded and re-run, and the remaining 60 jobs ran under --resume with the hardened rig. Scoring code was unchanged between the freeze and the analysis except for diff_loc tolerating deleted files and the exception wrapper (no oracle or threshold changed)."
+    },
+    {
+      "path": "probe1.jsonl",
+      "evidence_class": "probe",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 6,
+      "unit": "runs",
+      "sha256": "ac0c76b6c70864db9eb50e8c7bd9d2b76112e3245c3ec91a477dcf80d2f96d68",
+      "note": "skill-body activation under claude -p: implicit / named / /samewrite prompts, arm D, 2 reps each"
     }
   ]
 }

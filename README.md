@@ -18,7 +18,7 @@ its label: **MEASURED** (this repo, method published), **OBSERVED** (seen, not c
 | overwrites byte-identical to disk | **20.8%** (154/741) — the guard hook denies them | MEASURED |
 | the popular "≤3 change blocks → Edit" rule | **net negative**; changed-fraction rule keeps 84% of the oracle saving | MEASURED, 20 held-out splits |
 | the vNext skill vs the previous one on total context | cheaper on 4/10 fixtures, median +1.4% — **not proven cheaper** | EXPERIMENTAL, 110 runs |
-| human-output layer (result first, no filler, detail on request) | per-case contract met 5/8 with the description alone (6/8 before the change), **7/8** with the opt-in one-sentence session hook, 4/8 for the full i-have-adhd hook at 2× the injected bytes; correctness 7/8 in every arm | EXPERIMENTAL, 64 runs, n = 8 per arm |
+| human-output layer (result first, no filler, detail on request) | confirmatory run on 16 fresh cases × 2 reps: contract met 23/32 with the description alone, 24/32 with the opt-in one-sentence session hook (sign p = 1.0), 23/32 for the full i-have-adhd hook at 2× the injected bytes; correctness 25–26/32 in every arm | EXPERIMENTAL — **NOT_PROVEN** as an improvement; 256 runs |
 
 ## Install
 
@@ -140,7 +140,14 @@ exposed this is in [docs/VNEXT.md §12](docs/VNEXT.md). Losing cases are listed 
   the full i-have-adhd hook at twice the injected bytes; requested detail stayed full everywhere.
   Verdict **NOT_PROVEN** for the zero-hook default; direction only for the hook.
 - **Confirmatory presentation run — CURRENT** (`experiments/presentation/PREREGISTRATION_confirm.md`,
-  16 fresh held-out cases, 8 arms, 2 repetitions, frozen before the run): CONFIRM_SUMMARY
+  16 fresh held-out cases, 8 arms, 2 repetitions, frozen before the run, 256 runs, 0 excluded): correctness
+  25–26/32 in every arm; the human-output contract 23/32 with the description alone, 24/32 with the
+  one-sentence SessionStart hook (2 wins, 1 loss, p = 1.0 — the pilot's 7/8 vs 5/8 did not replicate),
+  23/32 for i-have-adhd's full hook; hook cost median +1.7% (not significant); stacking with Ponytail,
+  i-have-adhd or both lost no correctness. Pre-registered promotion gate for the hook: **NOT met** — it
+  stays opt-in (`SAMEWRITE_OUTPUT_HOOK=1 bash hooks/install.sh`), off by default. Three cases were floors
+  in every arm (one-command follow-up, out-of-workspace blocker, public-API rename without alias) and
+  six were ceilings; the report names them.
 - **Earlier rounds** (`experiments/skill-ab/`, 462 scored runs): the terseness sentence
   replicates in two languages; three always-on blocks did not beat one sentence; the
   systematic-debugging skill cost +67.6% tokens and reached the root cause no more often than the
