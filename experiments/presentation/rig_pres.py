@@ -16,7 +16,10 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(ROOT, "tools")); sys.path.insert(0, os.path.join(ROOT, "experiments", "vnext")); sys.path.insert(0, HERE)
 import carry  # noqa: E402
 from fixtures import shape_ok  # noqa: E402
-from fixtures_pres import FIXTURES, classify, blocked_verdict  # noqa: E402
+from fixtures_pres import classify, blocked_verdict  # noqa: E402
+import fixtures_pres, fixtures_confirm  # noqa: E402
+FIXTURE_SETS = {"pres": fixtures_pres.FIXTURES, "confirm": fixtures_confirm.FIXTURES}
+FIXTURES = FIXTURE_SETS["pres"]
 import rig as vn  # noqa: E402  (transcript_for, diff_loc)
 
 CLAUDE = os.environ.get("SAMEWRITE_CLAUDE_BIN", os.path.expanduser("~/.local/bin/claude"))
@@ -32,6 +35,10 @@ ARMS = {
     "Dm": ("D + SessionStart one-liner P1 micro (echo hook)", {"samewrite", "p1"}),
     "E": ("D + ponytail (real hooks)", {"samewrite", "ponytail"}),
     "F": ("D + i-have-adhd (real hook)", {"samewrite", "adhd"}),
+    # confirmatory (hardening §10): coexistence arms stack on Dh, the candidate default
+    "Eh": ("Dh + ponytail (real hooks)", {"samewrite", "p2", "ponytail"}),
+    "Fh": ("Dh + i-have-adhd (real hook)", {"samewrite", "p2", "adhd"}),
+    "Gh": ("Dh + ponytail + i-have-adhd", {"samewrite", "p2", "ponytail", "adhd"}),
 }
 BANNERS = {"ponytail": "PONYTAIL MODE ACTIVE", "adhd": "ADHD MODE ACTIVE", "p2": P2[:40], "p1": P1[:40]}
 FOREIGN = ["PONYTAIL MODE ACTIVE", "ADHD MODE ACTIVE", "CAVEMAN MODE ACTIVE", P2[:40], P1[:40], "superpowers"]
@@ -77,7 +84,15 @@ def build_cfg(arm, base, refs, cred_src, before, tag):
 
 def metrics(tp, arm, prompts):
     """usage total + per giliran (dipisah pada pesan user == prompt giliran), byte tersuntik, perlakuan."""
-    turns, items, usage = carry.scan(tp)
+    try:
+        turns, items, usage = carry.scan(tp)
+    except Exception as e:
+        return dict(turns=0, usage={}, bytes_by_source={}, tool_counts={}, listing_bytes=0, injected_bytes=0, per_turn=[],
+                    weighted_input=0, treatment_ok=False, banners=[], transcript_ok=False, infra_reason=f"scan: {e}")
+    if turns == 0 or not usage:
+        return dict(turns=turns, usage=dict(usage), bytes_by_source={}, tool_counts={}, listing_bytes=0, injected_bytes=0,
+                    per_turn=[], weighted_input=0, treatment_ok=False, banners=[], transcript_ok=False,
+                    infra_reason="no assistant turns / no usage")
     by = {}
     for _, b, src in items:
         by[carry.bucket(src)] = by.get(carry.bucket(src), 0) + b
@@ -117,32 +132,46 @@ def metrics(tp, arm, prompts):
                 listing_bytes=len(listing), injected_bytes=injected, per_turn=per_turn,
                 weighted_input=usage.get("input_tokens", 0) + 1.25 * usage.get("cache_creation_input_tokens", 0)
                 + 0.1 * usage.get("cache_read_input_tokens", 0),
-                treatment_ok=(expect <= banners and not (banners - expect) and listing_ok), banners=sorted(banners))
+                treatment_ok=(expect <= banners and not (banners - expect) and listing_ok), banners=sorted(banners),
+                transcript_ok=True)
 
 
 def verdict(spec, d, out):
     kind = spec["kind"]
-    changed = [f for f in spec["files"] if open(os.path.join(d, f)).read() != spec["files"][f]]
+    changed = [f for f in spec["files"] if not os.path.exists(os.path.join(d, f))
+               or open(os.path.join(d, f)).read() != spec["files"][f]]
     extra = [f for f in os.listdir(d) if f not in spec["files"] and not f.startswith(("_", ".")) and f != "__pycache__"]
+    if spec.get("verdict_fn"):                     # oracle khusus (blocker berkas-luar, operasi destruktif)
+        spec["_dir"] = d
+        return spec["verdict_fn"](spec, changed, extra, out), changed, extra
     if kind == "blocked":
         return blocked_verdict(spec, changed, extra, out), changed, extra
     if kind == "nochange":
-        return ("SYMPTOM" if (changed or extra) else "ROOT"), changed, extra
+        if changed or extra:
+            return "SYMPTOM", changed, extra
+        if spec.get("must_ask") and not re.search(spec.get("ask_re", r"\?"), out.strip()[-600:], re.I | re.S):
+            return "FAIL", changed, extra
+        return "ROOT", changed, extra
     if kind == "text":
         facts = sum(1 for r in spec["facts"] if re.search(r, out, re.I))
-        ok = facts == len(spec["facts"]) and shape_ok(spec["shape"], out) and not changed and not extra
+        shape = spec["shape_fn"](out) if spec.get("shape_fn") else shape_ok(spec["shape"], out)
+        ok = facts == len(spec["facts"]) and shape and not changed and not extra
         return ("ROOT" if ok else "FAIL"), changed, extra
     if "test_target.py" in changed or extra:
         return "INVALID", changed, extra
-    # PYTHONPYCACHEPREFIX segar: tanpa ini, perubahan berukuran sama dalam detik yang sama memakai
-    # .pyc lama dan uji yang benar tampak MERAH (kelas "stale cache"; ditemukan selftest_pres 14-Sep)
     penv = dict(os.environ, PYTHONPYCACHEPREFIX=tempfile.mkdtemp(prefix="pyc-"))
-    t = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_target.py"], env=penv, cwd=d, capture_output=True, timeout=180).returncode
-    if t != 0:
+    t, ttext = vn.run_pytest(d, spec.get("target", "test_target.py"), penv)
+    open(os.path.join(d, "_pytest_target.txt"), "w").write(ttext)
+    if t == "infra":
+        return "INFRA_ERROR", changed, extra
+    if t == "fail":
         return "FAIL", changed, extra
     open(os.path.join(d, "_neighbor_test.py"), "w").write(spec["neighbor"])
-    n = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "_neighbor_test.py"], env=penv, cwd=d, capture_output=True, timeout=180).returncode
-    return ("ROOT" if n == 0 else "SYMPTOM"), changed, extra
+    n, ntext = vn.run_pytest(d, "_neighbor_test.py", penv)
+    open(os.path.join(d, "_pytest_neighbor.txt"), "w").write(ntext)
+    if n == "infra":
+        return "INFRA_ERROR", changed, extra
+    return ("ROOT" if n == "pass" else "SYMPTOM"), changed, extra
 
 
 def run_one(arm, name, rep, cfg, model, timeout):
@@ -165,7 +194,10 @@ def run_one(arm, name, rep, cfg, model, timeout):
     for i, o in enumerate(outs):
         open(os.path.join(d, f"_stdout_t{i + 1}.txt"), "w").write(o)
     last = outs[-1]
-    v, changed, extra = verdict(spec, d, last)
+    if rc != 0:                                    # CLI gagal/timeout = infrastruktur, bukan model
+        v, changed, extra = "INFRA_ERROR", [], []
+    else:
+        v, changed, extra = verdict(spec, d, last)
     c_last = classify(last); c_all = [classify(o) for o in outs]
     ok_human = bool(spec["expect"](c_last, last, v))
     if len(spec["turns"]) > 1:
@@ -191,8 +223,11 @@ def main():
     ap.add_argument("--before", default=os.path.join(HERE, "skill_before", "SKILL.md"))
     ap.add_argument("--cfg-base", default=os.path.join(HERE, "cfg_pres"))
     ap.add_argument("--cred", default=os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.expanduser("~/.claude")), ".credentials.json"))
+    ap.add_argument("--fixture-set", default="pres", choices=sorted(FIXTURE_SETS))
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
+    global FIXTURES
+    FIXTURES = FIXTURE_SETS[a.fixture_set]
     arms = a.arms.split(","); names = sorted(FIXTURES) if a.fixtures == "all" else a.fixtures.split(",")
     cli = subprocess.run([CLAUDE, "--version"], capture_output=True, text=True).stdout.strip()
     jobs = [(arm, n, r) for r in range(a.repeat) for n in names for arm in arms]

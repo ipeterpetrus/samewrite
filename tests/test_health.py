@@ -15,7 +15,7 @@ def check(name, got, want):
 
 
 def run(args):
-    return subprocess.run(["/usr/bin/python3", HEALTH] + args,
+    return subprocess.run([sys.executable, HEALTH] + args,
                           capture_output=True, text=True, timeout=30).stdout
 
 

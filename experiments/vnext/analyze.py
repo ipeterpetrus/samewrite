@@ -33,14 +33,16 @@ def main(path, md=False):
     arms = sorted(by, key=lambda a: (len(a), a))
     fixtures = sorted({(r["fixture"], r.get("rep", 0)) for r in rows})
     fname = lambda f: f[0] if f[1] == 0 else f"{f[0]}#r{f[1]}"
-    excluded = [(r["arm"], r["fixture"], "treatment" if not r.get("treatment_ok") else "rc/transcript")
-                for r in rows if not r.get("treatment_ok") or r.get("rc") != 0 or "transcript" not in r]
+    excluded = [(r["arm"], r["fixture"], "INFRA_ERROR" if r["verdict"] == "INFRA_ERROR" else
+                 "treatment" if not r.get("treatment_ok") else "rc/transcript")
+                for r in rows if not r.get("treatment_ok") or r.get("rc") != 0 or "transcript" not in r
+                or r["verdict"] == "INFRA_ERROR"]
     print(f"{len(rows)} run · {len(arms)} arms · {len(fixtures)} fixtures · excluded {len(excluded)}")
     for e in excluded:
         print("  EXCLUDED", e)
 
     def ok(r):
-        return r.get("treatment_ok") and r.get("rc") == 0 and "transcript" in r
+        return r.get("treatment_ok") and r.get("rc") == 0 and "transcript" in r and r["verdict"] != "INFRA_ERROR"
 
     print("\nper arm — ROOT count, mean weighted context (ok rows), mean output tokens, mean turns, listing bytes")
     hdr = "| arm | ROOT/n | weighted ctx | output tok | turns | Read B | Bash B | listing B | verdicts |"

@@ -9,7 +9,7 @@ membedakan BAIK dari BURUK.  GOOD fixture → GREEN · CONTROLLED BAD fixture �
   5. pemeriksa perlakuan: banner asing di lengan A → treatment_ok False; banner yang diharapkan
      hilang di lengan E → False; tepat → True
 Berdiri sendiri; nol panggilan model."""
-import json, os, shutil, sys, tempfile
+import json, os, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -85,6 +85,29 @@ def main():
                 check(f"{name}: komposisi salah min(lo, max(hi, x)) -> FAIL",
                       rig.verdict(spec, mk(spec), "```python\ndef clamp(x, lo, hi):\n    return min(lo, max(hi, x))\n```")[0], "FAIL")
 
+    # 3b. INFRA vs MODEL: kegagalan infrastruktur tak boleh menjadi FAIL model (CI 14-Sep)
+    for rc, text, want in [(1, "ModuleNotFoundError: No module named pytest", "infra"), (0, "1 passed in 0.01s", "pass"),
+                           (0, "2 skipped in 0.01s", "infra"), (5, "no tests ran in 0.01s", "infra"), (4, "usage: pytest", "infra"),
+                           (3, "INTERNALERROR> boom", "infra"), (1, "1 failed, 1 passed", "fail"),
+                           (2, "ImportError while importing test module", "fail"), (0, "", "infra"),
+                           (1, "usage: cli.py [-h] target\ncli.py: error: unrecognized arguments\n1 failed", "fail")]:
+        check(f"classify_pytest rc={rc} {text[:24]!r} -> {want}", rig.classify_pytest(rc, text), want)
+    spec = FIXTURES["oneline"]
+    os.environ["SAMEWRITE_PYTEST_MODULE"] = "samewrite_no_such_runner"
+    import importlib; importlib.reload(rig)
+    check("runner uji HILANG -> INFRA_ERROR (bukan FAIL) pada golden", rig.verdict(spec, mk(spec, spec["golden"]), "")[0], "INFRA_ERROR")
+    del os.environ["SAMEWRITE_PYTEST_MODULE"]; importlib.reload(rig)
+    check("runner kembali -> golden ROOT", rig.verdict(spec, mk(spec, spec["golden"]), "")[0], "ROOT")
+    broken = dict(spec["golden"]); broken["mod.py"] = "def clamp(x, lo, hi:\n    return 1\n"
+    check("kode model rusak sintaks -> FAIL (kesalahan model, bukan infra)", rig.verdict(spec, mk(spec, broken), "")[0], "FAIL")
+    check("uji disunting jadi rusak sintaks -> INVALID",
+          rig.verdict(spec, mk(spec, dict(spec["golden"], **{"test_target.py": "def (:\n"})), "")[0], "INVALID")
+    # pyc basi: buggy -> pytest membuat .pyc -> golden berukuran sama di detik yang sama -> harus tetap ROOT
+    dd = mk(spec)
+    subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_target.py"], cwd=dd, capture_output=True)
+    open(os.path.join(dd, "mod.py"), "w").write(spec["golden"]["mod.py"])
+    check("pyc basi dari run sebelumnya tidak membuat golden MERAH", rig.verdict(spec, dd, "")[0], "ROOT")
+
     # 4. ekstraktor metrik pada transcript sintetis
     d = tempfile.mkdtemp(prefix="vn-tp-")
     tp = os.path.join(d, "s.jsonl")
@@ -116,13 +139,26 @@ def main():
     check("metrik: tool_counts dari blok tool_use saja", m["tool_counts"], {"Read": 1, "Bash": 1})
     tp2 = os.path.join(d, "a.jsonl")
     open(tp2, "w").write(json.dumps({"type": "attachment", "attachment": {"type": "skill_listing",
-                                     "content": "- dataviz: built-in only"}}) + "\n")
+                                     "content": "- dataviz: built-in only"}}) + "\n" +
+                         json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "ok"}],
+                                     "usage": {"input_tokens": 1, "output_tokens": 1}}}) + "\n")
     check("perlakuan A: hanya skill bawaan CLI -> ok", rig.metrics(tp2, "A")["treatment_ok"], True)
     check("perlakuan C: listing tanpa edit-discipline -> BAD", rig.metrics(tp2, "C")["treatment_ok"], False)
     check("perlakuan E: banner ponytail absen -> BAD", rig.metrics(tp, "E")["treatment_ok"], False)
     open(tp, "a").write(json.dumps({"type": "attachment", "attachment": {"type": "hook", "content": "PONYTAIL MODE ACTIVE — level: full"}}) + "\n")
     check("perlakuan H: banner ponytail + listing samewrite -> ok", rig.metrics(tp, "H")["treatment_ok"], True)
     check("perlakuan D dengan banner ponytail nyasar -> BAD", rig.metrics(tp, "D")["treatment_ok"], False)
+    empty = os.path.join(d, "empty.jsonl"); open(empty, "w").close()
+    m0 = rig.metrics(empty, "A")
+    check("transcript kosong -> transcript_ok False, treatment BAD, tanpa crash", (m0["transcript_ok"], m0["treatment_ok"]), (False, False))
+    trunc = os.path.join(d, "trunc.jsonl"); open(trunc, "w").write(open(tp).read()[:200])
+    m1 = rig.metrics(trunc, "D")
+    check("transcript terpotong -> tidak crash, transcript_ok False atau treatment BAD",
+          (m1.get("transcript_ok") is False) or (m1["treatment_ok"] is False), True)
+    nouse = os.path.join(d, "nousage.jsonl")
+    open(nouse, "w").write(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "x"}]}}) + "\n")
+    m2 = rig.metrics(nouse, "A")
+    check("usage hilang -> transcript_ok False", m2["transcript_ok"], False)
     shutil.rmtree(d, ignore_errors=True)
 
     print(f"\n{P} PASS / {F} FAIL")

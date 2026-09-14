@@ -108,7 +108,14 @@ def transcript_for(cfg, work):
 
 
 def metrics(tp, arm):
-    turns, items, usage = carry.scan(tp)
+    try:
+        turns, items, usage = carry.scan(tp)
+    except Exception as e:                       # transcript kosong/terpotong = INFRA, bukan model
+        return dict(turns=0, usage={}, bytes_by_source={}, tool_counts={}, listing_bytes=0, weighted_input=0,
+                    treatment_ok=False, banners=[], transcript_ok=False, infra_reason=f"scan: {e}")
+    if turns == 0 or not usage:
+        return dict(turns=turns, usage=dict(usage), bytes_by_source={}, tool_counts={}, listing_bytes=0, weighted_input=0,
+                    treatment_ok=False, banners=[], transcript_ok=False, infra_reason="no assistant turns / no usage")
     by = {}
     for _, b, src in items:
         by[carry.bucket(src)] = by.get(carry.bucket(src), 0) + b
@@ -142,7 +149,37 @@ def metrics(tp, arm):
                 bytes_by_source=by, tool_counts=counts, listing_bytes=len(listing),
                 weighted_input=usage.get("input_tokens", 0) + 1.25 * usage.get("cache_creation_input_tokens", 0)
                 + 0.1 * usage.get("cache_read_input_tokens", 0),
-                treatment_ok=treatment_ok, banners=sorted(banners))
+                treatment_ok=treatment_ok, banners=sorted(banners), transcript_ok=True)
+
+
+PYTEST_MODULE = os.environ.get("SAMEWRITE_PYTEST_MODULE", "pytest")   # selftest: modul palsu -> INFRA_ERROR
+INFRA_MARKERS = ("No module named pytest", "No module named " + PYTEST_MODULE, "INTERNALERROR", "usage: pytest")
+# "usage:" telanjang TIDAK dipakai: argparse di kode yang diuji juga mencetak "usage: ..." saat gagal
+# (selftest_pres 14-Sep memvonis kegagalan model sebagai INFRA)
+
+
+def classify_pytest(rc, text):
+    """-> 'pass' | 'fail' | 'infra'. Kegagalan INFRASTRUKTUR (runner hilang, usage error, internal
+    error, nol uji terkumpul, semua uji di-skip) tidak boleh runtuh menjadi kegagalan MODEL:
+    CI 14-Sep menunjukkan `python -m pytest` tanpa pytest terpasang memberi rc 1 dan 12 verdict
+    'FAIL' yang tampak seperti scorer yang rusak. rc pytest: 0 lulus, 1 gagal, 2 terputus/kesalahan
+    pengumpulan (kode model rusak = gagal model), 3 internal, 4 usage, 5 nol uji terkumpul."""
+    if any(m in text for m in INFRA_MARKERS) or rc in (3, 4, 5):
+        return "infra"
+    if rc == 0:
+        return "pass" if re.search(r"\b[1-9]\d* passed\b", text) else "infra"   # 0 lulus = semua di-skip
+    return "fail"
+
+
+def run_pytest(d, test_file, env):
+    """Jalankan satu berkas uji; -> (status, ekor keluaran). Keluaran DISIMPAN agar alasan tak hilang."""
+    try:
+        p = subprocess.run([sys.executable, "-m", PYTEST_MODULE, "-q", "-p", "no:cacheprovider", test_file],
+                           env=env, cwd=d, capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        return "infra", "timeout"
+    text = (p.stdout or "") + (p.stderr or "")
+    return classify_pytest(p.returncode, text), text[-600:]
 
 
 def verdict(spec, d, out):
@@ -170,14 +207,18 @@ def verdict(spec, d, out):
     # PYTHONPYCACHEPREFIX segar: tanpa ini, perubahan berukuran sama dalam detik yang sama memakai
     # .pyc lama dan uji yang benar tampak MERAH (kelas "stale cache"; ditemukan selftest_pres 14-Sep)
     penv = dict(os.environ, PYTHONPYCACHEPREFIX=tempfile.mkdtemp(prefix="pyc-"))
-    t = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_target.py"], env=penv,
-                       cwd=d, capture_output=True, timeout=180).returncode
-    if t != 0:
+    t, ttext = run_pytest(d, "test_target.py", penv)
+    open(os.path.join(d, "_pytest_target.txt"), "w").write(ttext)
+    if t == "infra":
+        return "INFRA_ERROR", changed, extra
+    if t == "fail":
         return "FAIL", changed, extra
     open(os.path.join(d, "_neighbor_test.py"), "w").write(spec["neighbor"])
-    n = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "_neighbor_test.py"], env=penv,
-                       cwd=d, capture_output=True, timeout=180).returncode
-    return ("ROOT" if n == 0 else "SYMPTOM"), changed, extra
+    n, ntext = run_pytest(d, "_neighbor_test.py", penv)
+    open(os.path.join(d, "_pytest_neighbor.txt"), "w").write(ntext)
+    if n == "infra":
+        return "INFRA_ERROR", changed, extra
+    return ("ROOT" if n == "pass" else "SYMPTOM"), changed, extra
 
 
 def diff_loc(spec, d):
