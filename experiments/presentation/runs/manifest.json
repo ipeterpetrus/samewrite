@@ -1,0 +1,40 @@
+{
+  "generated_from": "the data files themselves, 2026-09-14",
+  "evidence_classes": {
+    "pilot": "pre-registered contrasts, n=1 per arm x fixture; direction/instrument validation only",
+    "calibration": "pipeline smoke; never an effect estimate"
+  },
+  "files": [
+    {
+      "path": "pres1.jsonl",
+      "evidence_class": "pilot",
+      "preregistered": true,
+      "analysis_eligible": true,
+      "n": 64,
+      "unit": "runs (multistage = 3 model calls each)",
+      "arms": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "Dh",
+        "Dm",
+        "E",
+        "F"
+      ],
+      "model": "claude-haiku-4-5-20251001",
+      "cli": "2.1.270",
+      "sha256": "5c25912825f8a80466f8d32f0e17db6e1e112eb77363f9b7c34f513b859a84fc"
+    },
+    {
+      "path": "smoke.jsonl",
+      "evidence_class": "calibration",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 4,
+      "unit": "runs",
+      "sha256": "a4f5bcd342792cfc743ff8544d32e4f4b271834d590caa085fc8badcd954206d",
+      "note": "run before the filler-closer pattern was added to the classifier"
+    }
+  ]
+}

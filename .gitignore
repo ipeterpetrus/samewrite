@@ -5,3 +5,5 @@ experiments/skill-ab/cfg_*/
 experiments/skill-ab/mbpp.jsonl
 experiments/vnext/cfg_vnext/
 experiments/vnext/runs/*.log
+experiments/presentation/cfg_pres/
+experiments/presentation/runs/*.log

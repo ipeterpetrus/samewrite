@@ -28,7 +28,9 @@ ARMS = {
     "B": ("one-sentence instruction (prompt prefix)", {"sentence"}),
     "C": ("current samewrite: edit-discipline skill", {"edit-discipline"}),
     "D": ("samewrite vNext: skill only (listing entry always-on, body on demand)", {"samewrite"}),
-    "D2": ("samewrite vNext: skill + hooks (guard + SessionStart core line)", {"samewrite", "hooks"}),
+    # D2 ran in pilot1 with a mode hook that was removed afterwards (measured: no benefit over D).
+    # Kept so pilot rows still resolve; selecting it for a new run raises.
+    "D2": ("HISTORICAL pilot1 only: skill + mode hook (removed)", {"samewrite", "hooks"}),
     "E": ("ponytail alone (real hooks)", {"ponytail"}),
     "F": ("i-have-adhd alone (real always-on hook)", {"adhd"}),
     "G": ("ponytail + i-have-adhd", {"ponytail", "adhd"}),
@@ -57,6 +59,7 @@ def build_cfg(arm, base, refs, cred_src, tag=""):
     if "samewrite" in parts:
         shutil.copytree(os.path.join(ROOT, "skills", "samewrite"), os.path.join(cfg, "skills", "samewrite"))
     if "hooks" in parts:
+        raise SystemExit("arm D2 is historical (its mode hook was removed after pilot1); not runnable")
         g = os.path.join(ROOT, "hooks", "write_noop_guard.py"); m = os.path.join(ROOT, "hooks", "samewrite_mode.py")
         settings["hooks"].setdefault("PreToolUse", []).append(
             {"matcher": "Write", "hooks": [{"type": "command", "command": f"{sys.executable} {g}"}]})
@@ -164,12 +167,15 @@ def verdict(spec, d, out):
         # berkas baru (mis. conftest.py yang men-skip semua uji) bisa membuat implementasi rusak
         # tampak ROOT — tak ada fixture yang butuh berkas baru, jadi setiap tambahan = INVALID
         return "INVALID", changed, extra
-    t = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_target.py"],
+    # PYTHONPYCACHEPREFIX segar: tanpa ini, perubahan berukuran sama dalam detik yang sama memakai
+    # .pyc lama dan uji yang benar tampak MERAH (kelas "stale cache"; ditemukan selftest_pres 14-Sep)
+    penv = dict(os.environ, PYTHONPYCACHEPREFIX=tempfile.mkdtemp(prefix="pyc-"))
+    t = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_target.py"], env=penv,
                        cwd=d, capture_output=True, timeout=180).returncode
     if t != 0:
         return "FAIL", changed, extra
     open(os.path.join(d, "_neighbor_test.py"), "w").write(spec["neighbor"])
-    n = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "_neighbor_test.py"],
+    n = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "_neighbor_test.py"], env=penv,
                        cwd=d, capture_output=True, timeout=180).returncode
     return ("ROOT" if n == 0 else "SYMPTOM"), changed, extra
 

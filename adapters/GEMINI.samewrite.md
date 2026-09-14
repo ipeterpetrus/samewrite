@@ -9,8 +9,11 @@ target → symbol/block → surrounding lines → callers/imports → nearest te
 module → repository. Each step must answer a specific unresolved question; if a Read, grep, log
 dump, test run or review adds no new fact or failure mode, skip it. Read a range, not a file;
 bound grep; ask Bash for the answer, not the log (`184/184 PASS`, or the exact failing lines).
-Widen without hesitation when a shared caller, public API, auth boundary, persistence layer or
-cross-module invariant is in play — semantic completeness beats byte minimalism.
+If a symbol-level tool such as Serena is loaded, use its overview → symbol → references path for
+code files and let its rules win there. Widen without hesitation when a shared caller, public
+API, auth boundary, persistence layer or cross-module invariant is in play — semantic
+completeness beats byte minimalism. Measured (1,316 transcripts): Bash and Read results are
+~64% of what a session carries, Write/Edit 9.5%, prose 5.6% — economise tool output first.
 
 ## Ask only if material
 CLEAR → proceed. MINOR and reversible → safest reading; state the assumption if useful.
@@ -24,7 +27,7 @@ dependency? Deletion? — only then new code. If a minimalism profile such as Po
 follow its ladder and do not restate it. Never trim security, trust-boundary validation,
 required error handling, data integrity, accessibility, compatibility or explicit requirements.
 Overwriting an existing file: byte-identical → do not write; under ~25% changed → anchored
-Edit; over ~40% → rewrite and say why (measured: `edit-discipline`).
+Edit; over ~40% → rewrite and say why (measured on 741 overwrites; 20.8% were identical).
 
 ## Root cause, bounded retries
 Reproduce the smallest failure; check sibling callers of what you touch; patch the narrowest
@@ -41,16 +44,19 @@ plant a mutation, see RED, restore, see GREEN. Nothing is verified until a check
 have failed has passed; a stale cache, a skipped test or a pattern matching zero places is not
 a pass.
 
-## Exit receipt
+## Output: result first, only what the human needs
+Lead with the result, blocker, or next action. Use numbered steps only for user actions; omit
+unchanged state, recaps, and generic closers. Expand when requested.
+Your own completed work is a receipt, not a list. Report state only when it changed, matters
+to a decision, or blocks. Errors: the exact failing line, what was observed, one next action.
+No preamble, no recap, no generic closer — a complete task ends after its proof.
+Expand fully when the user asks for explanation, analysis, a report or detail, and when safety
+needs the warning: brevity must never lose information. The one measured brevity instruction
+is a prompt prefix, `Answer as briefly as possible, without reducing the technical content.`
+(−19.6% output tokens, facts kept, pre-registered) — not a block.
 `DONE — <what>. Proof: <checks run>. Scope: <files> · +a/−b.` or
-`BLOCKED — <what still fails>. Observed: <evidence>. No third speculative patch.`
+`BLOCKED — <what still fails>. Observed: <evidence>. Next: <one action>.`
 Labels: PROVEN · OBSERVED · INFERRED · UNVERIFIED · BLOCKED. Never invent evidence.
-
-## Presentation and controls
-Wording is inherited: system/safety > explicit user format > active presentation profile
-(Caveman, i-have-adhd, …) > this file. With no profile active, the one instruction with a
-measured effect is a prompt prefix, not a block: `Answer as briefly as possible, without
-reducing the technical content.` (−19.6% output tokens, facts kept, pre-registered —
-`edit-discipline`). Controls are namespaced: `/samewrite on|off|status`,
-`stop samewrite`. samewrite never reacts to `normal mode`, `stop ponytail`, `stop caveman` or
-`stop adhd mode`, and never touches another plugin's files or state.
+Precedence: system/safety > explicit user format > an active presentation profile (Caveman,
+i-have-adhd, …) > this file. samewrite has no mode switch: it never reacts to `normal mode`,
+`stop ponytail`, `stop caveman` or `stop adhd mode`, and never touches another plugin's files.

@@ -1,24 +1,19 @@
 #!/usr/bin/env python3
 """Matriks koeksistensi (master prompt §26): samewrite harus MENYUSUN, bukan bersaing.
 
-Semua kasus deterministik: direktori config sementara, settings.json yang SUDAH berisi hook,
-statusLine dan kunci milik plugin lain, plus berkas-flag plugin lain. Permukaan asing diambil
-dari audit ter-pin (docs/VNEXT.md §referensi):
-  ponytail@e3ba2aa  .ponytail-active · .ponytail-statusline-nudged · ~/.config/ponytail/config.json
-                    frasa `stop ponytail` / `normal mode` (whole-message) · /ponytail* · ponytail-*.js
-  i-have-adhd@4092de0  .i-have-adhd-always · frasa `stop adhd mode` / `normal mode` · /i-have-adhd
-  caveman@15581d1   .caveman-active · .caveman-sessions/ · frasa `stop caveman` · /caveman*
-  rtk@d402152       PreToolUse(Bash) `rtk hook claude`
-Kasus yang butuh model (format keluaran eksplisit, ambiguitas API, perubahan auth) BUKAN uji
-deterministik: mereka fixture benchmark (experiments/vnext/) dan dilabeli EXPERIMENTAL di
-tabel akhir — bukan diklaim lulus diam-diam. Bila SAMEWRITE_REF_DIR menunjuk klon referensi
-dan `node` ada, hook ponytail/i-have-adhd yang ASLI ikut dijalankan (uji silang hidup)."""
-import copy, hashlib, json, os, shutil, subprocess, sys, tempfile
+samewrite tak punya mode, saklar, hook per-turn, atau berkas state: ia skill on-demand plus
+SATU hook opsional (PreToolUse Write, write_noop_guard.py). Jadi yang bisa bertabrakan hanya
+pemasang/pencabutnya dan isi skill-nya. Kasus deterministik di sini: direktori config sementara
+yang SUDAH berisi hook, statusLine dan kunci milik plugin lain, plus berkas-flag plugin lain —
+permukaan asing diambil dari audit ter-pin (docs/VNEXT.md §3). Baris matriks yang butuh model
+(format eksplisit, ambiguitas, auth, multi-giliran) = fixture benchmark, dilabeli EXPERIMENTAL.
+Bila SAMEWRITE_REF_DIR menunjuk klon referensi dan `node` ada, hook ponytail/i-have-adhd ASLI
+ikut dijalankan dengan skill samewrite terpasang (uji silang hidup)."""
+import copy, hashlib, json, os, re, shutil, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOKS = os.path.join(ROOT, "hooks")
-sys.path.insert(0, HOOKS)
-import samewrite_mode as sm  # noqa: E402
+SKILL = open(os.path.join(ROOT, "skills", "samewrite", "SKILL.md"), encoding="utf-8").read()
 
 P = F = 0
 MATRIX = []
@@ -56,7 +51,6 @@ FOREIGN_SETTINGS = {
 FOREIGN_FLAGS = {".ponytail-active": "full\n", ".ponytail-statusline-nudged": "",
                  ".i-have-adhd-always": "", ".caveman-active": "full\n",
                  ".caveman-sessions/s1.mode": "full\n"}
-OWN_NAMES = ("write_noop_guard.py", "samewrite_mode.py")
 
 
 class Env:
@@ -91,10 +85,7 @@ class Env:
         return json.load(open(self.settings))
 
     def env(self, **extra):
-        e = dict(os.environ)
-        for k in list(e):
-            if k.startswith("SAMEWRITE_"):
-                del e[k]
+        e = {k: v for k, v in os.environ.items() if not k.startswith("SAMEWRITE_")}
         e.update(HOME=self.home, CLAUDE_CONFIG_DIR=self.cfg, SAMEWRITE_SETTINGS=self.settings,
                  SAMEWRITE_DST=self.dst, SAMEWRITE_LEDGER=self.ledger, SAMEWRITE_PYTHON=sys.executable,
                  SAMEWRITE_ROOT=self.home)
@@ -105,12 +96,6 @@ class Env:
         return subprocess.run(["bash", os.path.join(HOOKS, script)], capture_output=True, text=True,
                               timeout=120, env=self.env(**extra))
 
-    def hook(self, verb, prompt="", **extra):
-        p = subprocess.run([sys.executable, os.path.join(HOOKS, "samewrite_mode.py"), verb],
-                           input=json.dumps({"prompt": prompt, "session_id": "s1", "source": extra.pop("source", "startup")}),
-                           capture_output=True, text=True, timeout=20, env=self.env(**extra))
-        return p.stdout
-
     def guard(self, path, content, **extra):
         p = subprocess.run([sys.executable, os.path.join(HOOKS, "write_noop_guard.py")],
                            input=json.dumps({"tool_name": "Write",
@@ -118,16 +103,20 @@ class Env:
                            capture_output=True, text=True, timeout=20, env=self.env(**extra))
         return "deny" in p.stdout
 
+    def own_cmds(self):
+        return [(ev, m.get("matcher"), h["command"]) for ev, ms in self.read_settings().get("hooks", {}).items()
+                for m in ms for h in m.get("hooks", []) if self.dst in h["command"]]
+
     def foreign_view(self):
-        """settings.json tanpa entri milik samewrite — harus == asli, byte demi byte secara struktur."""
+        """settings.json tanpa entri milik samewrite — harus == asli secara STRUKTUR."""
         d = self.read_settings()
         hooks = d.get("hooks", {})
         for ev in list(hooks):
             kept = []
             for m in hooks[ev]:
-                hs = [h for h in m.get("hooks", []) if not any(n in h.get("command", "") for n in OWN_NAMES)]
+                hs = [h for h in m.get("hooks", []) if self.dst not in h.get("command", "")]
                 if hs:
-                    m = dict(m, hooks=hs); kept.append(m)
+                    kept.append(dict(m, hooks=hs))
             if kept:
                 hooks[ev] = kept
             else:
@@ -136,26 +125,14 @@ class Env:
             del d["hooks"]
         return d
 
-    def own_entries(self):
-        d = self.read_settings()
-        out = []
-        for ev, ms in d.get("hooks", {}).items():
-            for m in ms:
-                for h in m.get("hooks", []):
-                    if any(n in h.get("command", "") for n in OWN_NAMES):
-                        out.append((ev, m.get("matcher"), h["command"]))
-        return out
-
     def snapshot(self):
-        """hash setiap berkas non-samewrite di HOME (flag asing, config ponytail, dst.)."""
+        """hash tiap berkas asing di cfg + ~/.config (settings.json dinilai lewat foreign_view)."""
         out = {}
         for top in (self.cfg, os.path.join(self.home, ".config")):
             for base, _, files in os.walk(top):
                 for f in files:
-                    p = os.path.join(base, f)
-                    rel = os.path.relpath(p, self.home)
-                    # settings.json dinilai terpisah lewat foreign_view(); cadangan + marker = milik sendiri
-                    if f == "settings.json" or ".bak." in rel or f == "samewrite-disabled":
+                    p = os.path.join(base, f); rel = os.path.relpath(p, self.home)
+                    if f == "settings.json" or ".bak." in rel:
                         continue
                     out[rel] = hashlib.sha256(open(p, "rb").read()).hexdigest()
         return out
@@ -164,138 +141,116 @@ class Env:
 def main():
     # ---------------------------------------------------------------- 1. samewrite only
     e = Env(foreign=False)
-    r = e.sh("install.sh", SAMEWRITE_MODE_HOOK="1")
+    r = e.sh("install.sh")
     check("1 pasang di config kosong: rc 0", r.returncode, 0)
-    check("1 tiga entri milik sendiri (Write, UserPromptSubmit, SessionStart)",
-          sorted(ev for ev, _, _ in e.own_entries()), ["PreToolUse", "SessionStart", "UserPromptSubmit"])
-    check("1 perintah hook memuat path berspasi yang di-quote (POSIX single-quote)",
-          all("'" in c and "bin dir" in c for _, _, c in e.own_entries()), True)
-    # jalankan perintah hook PERSIS seperti tertulis di settings.json lewat sh -c: quoting harus jalan
-    cmd = [c for ev, _, c in e.own_entries() if ev == "UserPromptSubmit"][0]
-    p = subprocess.run(["sh", "-c", cmd], input='{"prompt":"samewrite status"}', capture_output=True,
-                       text=True, env=e.env())
-    check("1 perintah ter-quote berjalan lewat sh -c", "SAMEWRITE status" in p.stdout, True)
+    check("1 tepat satu entri milik sendiri: PreToolUse(Write)",
+          [(ev, m) for ev, m, _ in e.own_cmds()], [("PreToolUse", "Write")])
+    cmd = e.own_cmds()[0][2]
+    f = os.path.join(e.home, "work.txt"); open(f, "w").write("x\n")
+    wr = lambda c: json.dumps({"tool_name": "Write", "tool_input": {"file_path": f, "content": c}})
+    p1 = subprocess.run(["sh", "-c", cmd], input=wr("x\n"), capture_output=True, text=True, env=e.env())
+    p2 = subprocess.run(["sh", "-c", cmd], input=wr("y\n"), capture_output=True, text=True, env=e.env())
+    check("1 perintah ter-quote (path berspasi) berjalan lewat sh -c: identik deny, beda allow",
+          ("deny" in p1.stdout, "deny" in p2.stdout), (True, False))
     before = open(e.settings).read()
-    r2 = e.sh("install.sh", SAMEWRITE_MODE_HOOK="1")
+    e.sh("install.sh")
     check("1 pasang dua kali: idempoten (byte-identik)", open(e.settings).read() == before, True)
     r3 = e.sh("uninstall.sh")
-    check("1 cabut: rc 0", r3.returncode, 0)
-    check("1 cabut: settings kembali kosong", e.read_settings(), {})
-    # kepemilikan = path PERSIS, bukan nama berkas: hook asing bernama sama di dir lain tetap tinggal,
-    # dan perintah asing yang cuma MEMUAT substring nama tidak menahan pemasangan (review 14-Sep)
+    check("1 cabut: rc 0, settings kembali kosong", (r3.returncode, e.read_settings()), (0, {}))
+    # kepemilikan = path PERSIS: hook asing bernama sama di dir lain tetap; substring tak menahan pasang
     e.write_settings({"hooks": {"PreToolUse": [
         {"matcher": "Write", "hooks": [{"type": "command", "command": "python /opt/other/write_noop_guard.py"}]},
         {"matcher": "Bash", "hooks": [{"type": "command", "command": "python /opt/write_noop_guard.py.bak/x"}]}]}})
-    e.sh("install.sh", SAMEWRITE_MODE_HOOK="1")
-    cmds = [h["command"] for m in e.read_settings()["hooks"]["PreToolUse"] for h in m["hooks"]]
-    check("1 substring asing tidak menahan pemasangan guard sendiri",
-          sum(1 for c in cmds if e.dst in c or "'" + e.dst + "'" in c), 1)
+    e.sh("install.sh")
+    check("1 substring asing tidak menahan pemasangan guard sendiri", len(e.own_cmds()), 1)
     e.sh("uninstall.sh")
-    left = [h["command"] for m in e.read_settings()["hooks"]["PreToolUse"] for h in m["hooks"]]
-    check("1 cabut: hook asing bernama sama di dir lain TETAP", sorted(left),
+    left = sorted(h["command"] for m in e.read_settings()["hooks"]["PreToolUse"] for h in m["hooks"])
+    check("1 cabut: hook asing bernama sama di dir lain TETAP", left,
           ["python /opt/other/write_noop_guard.py", "python /opt/write_noop_guard.py.bak/x"])
+    # hook output opsional (SAMEWRITE_OUTPUT_HOOK=1): satu entri SessionStart, idempoten, dicabut bersih,
+    # entri SessionStart asing tetap
+    e5 = Env(foreign=True); orig5 = copy.deepcopy(e5.read_settings())
+    e5.sh("install.sh", SAMEWRITE_OUTPUT_HOOK="1")
+    ss = [h["command"] for m in e5.read_settings()["hooks"]["SessionStart"] for h in m["hooks"]]
+    check("1 output hook: satu entri SessionStart bertanda samewrite-output-hook",
+          sum(c.endswith("# samewrite-output-hook") for c in ss), 1)
+    check("1 output hook: entri SessionStart asing tetap", [c for c in ss if "samewrite" not in c],
+          ["node /p/hooks/ponytail-activate.js", "node /a/hooks/always-on.mjs"])
+    oc = [c for c in ss if c.endswith("# samewrite-output-hook")][0]
+    p = subprocess.run(["sh", "-c", oc], capture_output=True, text=True)
+    check("1 output hook: perintah menjawab satu kalimat lewat sh -c", p.stdout.startswith("Lead with the result"), True)
+    b5 = open(e5.settings).read(); e5.sh("install.sh", SAMEWRITE_OUTPUT_HOOK="1")
+    check("1 output hook: pasang dua kali idempoten", open(e5.settings).read() == b5, True)
+    e5.sh("uninstall.sh")
+    check("1 output hook: cabut mengembalikan settings asing == asli", e5.read_settings(), orig5)
     row(1, "SameWrite only", "PASS")
 
-    # ---------------------------------------------------------------- 2/3. foreign only (samewrite absent)
+    # ---------------------------------------------------------------- 2/3. foreign only
     e = Env(foreign=True)
-    snap = e.snapshot(); fv = e.foreign_view()
-    out = e.hook("prompt", "normal mode")
-    check("2/3 samewrite tak terpasang: 'normal mode' nol reaksi, nol berkas", (out, e.snapshot() == snap), ("", True))
+    snap0 = e.snapshot(); orig = copy.deepcopy(e.read_settings())
     row(2, "Ponytail only", "PASS — constructed foreign state; SameWrite absent, nothing touched")
     row(3, "i-have-adhd only", "PASS — constructed foreign state; SameWrite absent, nothing touched")
 
-    # ---------------------------------------------------------------- 4/5/6/26. installed alongside, inactive
-    snap0 = e.snapshot(); orig = copy.deepcopy(e.read_settings())
-    r = e.sh("install.sh", SAMEWRITE_MODE_HOOK="1")
+    # ---------------------------------------------------------------- 4/5/6/26. installed alongside
+    r = e.sh("install.sh")
     check("4-6 pasang di config asing: rc 0", r.returncode, 0)
-    check("4-6 entri asing tak berubah (tanpa entri samewrite == asli)", e.foreign_view(), orig)
-    check("4-6 statusLine asing byte-identik", e.read_settings()["statusLine"], orig["statusLine"])
+    check("4-6 entri asing tak berubah secara struktur", e.foreign_view(), orig)
+    check("4-6 statusLine asing utuh", e.read_settings()["statusLine"], orig["statusLine"])
     check("4-6 flag asing + ~/.config/ponytail byte-identik", e.snapshot(), snap0)
-    check("4-6 tak ada SubagentStart milik samewrite (subagen tak disuntik)",
-          any(ev == "SubagentStart" for ev, _, _ in e.own_entries()), False)
-    row(4, "SameWrite + Ponytail installed, inactive", "PASS — SameWrite-side: foreign settings/flags structurally unchanged")
-    row(5, "SameWrite + i-have-adhd installed, inactive", "PASS — SameWrite-side: foreign settings/flags structurally unchanged")
-    row(6, "all three installed", "PASS — SameWrite-side: foreign settings/flags structurally unchanged")
+    row(4, "SameWrite + Ponytail installed, inactive", "PASS — SameWrite-side: foreign settings/flags unchanged")
+    row(5, "SameWrite + i-have-adhd installed, inactive", "PASS — SameWrite-side: foreign settings/flags unchanged")
+    row(6, "all three installed", "PASS — SameWrite-side: foreign settings/flags unchanged")
     row(26, "pre-populated foreign config", "PASS")
 
-    # ---------------------------------------------------------------- 7/8/9/10. active together
+    # ---------------------------------------------------------------- 7-10. active together
     f = os.path.join(e.home, "work.txt"); open(f, "w").write("x\n")
-    out = e.hook("session", SAMEWRITE_CORE="1")
-    check("7-10 SessionStart: inti satu baris, tanpa menyebut plugin lain",
-          (out.count("samewrite:"), "ponytail" in out.lower()), (1, False))
-    check("7-10 flag asing tetap sesudah session hook", e.snapshot(), snap0)
-    check("7-10 guard menolak Write identik saat semua aktif", e.guard(f, "x\n"), True)
-    check("7-10 prompt biasa: hook samewrite senyap (nol injeksi per-turn)", e.hook("prompt", "fix the bug"), "")
-    row(7, "SameWrite active + Ponytail active", "PASS — SameWrite-side only (foreign hooks run in LIVE block, not here)")
-    row(8, "SameWrite active + i-have-adhd active", "PASS — SameWrite-side only (foreign hooks run in LIVE block, not here)")
-    row(9, "Ponytail + i-have-adhd active", "PASS — SameWrite silent on ordinary prompts")
-    row(10, "all three active", "PASS — SameWrite-side only (foreign hooks run in LIVE block, not here)")
+    check("7-10 guard menolak Write identik saat flag ponytail/adhd/caveman ada", e.guard(f, "x\n"), True)
+    check("7-10 guard tak menyentuh flag asing", e.snapshot(), snap0)
+    for n, name in [(7, "SameWrite active + Ponytail active"), (8, "SameWrite active + i-have-adhd active"),
+                    (9, "Ponytail + i-have-adhd active"), (10, "all three active")]:
+        row(n, name, "PASS — SameWrite-side only; foreign hooks run in the LIVE block")
 
     # ---------------------------------------------------------------- 11. activation orders
-    e2 = Env(foreign=False)
-    e2.sh("install.sh", SAMEWRITE_MODE_HOOK="1")
+    e2 = Env(foreign=False); e2.sh("install.sh")
     d = e2.read_settings()
     for ev, ms in FOREIGN_SETTINGS["hooks"].items():
         d.setdefault("hooks", {}).setdefault(ev, []).extend(copy.deepcopy(ms))
-    d["statusLine"] = FOREIGN_SETTINGS["statusLine"]
-    e2.write_settings(d)
-    def hookset(env):
-        return {(ev, m.get("matcher"), h["command"].replace(env.home, "<HOME>"))
-                for ev, ms in env.read_settings()["hooks"].items() for m in ms for h in m["hooks"]}
-    a, b = hookset(e2), hookset(e)
-    check("11 urutan pasang berbeda -> himpunan hook sama", a, b)
+    d["statusLine"] = FOREIGN_SETTINGS["statusLine"]; e2.write_settings(d)
+    hookset = lambda env: {(ev, m.get("matcher"), h["command"].replace(env.home, "<HOME>"))
+                           for ev, ms in env.read_settings()["hooks"].items() for m in ms for h in m["hooks"]}
+    check("11 urutan pasang berbeda -> himpunan hook sama", hookset(e2), hookset(e))
     row(11, "different activation orders", "PASS")
 
-    # ---------------------------------------------------------------- 12. samewrite off, others stay
-    out = e.hook("prompt", "stop samewrite")
-    check("12 stop samewrite: marker sendiri dibuat", os.path.exists(os.path.join(e.cfg, "samewrite-disabled")), True)
-    check("12 stop samewrite: flag asing utuh", e.snapshot(), snap0)
-    check("12 stop samewrite: settings asing utuh", e.foreign_view(), orig)
-    check("12 guard berhenti (identik lolos)", e.guard(f, "x\n"), False)
-    check("12 SessionStart senyap saat off", e.hook("session", SAMEWRITE_CORE="1"), "")
-    row(12, "SameWrite off while others active", "PASS")
-
-    # ---------------------------------------------------------------- 13/14. others off, samewrite stays
-    e.hook("prompt", "samewrite on")
+    # ---------------------------------------------------------------- 12-14. one off, others on
+    e.sh("uninstall.sh")
+    check("12 samewrite dicabut: settings asing == asli, flag asing utuh",
+          (e.read_settings() == orig, e.snapshot() == snap0), (True, True))
+    row(12, "SameWrite off while others active", "PASS — off = uninstall (no mode); foreign state untouched")
+    e.sh("install.sh")
     os.unlink(os.path.join(e.cfg, ".ponytail-active"))
-    check("13 ponytail off: guard samewrite tetap menolak", e.guard(f, "x\n"), True)
-    check("13 ponytail off: samewrite tak menulis ulang flag ponytail",
-          os.path.exists(os.path.join(e.cfg, ".ponytail-active")), False)
+    check("13 ponytail off: guard samewrite tetap menolak, flag ponytail tak dibuat ulang",
+          (e.guard(f, "x\n"), os.path.exists(os.path.join(e.cfg, ".ponytail-active"))), (True, False))
     os.unlink(os.path.join(e.cfg, ".i-have-adhd-always"))
-    check("14 adhd off: guard samewrite tetap menolak", e.guard(f, "x\n"), True)
-    check("14 adhd off: flag adhd tak dihidupkan lagi", os.path.exists(os.path.join(e.cfg, ".i-have-adhd-always")), False)
-    row(13, "Ponytail off while SameWrite active", "PASS — foreign flag removed by the test, SameWrite unaffected")
-    row(14, "i-have-adhd off while SameWrite active", "PASS — foreign flag removed by the test, SameWrite unaffected")
+    check("14 adhd off: guard samewrite tetap menolak, flag adhd tak dibuat ulang",
+          (e.guard(f, "x\n"), os.path.exists(os.path.join(e.cfg, ".i-have-adhd-always"))), (True, False))
+    row(13, "Ponytail off while SameWrite active", "PASS — foreign flag removed by the test; SameWrite unaffected")
+    row(14, "i-have-adhd off while SameWrite active", "PASS — foreign flag removed by the test; SameWrite unaffected")
 
-    # ---------------------------------------------------------------- 15-19. lifecycle sources
-    for n, src in [(15, "startup"), (16, "resume"), (17, "clear"), (18, "compact"), (19, "startup")]:
-        out = e.hook("session", source=src, SAMEWRITE_CORE="1")
-        check(f"{n} SessionStart source={src}: tepat satu inti", out.count("samewrite:"), 1)
-        check(f"{n} source={src}: inti tak ganda saat dijalankan lagi", e.hook("session", source=src, SAMEWRITE_CORE="1").count("samewrite:"), 1)
-    row(15, "session start", "PASS — SameWrite hook only; `source` not consulted by design"); row(16, "resume", "PASS — same"); row(17, "clear", "PASS — same")
-    row(18, "compaction", "PASS (re-inject once via matcher, none when off)")
-    row(19, "plugin reload", "PASS (same path as startup)")
-
-    # ---------------------------------------------------------------- 20. subagent spawn
-    check("20 tak ada SubagentStart samewrite; hook prompt/session tak dipanggil utk subagen",
-          any(ev == "SubagentStart" for ev, _, _ in e.own_entries()), False)
-    row(20, "subagent spawn", "PASS by construction — no SubagentStart entry registered; no subagent exercised")
+    # ---------------------------------------------------------------- 15-20. lifecycle, subagents
+    check("15-20 samewrite mendaftarkan nol hook SessionStart/UserPromptSubmit/SubagentStart",
+          sorted({ev for ev, _, _ in e.own_cmds()}), ["PreToolUse"])
+    for n, name in [(15, "session start"), (16, "resume"), (17, "clear"), (18, "compaction"), (19, "plugin reload")]:
+        row(n, name, "N/A — nothing to re-inject: samewrite is a listing entry + on-demand body, no hook")
+    row(20, "subagent spawn", "N/A by construction — no SubagentStart injection exists")
 
     # ---------------------------------------------------------------- 21-25. model-behaviour cases
     for n, name in [(21, "explicit user output-only format"), (22, "long-form explanation request"),
                     (23, "destructive action"), (24, "public API ambiguity"), (25, "CRITICAL auth/security change")]:
-        row(n, name, "EXPERIMENTAL — benchmark fixture experiments/vnext/, not a deterministic test")
+        row(n, name, "EXPERIMENTAL — benchmark fixture (experiments/vnext, experiments/presentation)")
 
-    # ---------------------------------------------------------------- 27. existing statusLine + malformed JSON
+    # ---------------------------------------------------------------- 27. statusLine + malformed JSON
     e.sh("uninstall.sh")
-    check("27 cabut: statusLine asing tetap", e.read_settings()["statusLine"], orig["statusLine"])
-    check("27 cabut: settings asing == asli", e.read_settings(), orig)
-    check("27 cabut: marker sendiri dibersihkan", os.path.exists(os.path.join(e.cfg, "samewrite-disabled")), False)
-    sd = os.path.join(e.home, "state dir"); os.makedirs(sd)
-    e.hook("prompt", "stop samewrite", SAMEWRITE_STATE_DIR=sd)
-    e.sh("uninstall.sh", SAMEWRITE_STATE_DIR=sd)
-    check("27 cabut dengan SAMEWRITE_STATE_DIR: marker di dir itu ikut dibersihkan",
-          os.path.exists(os.path.join(sd, "samewrite-disabled")), False)
+    check("27 cabut: statusLine asing tetap, settings == asli", e.read_settings(), orig)
     e3 = Env(foreign=False, settings='{"hooks": {oops')
     raw = open(e3.settings).read()
     r = e3.sh("uninstall.sh")
@@ -303,51 +258,45 @@ def main():
           (r.returncode, open(e3.settings).read() == raw, "PERINGATAN" in r.stdout), (1, True, True))
     r = e3.sh("install.sh")
     check("27 JSON rusak: pasang gagal, berkas tetap byte-identik", (r.returncode != 0, open(e3.settings).read() == raw), (True, True))
-    row(27, "existing/custom statusLine", "PASS (preserved on install + uninstall; malformed JSON untouched)")
+    row(27, "existing/custom statusLine", "PASS — preserved on install + uninstall; malformed JSON untouched")
 
-    # ---------------------------------------------------------------- 28/29. other hosts
     row(28, "OpenCode per-turn transform", "UNSUPPORTED — no OpenCode adapter shipped")
     row(29, "Pi before-agent injection", "UNSUPPORTED — no Pi adapter shipped")
 
     # ---------------------------------------------------------------- 30. paths
-    weird = os.path.join(e.home, "we ird", "$dir", "it's")
-    os.makedirs(weird)
-    e.hook("prompt", "stop samewrite", SAMEWRITE_STATE_DIR=weird)
-    check("30 POSIX: dir state berspasi/$/kutip -> marker dibuat",
-          os.path.exists(os.path.join(weird, "samewrite-disabled")), True)
-    check("30 POSIX: guard membaca marker dari dir yang sama", e.guard(f, "x\n", SAMEWRITE_STATE_DIR=weird), False)
+    sys.path.insert(0, HOOKS)
     check("30 path gaya Windows dikenali sensitif oleh guard (backslash)",
           __import__("write_noop_guard").sensitive(r"C:\Users\me\.ssh\id_rsa"), True)
-    row(30, "Windows + POSIX path behavior", "PARTIAL — POSIX spaces/metachars tested; Windows UNTESTED (no runner)")
+    row(30, "Windows + POSIX path behavior", "PARTIAL — POSIX spaces/metachars tested (case 1); Windows UNTESTED (no runner)")
 
-    # ---------------------------------------------------------------- live cross-check with REAL foreign hooks
-    ref = os.environ.get("SAMEWRITE_REF_DIR")
-    node = shutil.which("node")
-    live = 0
+    # ---------------------------------------------------------------- skill text: no foreign controls
+    check("skill: tak mengklaim 'normal mode' kecuali sebagai larangan",
+          all("never reacts" in l for l in SKILL.splitlines() if "normal mode" in l), True)
+    check("skill: tak mendefinisikan saklar mode sendiri", bool(re.search(r"/samewrite (on|off)|stop samewrite", SKILL)), False)
+    check("skill: tak memakai kata pemicu caveman sebagai perintah (be brief/less tokens/fewer tokens)",
+          bool(re.search(r"\b(be brief|be terse|less tokens|fewer tokens|shorter answers)\b", SKILL, re.I)), False)
+
+    # ---------------------------------------------------------------- LIVE: real foreign hooks next to the skill
+    ref = os.environ.get("SAMEWRITE_REF_DIR"); node = shutil.which("node")
     if ref and node and os.path.isdir(os.path.join(ref, "ponytail", "hooks")):
-        e4 = Env(foreign=True)
+        e4 = Env(foreign=True); e4.sh("install.sh")
+        shutil.copytree(os.path.join(ROOT, "skills", "samewrite"), os.path.join(e4.cfg, "skills", "samewrite"))
         pt = os.path.join(ref, "ponytail", "hooks", "ponytail-mode-tracker.js")
-        p = subprocess.run([node, pt], input=json.dumps({"prompt": "stop samewrite"}), capture_output=True,
-                           text=True, timeout=30, env=e4.env())
-        check("LIVE ponytail tracker mengabaikan 'stop samewrite' (.ponytail-active tetap)",
+        subprocess.run([node, pt], input=json.dumps({"prompt": "fix the bug in samewrite style"}),
+                       capture_output=True, text=True, timeout=30, env=e4.env())
+        check("LIVE ponytail tracker: prompt biasa tak mengubah .ponytail-active",
               open(os.path.join(e4.cfg, ".ponytail-active")).read().strip(), "full")
-        p = subprocess.run([node, pt], input=json.dumps({"prompt": "stop ponytail"}), capture_output=True,
-                           text=True, timeout=30, env=e4.env())
-        check("LIVE 'stop ponytail' memang mematikan ponytail (kontrol positif)",
-              os.path.exists(os.path.join(e4.cfg, ".ponytail-active")), False)
-        check("LIVE 'stop ponytail' tak menyentuh samewrite (nol marker)",
-              os.path.exists(os.path.join(e4.cfg, "samewrite-disabled")), False)
-        live += 3
+        subprocess.run([node, pt], input=json.dumps({"prompt": "stop ponytail"}),
+                       capture_output=True, text=True, timeout=30, env=e4.env())
+        check("LIVE 'stop ponytail' mematikan ponytail (kontrol positif) dan samewrite tetap terpasang",
+              (os.path.exists(os.path.join(e4.cfg, ".ponytail-active")), len(e4.own_cmds())), (False, 1))
         ad = os.path.join(ref, "i-have-adhd", "hooks", "always-on.mjs")
-        if os.path.exists(ad):
-            p = subprocess.run([node, ad], input="{}", capture_output=True, text=True, timeout=30,
-                               env=dict(e4.env(), CLAUDE_PLUGIN_ROOT=os.path.join(ref, "i-have-adhd")))
-            check("LIVE i-have-adhd always-on menyuntik saat flag ada", "ADHD MODE ACTIVE" in p.stdout, True)
-            e4.hook("prompt", "stop samewrite")
-            check("LIVE stop samewrite membiarkan .i-have-adhd-always",
-                  os.path.exists(os.path.join(e4.cfg, ".i-have-adhd-always")), True)
-            live += 2
-        print(f"  LIVE  {live} uji silang dengan hook asing ASLI dijalankan")
+        p = subprocess.run([node, ad], input="{}", capture_output=True, text=True, timeout=30,
+                           env=dict(e4.env(), CLAUDE_PLUGIN_ROOT=os.path.join(ref, "i-have-adhd")))
+        w = os.path.join(e4.home, "work.txt"); open(w, "w").write("x\n")
+        check("LIVE i-have-adhd always-on menyuntik saat flag ada, guard samewrite tetap jalan",
+              ("ADHD MODE ACTIVE" in p.stdout, e4.guard(w, "x\n")), (True, True))
+        print("  LIVE  3 uji silang dengan hook asing ASLI dijalankan")
     else:
         print("  SKIP  uji silang hook asing asli: set SAMEWRITE_REF_DIR=<dir klon> dan sediakan node")
 

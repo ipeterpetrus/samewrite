@@ -289,47 +289,162 @@ same 110 results (0 excluded, all arms 10/10).
 
 ## 10. Files changed
 
-Against `0aec7ce` (`git diff --stat`), all local, nothing pushed:
+Against `0aec7ce` (`git diff --stat`, after the continuation in §11), all local until the release branch is pushed:
 
 ```
-.claude-plugin/marketplace.json              |   2 +-
- .claude-plugin/plugin.json                   |   2 +-
- .github/workflows/test.yml                   |  10 +-
- .gitignore                                   |   2 +
- README.md                                    |  36 ++++-
- adapters/AGENTS.samewrite.md                 |  56 ++++++++
- adapters/GEMINI.samewrite.md                 |  56 ++++++++
- docs/VNEXT.md                                | 335 +++++++++++++++++++++++++++++++++++++++++++
- docs/reference-audits/aider.md               |  44 ++++++
- docs/reference-audits/caveman.md             |  48 +++++++
- docs/reference-audits/i-have-adhd.md         |  46 ++++++
- docs/reference-audits/ponytail.md            |  54 +++++++
- docs/reference-audits/rtk.md                 |  49 +++++++
- docs/reference-audits/serena.md              |  57 ++++++++
- docs/reference-audits/superpowers.md         |  55 +++++++
- docs/reference-audits/token-savior.md        |  41 ++++++
- experiments/vnext/PREREGISTRATION.md         |  85 +++++++++++
- experiments/vnext/README.md                  |  23 +++
- experiments/vnext/analyze.py                 |  89 ++++++++++++
- experiments/vnext/fixtures.py                | 325 ++++++++++++++++++++++++++++++++++++++++++
- experiments/vnext/rescore.py                 |  22 +++
- experiments/vnext/rig.py                     | 264 ++++++++++++++++++++++++++++++++++
- experiments/vnext/runs/manifest.json         |  58 ++++++++
- experiments/vnext/runs/pilot1.jsonl          | 110 ++++++++++++++
- experiments/vnext/runs/pilot1.rescored.jsonl | 110 ++++++++++++++
- experiments/vnext/runs/smoke.jsonl           |   4 +
- experiments/vnext/selftest.py                | 133 +++++++++++++++++
- hooks/install.sh                             |  56 +++++++-
- hooks/samewrite_mode.py                      | 126 +++++++++++++++++
- hooks/uninstall.sh                           |  51 +++++++
- hooks/write_noop_guard.py                    |  14 +-
- skills/samewrite/SKILL.md                    |  60 ++++++++
- tests/test_adapters.py                       |  75 ++++++++++
- tests/test_coexist.py                        | 362 +++++++++++++++++++++++++++++++++++++++++++++++
- tests/test_samewrite_mode.py                 | 155 ++++++++++++++++++++
- tests/test_write_noop_guard.py               |   3 +
- tools/adapters.py                            |  61 ++++++++
- 37 files changed, 3066 insertions(+), 13 deletions(-)
+.claude-plugin/marketplace.json                |   2 +-
+ .claude-plugin/plugin.json                     |   2 +-
+ .github/workflows/test.yml                     |  10 +-
+ .gitignore                                     |   4 +
+ README.md                                      | 699 +++++++++++----------------------------------
+ adapters/AGENTS.samewrite.md                   |  62 ++++
+ adapters/GEMINI.samewrite.md                   |  62 ++++
+ docs/VNEXT.md                                  | 444 ++++++++++++++++++++++++++++
+ docs/reference-audits/aider.md                 |  44 +++
+ docs/reference-audits/caveman.md               |  48 ++++
+ docs/reference-audits/i-have-adhd.md           |  46 +++
+ docs/reference-audits/ponytail.md              |  54 ++++
+ docs/reference-audits/rtk.md                   |  49 ++++
+ docs/reference-audits/serena.md                |  57 ++++
+ docs/reference-audits/superpowers.md           |  55 ++++
+ docs/reference-audits/token-savior.md          |  41 +++
+ experiments/presentation/PREREGISTRATION.md    |  63 ++++
+ experiments/presentation/analyze_pres.py       |  62 ++++
+ experiments/presentation/fixtures_pres.py      | 196 +++++++++++++
+ experiments/presentation/rig_pres.py           | 219 ++++++++++++++
+ experiments/presentation/runs/manifest.json    |  40 +++
+ experiments/presentation/runs/pres1.jsonl      |  64 +++++
+ experiments/presentation/runs/smoke.jsonl      |   4 +
+ experiments/presentation/selftest_pres.py      | 107 +++++++
+ experiments/presentation/skill_before/SKILL.md |  60 ++++
+ experiments/vnext/PREREGISTRATION.md           |  85 ++++++
+ experiments/vnext/README.md                    |  23 ++
+ experiments/vnext/analyze.py                   |  89 ++++++
+ experiments/vnext/fixtures.py                  | 325 +++++++++++++++++++++
+ experiments/vnext/rescore.py                   |  22 ++
+ experiments/vnext/rig.py                       | 270 +++++++++++++++++
+ experiments/vnext/runs/manifest.json           |  58 ++++
+ experiments/vnext/runs/pilot1.jsonl            | 110 +++++++
+ experiments/vnext/runs/pilot1.rescored.jsonl   | 110 +++++++
+ experiments/vnext/runs/smoke.jsonl             |   4 +
+ experiments/vnext/selftest.py                  | 133 +++++++++
+ hooks/install.sh                               |  39 ++-
+ hooks/uninstall.sh                             |  51 ++++
+ skills/edit-discipline/SKILL.md                |  62 +---
+ skills/samewrite/SKILL.md                      |  66 +++++
+ tests/test_adapters.py                         |  87 ++++++
+ tests/test_coexist.py                          | 311 ++++++++++++++++++++
+ tools/adapters.py                              |  61 ++++
+ 43 files changed, 3808 insertions(+), 592 deletions(-)
 ```
 
-Untouched on purpose: `skills/edit-discipline/SKILL.md`, every `tools/*.py` except the new `adapters.py`, `experiments/skill-ab/`, `docs/FINDINGS.md`, `docs/FIELD_DATA.md`, `LICENSE`.
+Untouched on purpose: every `tools/*.py` except the new `adapters.py`, `experiments/skill-ab/`, `docs/FINDINGS.md`, `docs/FIELD_DATA.md`, `LICENSE`.
+
+## 11. Continuation: human-first output, one runtime (2026-09-14, same day)
+
+Supersedes §1, §3 and §9 where they differ. Two directives arrived after the pilot: make the
+default human-facing output action-first without a second plugin, and keep ONE SameWrite.
+
+**Fact that reshaped the design.** In pilot1 the skill *body* was invoked in **0 of 50**
+samewrite-arm runs and `edit-discipline` in 0 of 10 (`tool_counts` has no `Skill` call in any
+of the 110 transcripts). Under `claude -p` only the always-on listing description reaches the
+model; the body reaches it only when invoked. So the earlier arm D measured the description, not
+the body, and any output policy that lives only in the body would be measured as nothing.
+
+**Delta (surgical):**
+
+| change | why |
+|---|---|
+| `skills/samewrite/SKILL.md`: new **Output** section replaces "Presentation and controls"; description gains the clause "answer result-first with only what a human needs to act or verify" | the compact human-output policy (§4 of the directive), in the one channel that is always on and in the body for invoked use |
+| `skills/edit-discipline/SKILL.md` → 755-byte compatibility alias with `disable-model-invocation: true` | one runtime (§16): the policy text exists once; `/edit-discipline` still works for 1.0.0 installs; zero listing bytes per turn (verified in every presentation transcript: `- edit-discipline:` absent from the listing) |
+| **removed** `hooks/samewrite_mode.py`, its 57 tests, the `SAMEWRITE_MODE_HOOK` install path, the `samewrite-disabled` marker in the guard | §15 (no mode machinery merely because Ponytail/i-have-adhd have it) plus pilot1 measurement: arm D2 (hooks) was not more correct and +0.7% dearer than D. `write_noop_guard.py` and its 64 tests are byte-identical to 1.0.0 again |
+| `hooks/install.sh` / `uninstall.sh` keep the review fixes (POSIX quoting, exact-path ownership) | unchanged behaviour, smaller surface |
+| `tests/test_coexist.py` rewritten for a hook-free skill; `tests/test_adapters.py` checks the alias and that each policy section exists exactly once | the matrix now says N/A where there is nothing to re-inject instead of testing a hook that no longer exists |
+| `experiments/presentation/` — 8 adversarial cases (§8 of the directive), 8 arms, self-tested prose classifiers, pre-registration, per-run isolated configs, multi-turn via `--continue` | the presentation benchmark (§7) |
+
+Runtime instruction size, before → after (bytes): listing description 330 → 366 (always on);
+body 4,011 → 4,753 (on demand); `edit-discipline` listing entry ~250 → 0 (hidden); hooks
+injected per session 0 → 0. Net always-on change: **+36 bytes** for the output clause and
+**−~250** for the retired alias entry.
+
+### Presentation pilot (`experiments/presentation/runs/pres1.jsonl`, pre-registered)
+
+| arm | ROOT | human_ok | out tok (mean) | last-turn out tok | injected B | pre/clo/decor | state lines | words (mean) |
+|---|---|---|---|---|---|---|---|---|
+| A | 7/8 | 5/8 | 3,140 | 2,654 | 6,388 | 0/1/0 | 0 | 83 |
+| B | 7/8 | 6/8 | 3,022 | 2,528 | 6,774 | 0/0/0 | 0 | 66 |
+| C | 7/8 | 4/8 | 2,844 | 2,406 | 13,672 | 0/1/0 | 0 | 71 |
+| D | 7/8 | 5/8 | 2,894 | 2,384 | 6,799 | 0/1/0 | 0 | 77 |
+| Dh | 7/8 | 7/8 | 2,972 | 2,432 | 6,962 | 0/0/0 | 0 | 64 |
+| Dm | 7/8 | 5/8 | 3,252 | 2,708 | 6,916 | 0/1/0 | 0 | 73 |
+| E | 7/8 | 5/8 | 2,804 | 2,410 | 13,416 | 0/0/0 | 0 | 63 |
+| F | 7/8 | 5/8 | 2,908 | 2,488 | 14,081 | 0/1/0 | 0 | 57 |
+
+Per fixture (verdict / human_ok):
+
+```
+  blocker          A=INVA/NO  B=INVA/NO  C=INVA/NO  D=INVA/NO  Dh=INVA/NO  Dm=INVA/NO  E=INVA/NO  F=INVA/NO
+  edit_simple      A=ROOT/ok  B=ROOT/ok  C=ROOT/ok  D=ROOT/ok  Dh=ROOT/ok  Dm=ROOT/ok  E=ROOT/ok  F=ROOT/ok
+  explain_detail   A=ROOT/ok  B=ROOT/ok  C=ROOT/ok  D=ROOT/ok  Dh=ROOT/ok  Dm=ROOT/ok  E=ROOT/ok  F=ROOT/ok
+  multistage       A=ROOT/NO  B=ROOT/ok  C=ROOT/NO  D=ROOT/NO  Dh=ROOT/ok  Dm=ROOT/NO  E=ROOT/ok  F=ROOT/NO
+  nothing_changed  A=ROOT/ok  B=ROOT/ok  C=ROOT/ok  D=ROOT/ok  Dh=ROOT/ok  Dm=ROOT/ok  E=ROOT/ok  F=ROOT/ok
+  output_only      A=ROOT/ok  B=ROOT/ok  C=ROOT/ok  D=ROOT/ok  Dh=ROOT/ok  Dm=ROOT/ok  E=ROOT/ok  F=ROOT/ok
+  security         A=ROOT/ok  B=ROOT/ok  C=ROOT/NO  D=ROOT/ok  Dh=ROOT/ok  Dm=ROOT/ok  E=ROOT/NO  F=ROOT/ok
+  user_must_run    A=ROOT/NO  B=ROOT/NO  C=ROOT/NO  D=ROOT/NO  Dh=ROOT/ok  Dm=ROOT/NO  E=ROOT/NO  F=ROOT/NO
+```
+
+Pre-registered contrasts:
+
+```
+  D vs B (H1 now vs before): n=8 ROOT 7 vs 7 · human_ok 5 vs 6 · D fewer output tokens in 5/8
+     human_ok LOST by D: multistage
+  D vs A (vs bare): n=8 ROOT 7 vs 7 · human_ok 5 vs 5 · D fewer output tokens in 5/8
+  D vs C (H2 vs i-have-adhd full): n=8 ROOT 7 vs 7 · human_ok 5 vs 4 · D fewer output tokens in 4/8
+  Dh vs D (H5 one-liner P2): n=8 ROOT 7 vs 7 · human_ok 7 vs 5 · Dh fewer output tokens in 3/8
+  Dm vs D (H5 one-liner P1): n=8 ROOT 7 vs 7 · human_ok 5 vs 5 · Dm fewer output tokens in 3/8
+  E vs D (H4 +ponytail): n=8 ROOT 7 vs 7 · human_ok 5 vs 5 · E fewer output tokens in 5/8
+     human_ok LOST by E: security
+  F vs D (H4 +i-have-adhd): n=8 ROOT 7 vs 7 · human_ok 5 vs 5 · F fewer output tokens in 5/8
+  F vs C (stacked vs adhd alone): n=8 ROOT 7 vs 7 · human_ok 5 vs 4 · F fewer output tokens in 4/8
+```
+
+**Reading.** Correctness is flat: 7/8 in every arm, and the one miss is the same everywhere —
+on `blocker` (two contradictory tests) the model *edited the test* in all 8 arms, so no
+instruction here changed that behaviour (INVALID, counted as a failure). `human_ok` — the
+per-case contract (result first, numbered human actions, full detail on request, security
+evidence, no manufactured status, no filler) — was 6/8 for SameWrite before this change (B),
+5/8 for the new description alone (D: it lost `multistage`, whose final "ok" turn ended in
+"Let me know if you need anything else!"), 4/8 for the full i-have-adhd hook at 2× the injected
+bytes, and **7/8 for D plus the one-sentence SessionStart injection (Dh)** — the only arm that
+produced numbered human actions on `user_must_run` and a filler-free final turn. The micro
+variant (Dm, P1) gained nothing over D. Output tokens: D fewer than B on 5/8, means within 5%
+of each other in every arm; the hook costs +163 bytes per session start. Stacking: with
+Ponytail (E) correctness held and `human_ok` stayed 5/8, but `security` lost its evidence
+sentence to Ponytail's "at most three short lines" — a shortening interaction, not a
+contradiction; with i-have-adhd (F) 5/8, no doubled status text. The skill body was again
+invoked 0 times in 64 runs — under `claude -p` the listing description and the SessionStart
+line are the only channels that reached the model.
+
+Pre-registered rules: H1 (D ≥ B on human_ok) **fails by one fixture**; H2 (D ≈ C) holds
+(5 vs 4 at half the carry); H3 holds (`explain_detail` ROOT with ≥120 words in D, Dh, Dm);
+H4 holds (no correctness loss with Ponytail or i-have-adhd); H5's threshold (one-liner raises
+human_ok by ≥ 2) is met exactly by P2 (7 vs 5), so the P2 sentence ships as an **opt-in**
+`SAMEWRITE_OUTPUT_HOOK=1` install option, default off, and the same sentence is the first
+sentence of the skill's Output section (one canonical text; drift-tested). n = 8, one repeat:
+direction and instrument validation, not significance.
+
+### Continuation gate
+
+| gate (continuation §19) | result |
+|---|---|
+| behaviour: action-first, scannable, concise, concrete errors, not repetitive, detailed on request | **NOT_PROVEN** for the description alone (5/8 vs 6/8 before); 7/8 with the opt-in one-liner; `explain_detail` and `output_only` ROOT everywhere |
+| token economy: no unjustified persistent overhead | PASS — +36 B always-on for the output clause, −~250 B for the hidden alias, +163 B per session start only when the hook is opted in |
+| correctness | PASS — 7/8 in every arm, identical miss everywhere |
+| completeness on requested detail | PASS — `explain_detail` ≥ 120 words, all facts, in D/Dh/Dm |
+| coexistence Ponytail / i-have-adhd / both | PASS on correctness; one shortening interaction with Ponytail on the security fixture, recorded |
+| no `normal mode` claim | PASS — skill text, tests, README |
+| one canonical runtime | PASS — `edit-discipline` is a hidden 755-byte alias; policy sections exist exactly once |
+
+Verdict for this continuation: **NOT_PROVEN** (human-output gain not shown for the zero-hook
+default at n = 8; shown as direction only for the opt-in one-liner). Everything shipped is
+labelled accordingly.

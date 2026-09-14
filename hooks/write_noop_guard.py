@@ -177,20 +177,8 @@ def heredoc_write(cmd):
     return path, m.group("body") + "\n"
 
 
-def samewrite_disabled():
-    """`samewrite off` / `stop samewrite` (hooks/samewrite_mode.py) leaves one marker,
-    `<state dir>/samewrite-disabled`; every samewrite hook stands down while it exists.
-    Same resolution order as the mode hook — the two must agree or "off" is a lie."""
-    try:
-        d = (os.environ.get("SAMEWRITE_STATE_DIR") or os.environ.get("CLAUDE_CONFIG_DIR")
-             or os.path.join(os.path.expanduser("~"), ".claude"))
-        return os.path.lexists(os.path.join(d, "samewrite-disabled"))
-    except Exception:
-        return False
-
-
 def main():
-    if os.environ.get(ESCAPE) == "1" or samewrite_disabled():
+    if os.environ.get(ESCAPE) == "1":
         allow()
     try:
         raw = sys.stdin.read(MAX_STDIN + 1)

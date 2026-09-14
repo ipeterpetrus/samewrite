@@ -49,42 +49,25 @@ json.dump(d,open(p,"w"),indent=2,ensure_ascii=False); open(p,"a").write("\n")
 print("   entri ditambahkan")
 PY
 
-# Opsional (SAMEWRITE_MODE_HOOK=1): saklar bernama-ruang `stop samewrite` / `samewrite on|off`
-# + injeksi satu kalimat inti saat SessionStart bila SAMEWRITE_CORE=1. Default TIDAK dipasang:
-# tiap byte yang selalu hadir harus membayar dirinya, dan angkanya belum ada (docs/VNEXT.md).
-if [ "${SAMEWRITE_MODE_HOOK:-0}" = "1" ]; then
-  MODE_DST="$(dirname "$DST")/samewrite_mode.py"
-  echo "[3b/4] pasang saklar mode -> $MODE_DST"
-  install -m 0755 "$PKG/samewrite_mode.py" "$MODE_DST"
-  CORE_ENV=""; [ "${SAMEWRITE_CORE:-0}" = "1" ] && CORE_ENV="SAMEWRITE_CORE=1 "
-  "$PY_BIN" - "$SET" "${CORE_ENV}$(q "$PY_BIN") $(q "$MODE_DST") prompt" \
-                     "${CORE_ENV}$(q "$PY_BIN") $(q "$MODE_DST") session" "$MODE_DST" <<'PY'
-import json,shlex,sys
-p, PROMPT, SESSION, MODE_DST = sys.argv[1:5]
+# Opsional (SAMEWRITE_OUTPUT_HOOK=1): satu kalimat output samewrite disuntik saat SessionStart
+# (startup|resume|clear|compact) lewat printf — nol skrip, ~170 byte per sesi. Kalimatnya =
+# kalimat PERTAMA bagian "## Output" di skills/samewrite/SKILL.md (uji drift: tests/test_adapters.py).
+# Pilot presentasi 14-Sep: 7/8 kasus human_ok vs 5/8 tanpa hook (n=8, arah bukan signifikansi).
+if [ "${SAMEWRITE_OUTPUT_HOOK:-0}" = "1" ]; then
+  echo "[3b/4] daftarkan hook SessionStart satu-kalimat output"
+  OUTCMD="printf '%s\\n' 'Lead with the result, blocker, or next action. Use numbered steps only for user actions; omit unchanged state, recaps, and generic closers. Expand when requested.' # samewrite-output-hook"
+  "$PY_BIN" - "$SET" "$OUTCMD" <<'PYX'
+import json,sys
+p, CMD = sys.argv[1], sys.argv[2]
 d = json.load(open(p))
-hooks = d.setdefault("hooks", {})
-def has(ev, path):
-    def owns(cmd):
-        try:
-            return path in shlex.split(cmd)
-        except ValueError:
-            return False
-    return any(owns(h.get("command","")) for m in hooks.get(ev, []) for h in m.get("hooks",[]))
-changed = False
-if not has("UserPromptSubmit", MODE_DST):
-    hooks.setdefault("UserPromptSubmit", []).append(
-        {"hooks":[{"type":"command","command":PROMPT}]}); changed = True
-if not has("SessionStart", MODE_DST):
-    hooks.setdefault("SessionStart", []).append(
-        {"matcher":"startup|resume|clear|compact","hooks":[{"type":"command","command":SESSION}]}); changed = True
-if changed:
-    json.dump(d,open(p,"w"),indent=2,ensure_ascii=False); open(p,"a").write("\n")
-    print("   entri UserPromptSubmit + SessionStart ditambahkan")
-else:
-    print("   sudah terpasang — tak ada perubahan")
-PY
-  printf '{"prompt":"samewrite status"}' | "$PY_BIN" "$MODE_DST" prompt | grep -q "SAMEWRITE status" \
-    && echo "   saklar mode menjawab: OK" || { echo "   GAGAL: saklar mode bisu"; exit 1; }
+ss = d.setdefault("hooks", {}).setdefault("SessionStart", [])
+if any(h.get("command") == CMD for m in ss for h in m.get("hooks", [])):
+    print("   sudah terpasang — tak ada perubahan"); sys.exit(0)
+ss.append({"matcher": "startup|resume|clear|compact", "hooks": [{"type": "command", "command": CMD}]})
+json.dump(d, open(p, "w"), indent=2, ensure_ascii=False); open(p, "a").write("\n")
+print("   entri SessionStart ditambahkan")
+PYX
+  sh -c "$OUTCMD" | grep -q "Lead with the result" && echo "   hook output menjawab: OK" || { echo "   GAGAL: hook output bisu"; exit 1; }
 fi
 
 echo "[4/4] verifikasi konsumen — guard dijalankan lewat jalur nyata"
