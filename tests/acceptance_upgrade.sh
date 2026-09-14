@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# PRE-MERGE LOCAL PLUGIN ACCEPTANCE + UPGRADE 1.0.0 -> 1.1.0 (hardening §12, §13).
+# PRE-MERGE LOCAL PLUGIN ACCEPTANCE + UPGRADE 1.0.0 -> the CANDIDATE in this worktree.
+# The candidate's version is read from .claude-plugin/plugin.json, never hardcoded: a script that
+# prints a version it did not actually test is the same stale-claim defect it exists to catch.
 # NOT part of CI: needs a logged-in Claude Code CLI and spends five small model calls. Run by hand
 # before a release:   SAMEWRITE_CRED=<your config dir>/.credentials.json bash tests/acceptance_upgrade.sh
 # Fresh HOME + CLAUDE_CONFIG_DIR; never the developer profile. Only the credentials file is copied
@@ -18,6 +20,7 @@ cat > "$CFG/settings.json" <<'EOF'
           "PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"rtk hook claude"}]}]}}
 EOF
 PY=/usr/bin/python3
+CAND=$("$PY" -c "import json;print(json.load(open('$REPO/.claude-plugin/plugin.json'))['version'])")
 FSHA() { $PY -c "
 import json,hashlib; d=json.load(open('$CFG/settings.json'))
 for k in ('enabledPlugins','extraKnownMarketplaces'): d.pop(k, None)   # Claude Code's own plugin bookkeeping
@@ -58,17 +61,17 @@ check "1.0.0: edit-discipline listed, samewrite absent" "$(echo "$L0" | cut -d' 
 INST "$W/v100/hooks/install.sh" >/dev/null 2>&1; echo "  1.0.0 install.sh rc=$?"
 check "1.0.0: one guard entry (old quoted form)" "$(GUARD_N)" "1"
 
-echo "=== [2] upgrade to candidate 1.1.0 (marketplace re-pointed at the branch checkout)"
+echo "=== [2] upgrade to candidate $CAND (marketplace re-pointed at the branch checkout)"
 run plugin marketplace remove samewrite >/dev/null 2>&1 || true
 run plugin marketplace add "$REPO" 2>&1 | tail -1 | sed 's/^/  /'
 run plugin install samewrite@samewrite 2>&1 | tail -1 | sed 's/^/  /'
 check "upgrade: exactly one samewrite plugin" "$(run plugin list 2>&1 | grep -c 'samewrite@samewrite')" "1"
-L1=$(listing up110); echo "  listing 1.1.0: $L1"
+L1=$(listing up110); echo "  listing $CAND: $L1"
 check "upgrade: samewrite listed once, edit-discipline hidden" "$(echo "$L1" | cut -d' ' -f1,2)" "samewrite=1 edit-discipline=0"
-INST "$REPO/hooks/install.sh" 2>&1 | grep -E "sudah terpasang|ditambahkan|GAGAL|BATAL" | sed 's/^/  1.1.0 install.sh: /'
+INST "$REPO/hooks/install.sh" 2>&1 | grep -E "sudah terpasang|ditambahkan|GAGAL|BATAL" | sed "s|^|  $CAND install.sh: |"
 check "upgrade: still one guard entry (1.0.0 form recognised, no duplicate)" "$(GUARD_N)" "1"
 B1=$(cat "$CFG/settings.json"); INST "$REPO/hooks/install.sh" >/dev/null 2>&1
-check "1.1 -> install 1.1 again: settings byte-identical (idempotent)" "$([ "$(cat "$CFG/settings.json")" = "$B1" ] && echo same || echo diff)" "same"
+check "candidate reinstalled: settings byte-identical (idempotent)" "$([ "$(cat "$CFG/settings.json")" = "$B1" ] && echo same || echo diff)" "same"
 INST "$REPO/hooks/install.sh" --human-output --no-guard 2>&1 | grep -E "SessionStart|GAGAL|BATAL" | sed 's/^/  --human-output: /'
 NOUT=$($PY -c "import json;d=json.load(open('$CFG/settings.json'));print(sum(h['command'].endswith('# samewrite-output-hook') for m in d['hooks'].get('SessionStart',[]) for h in m['hooks']))")
 check "--human-output: one SessionStart output hook" "$NOUT" "1"
