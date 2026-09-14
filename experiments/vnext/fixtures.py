@@ -283,7 +283,9 @@ FIXTURES = {
             return min(lo, max(hi, x))
     ''')}, ask="clamp() in mod.py is wrong. Reply with ONLY the corrected function as one python "
                 "code block — no prose before or after. Do not edit any file.",
-        facts=[r"def clamp", r"min\(hi,\s*max\(lo,\s*x\)\)|max\(lo,\s*min\(hi,\s*x\)\)"],
+        # any correct composition/argument order — the pilot caught `min(hi, max(x, lo))` scored FAIL
+        facts=[r"def clamp", r"min\((hi|x),\s*(hi|x)\)|max\((lo|x),\s*(lo|x)\)",
+               r"min\(\s*(hi|x)\s*,\s*max\(\s*(lo|x)\s*,\s*(lo|x)\s*\)\s*\)|max\(\s*(lo|x)\s*,\s*min\(\s*(hi|x)\s*,\s*(hi|x)\s*\)\s*\)|min\(\s*max\(\s*(lo|x)\s*,\s*(lo|x)\s*\)\s*,\s*(hi|x)\s*\)|max\(\s*min\(\s*(hi|x)\s*,\s*(hi|x)\s*\)\s*,\s*(lo|x)\s*\)"],
         shape="codeonly", neighbor=None, golden=None, symptom=None),
     # 10 explicit long-form explanation: verbosity requested must not be compressed away
     "explainlong": dict(kind="text", files={"mod.py": D('''

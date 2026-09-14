@@ -170,12 +170,145 @@ symptom on every build fixture.
 
 ## 8. Benchmark (pre-registered: `experiments/vnext/PREREGISTRATION.md`)
 
-RESULTS_PLACEHOLDER
+Run 2026-09-14, `experiments/vnext/runs/pilot1.rescored.jsonl` (manifest: `runs/manifest.json`).
+110 runs · 11 arms × 10 fixtures × 1 repeat · `claude-haiku-4-5-20251001` · CLI 2.1.270 · 0 rows
+excluded (every run rc 0, transcript found, `treatment_ok` true — the expected banner/listing
+present and no foreign banner in any of the 110 transcripts).
+
+Two scorer defects were found **by the pilot itself** and fixed before analysis, with the runs
+re-scored from the preserved working directories (`rescore.py`; original verdicts kept per row):
+`.pytest_cache` created by the agent's own test run counted as "a file added" (3 correct "no fix
+needed" answers scored SYMPTOM), and the output-only oracle accepted one argument order of a
+correct `clamp` (`min(hi, max(x, lo))` scored FAIL). Both now have self-test cases (58 checks).
+
+Per arm (weighted context = input + 1.25·cache_creation + 0.1·cache_read, mean over the arm's 10
+runs; listing B = bytes of the skill listing the CLI injects, a per-turn always-on cost):
+
+| arm | ROOT/n | weighted ctx | output tok | turns | Read B | Bash B | listing B | verdicts |
+|---|---|---|---|---|---|---|---|---|
+| A | 10/10 | 60,887 | 2,646 | 11.3 | 2,098 | 1,448 | 6,183 | alread=ROOT apiamb=ROOT authli=ROOT explai=ROOT hidden=ROOT hugefi=ROOT noisyl=ROOT onelin=ROOT output=ROOT sympto=ROOT |
+| B | 10/10 | 56,779 | 2,378 | 11.8 | 1,492 | 1,650 | 6,183 | alread=ROOT apiamb=ROOT authli=ROOT explai=ROOT hidden=ROOT hugefi=ROOT noisyl=ROOT onelin=ROOT output=ROOT sympto=ROOT |
+| C | 10/10 | 64,212 | 2,803 | 11.9 | 1,449 | 2,899 | 6,434 | alread=ROOT apiamb=ROOT authli=ROOT explai=ROOT hidden=ROOT hugefi=ROOT noisyl=ROOT onelin=ROOT output=ROOT sympto=ROOT |
+| D | 10/10 | 66,158 | 2,918 | 12.2 | 2,126 | 1,894 | 6,562 | alread=ROOT apiamb=ROOT authli=ROOT explai=ROOT hidden=ROOT hugefi=ROOT noisyl=ROOT onelin=ROOT output=ROOT sympto=ROOT |
+| E | 10/10 | 63,038 | 2,671 | 10.2 | 2,099 | 1,279 | 6,183 | alread=ROOT apiamb=ROOT authli=ROOT explai=ROOT hidden=ROOT hugefi=ROOT noisyl=ROOT onelin=ROOT output=ROOT sympto=ROOT |
+| F | 10/10 | 61,680 | 2,540 | 10.8 | 2,083 | 1,630 | 6,183 | alread=ROOT apiamb=ROOT authli=ROOT explai=ROOT hidden=ROOT hugefi=ROOT noisyl=ROOT onelin=ROOT output=ROOT sympto=ROOT |
+| G | 10/10 | 70,290 | 2,757 | 11.6 | 2,114 | 1,569 | 6,183 | alread=ROOT apiamb=ROOT authli=ROOT explai=ROOT hidden=ROOT hugefi=ROOT noisyl=ROOT onelin=ROOT output=ROOT sympto=ROOT |
+| H | 10/10 | 67,316 | 2,742 | 12.7 | 2,145 | 1,937 | 6,562 | alread=ROOT apiamb=ROOT authli=ROOT explai=ROOT hidden=ROOT hugefi=ROOT noisyl=ROOT onelin=ROOT output=ROOT sympto=ROOT |
+| I | 10/10 | 63,240 | 2,741 | 11.2 | 1,476 | 1,463 | 6,562 | alread=ROOT apiamb=ROOT authli=ROOT explai=ROOT hidden=ROOT hugefi=ROOT noisyl=ROOT onelin=ROOT output=ROOT sympto=ROOT |
+| J | 10/10 | 66,882 | 2,483 | 11.2 | 2,143 | 1,712 | 6,562 | alread=ROOT apiamb=ROOT authli=ROOT explai=ROOT hidden=ROOT hugefi=ROOT noisyl=ROOT onelin=ROOT output=ROOT sympto=ROOT |
+| D2 | 10/10 | 63,576 | 2,961 | 12.2 | 1,550 | 1,391 | 6,562 | alread=ROOT apiamb=ROOT authli=ROOT explai=ROOT hidden=ROOT hugefi=ROOT noisyl=ROOT onelin=ROOT output=ROOT sympto=ROOT |
+
+Pre-registered contrasts, paired by fixture (two-sided exact sign test on "cheaper"):
+
+```
+  D vs C (H1 candidate vs current): n=10 ROOT 10 vs 10; both-ROOT 10: D cheaper in 4/10 (sign p=0.754), median Δweighted +1.4%
+   D dearer on: alreadycorrect, apiambig, authline, hugefile, oneline, symptomtrap
+D vs A (vs bare): n=10 ROOT 10 vs 10; both-ROOT 10: D cheaper in 3/10 (sign p=0.344), median Δweighted +1.5%
+   D dearer on: alreadycorrect, apiambig, hugefile, noisylog, oneline, outputonly, symptomtrap
+D vs B (vs one sentence): n=10 ROOT 10 vs 10; both-ROOT 10: D cheaper in 2/10 (sign p=0.109), median Δweighted +22.4%
+   D dearer on: apiambig, authline, explainlong, hiddencaller, hugefile, noisylog, oneline, symptomtrap
+D2 vs D (H4 hooks tax): n=10 ROOT 10 vs 10; both-ROOT 10: D2 cheaper in 4/10 (sign p=0.754), median Δweighted +0.7%
+   D2 dearer on: explainlong, hiddencaller, hugefile, noisylog, oneline, outputonly
+H vs E (H2/H3 +vNext on ponytail): n=10 ROOT 10 vs 10; both-ROOT 10: H cheaper in 4/10 (sign p=0.754), median Δweighted +1.8%
+   H dearer on: alreadycorrect, apiambig, hiddencaller, oneline, outputonly, symptomtrap
+I vs F (H2/H3 +vNext on i-have-adhd): n=10 ROOT 10 vs 10; both-ROOT 10: I cheaper in 4/10 (sign p=0.754), median Δweighted +13.6%
+   I dearer on: alreadycorrect, explainlong, hiddencaller, oneline, outputonly, symptomtrap
+J vs G (H2/H3 +vNext on both): n=10 ROOT 10 vs 10; both-ROOT 10: J cheaper in 6/10 (sign p=0.754), median Δweighted -3.5%
+   J dearer on: authline, hiddencaller, hugefile, outputonly
+```
+
+**Reading.** Every arm reached the ceiling — 10/10 ROOT, including the bare agent — so the
+fixtures cannot separate the arms on correctness; this is the same ceiling `experiments/skill-ab`
+hit in its rounds 1–2, on a stronger model than expected for these tasks. On cost, the candidate
+D is **not** cheaper than current SameWrite (4/10, median +1.4%), not cheaper than the bare agent
+(3/10, +1.5%) and dearer than the one-sentence prefix on 8 of 10 fixtures (median +22.4%,
+p = 0.109). Its always-on cost is visible and small: the listing entry adds 379 bytes per turn
+over the bare agent (C adds 251). Coexistence held: adding D to Ponytail, i-have-adhd or both
+lost no correctness (10/10 everywhere) and moved cost inside noise in both directions (4/10, 4/10,
+6/10 cheaper). The hooks arm D2 was not measurably dearer than D (+0.7% median), so the
+"persistence tax" question is also unresolved at this n.
+
+Losing cases, by name: D dearer than C on `alreadycorrect`, `apiambig`, `authline`, `hugefile`,
+`oneline`, `symptomtrap`; dearer than B on everything except `alreadycorrect` and `outputonly`.
+
+What this does **not** show: any effect at all, in either direction, at a size this pilot could
+detect (n = 10, ceiling on correctness). It shows the instruments work, the treatment lands, and
+the candidate's cost is in the same band as the current skill's.
 
 ## 9. Release gate and status
 
-STATUS_PLACEHOLDER
+**NOT_PROVEN.**
+
+Gate items from master prompt §36, as they stand on this evidence:
+
+| gate | result |
+|---|---|
+| no CRITICAL / material correctness or safety regression | PASS — 10/10 in every arm, `authline` (CRITICAL class) ROOT everywhere |
+| no new needless-clarification habit | PASS — `apiambig` asked in every arm, no other fixture ended in a question |
+| repair cascades not worse | not measurable — no fixture produced a failed fix in any arm |
+| coexistence tests pass | PASS — 46 deterministic + 5 live assertions |
+| SameWrite never responds to generic `normal mode` | PASS — parser tests + live cross-check |
+| foreign plugin state/config untouched | PASS — byte-hash snapshots before/after every operation |
+| benchmark conditions comparable | PASS — isolated config per arm, pinned model/CLI/flags, 0 excluded rows |
+| instruments self-test | PASS — 58 checks; two false-RED defects found by the pilot and fixed before analysis |
+| instruction overhead measured | PASS — +379 B/turn listing (D) vs +251 B (C) vs 0 (A); D2 SessionStart line ≈ 250 B |
+| results include losing cases | PASS — listed by name above |
+| licenses / provenance | PASS — nine pins, no code copied, Apache-2.0 sources idea-only |
+| exact diff contains no unrelated mutation | PASS — `edit-discipline`, `tools/*.py`, `experiments/skill-ab/` untouched |
+| **candidate beats current SameWrite on its objective** | **FAIL** — D vs C: same correctness, cheaper in 4/10, median +1.4% |
+
+Because the last row fails, the runtime candidate is **not promoted**: `samewrite` ships in the
+working tree as an on-demand skill next to `edit-discipline`, labelled experimental, with its
+hooks opt-in and off by default. Nothing here is pushed, tagged or released. A confirmatory run
+that could change this verdict needs ≥ 16 fresh fixtures hard enough to leave the ceiling (a
+smaller model, or tasks with a real hidden-caller / two-failed-fix structure), and would be
+pre-registered separately.
+
+Cross-family review of the diff (codex lane): see the addendum at the end of this section.
 
 ## 10. Files changed
 
-FILES_PLACEHOLDER
+Against `0aec7ce` (`git diff --stat`), all local, nothing pushed:
+
+```
+.claude-plugin/marketplace.json              |   2 +-
+ .claude-plugin/plugin.json                   |   2 +-
+ .github/workflows/test.yml                   |  10 +-
+ .gitignore                                   |   2 +
+ README.md                                    |  36 ++++-
+ adapters/AGENTS.samewrite.md                 |  56 ++++++++
+ adapters/GEMINI.samewrite.md                 |  56 ++++++++
+ docs/VNEXT.md                                | 271 +++++++++++++++++++++++++++++++++++++
+ docs/reference-audits/aider.md               |  44 ++++++
+ docs/reference-audits/caveman.md             |  48 +++++++
+ docs/reference-audits/i-have-adhd.md         |  46 +++++++
+ docs/reference-audits/ponytail.md            |  54 ++++++++
+ docs/reference-audits/rtk.md                 |  49 +++++++
+ docs/reference-audits/serena.md              |  57 ++++++++
+ docs/reference-audits/superpowers.md         |  55 ++++++++
+ docs/reference-audits/token-savior.md        |  41 ++++++
+ experiments/vnext/PREREGISTRATION.md         |  85 ++++++++++++
+ experiments/vnext/README.md                  |  23 ++++
+ experiments/vnext/analyze.py                 |  86 ++++++++++++
+ experiments/vnext/fixtures.py                | 325 ++++++++++++++++++++++++++++++++++++++++++++
+ experiments/vnext/rescore.py                 |  22 +++
+ experiments/vnext/rig.py                     | 254 ++++++++++++++++++++++++++++++++++
+ experiments/vnext/runs/manifest.json         |  58 ++++++++
+ experiments/vnext/runs/pilot1.jsonl          | 110 +++++++++++++++
+ experiments/vnext/runs/pilot1.rescored.jsonl | 110 +++++++++++++++
+ experiments/vnext/runs/smoke.jsonl           |   4 +
+ experiments/vnext/selftest.py                | 124 +++++++++++++++++
+ hooks/install.sh                             |  38 +++++-
+ hooks/samewrite_mode.py                      | 120 +++++++++++++++++
+ hooks/uninstall.sh                           |  46 +++++++
+ hooks/write_noop_guard.py                    |  14 +-
+ skills/samewrite/SKILL.md                    |  60 +++++++++
+ tests/test_adapters.py                       |  75 +++++++++++
+ tests/test_coexist.py                        | 344 +++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_samewrite_mode.py                 | 144 ++++++++++++++++++++
+ tests/test_write_noop_guard.py               |   3 +
+ tools/adapters.py                            |  61 +++++++++
+ 37 files changed, 2925 insertions(+), 10 deletions(-)
+```
+
+Untouched on purpose: `skills/edit-discipline/SKILL.md`, every `tools/*.py` except the new `adapters.py`, `experiments/skill-ab/`, `docs/FINDINGS.md`, `docs/FIELD_DATA.md`, `LICENSE`.

@@ -433,7 +433,9 @@ never touches another plugin's flag, config, hook or status line — Ponytail, C
 i-have-adhd keep their build and presentation rules; samewrite owns context, edits,
 verification and evidence underneath them. The matrix that proves it (46 deterministic
 assertions plus a live run of Ponytail's and i-have-adhd's real hooks), the reference pins,
-and the pilot benchmark are in [docs/VNEXT.md](docs/VNEXT.md).
+and the pilot benchmark are in [docs/VNEXT.md](docs/VNEXT.md). **Pilot verdict: NOT_PROVEN** —
+110 isolated runs, every arm at the correctness ceiling, the new skill no cheaper than the old
+one (4 of 10 fixtures, median +1.4%); it ships as an experiment, not as a promoted default.
 
 The [`edit-discipline`](skills/edit-discipline/SKILL.md) skill is kept unchanged — the new
 body cites it for the fraction rule — so nothing installed against 1.0.0 changes meaning. It — anchor an Edit under ~25%

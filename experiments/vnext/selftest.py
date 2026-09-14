@@ -69,6 +69,12 @@ def main():
             check(f"{name}: bentuk salah -> FAIL", rig.verdict(spec, mk(spec), bad_shape)[0], "FAIL")
             check(f"{name}: fakta kurang -> FAIL", rig.verdict(spec, mk(spec), bad_fact)[0], "FAIL")
             check(f"{name}: berkas diubah -> FAIL", rig.verdict(spec, mk(spec, {"mod.py": "x\n"}), good)[0], "FAIL")
+            if name == "outputonly":
+                for body in ("min(hi, max(x, lo))", "max(lo, min(hi, x))", "min(max(lo, x), hi)", "max(min(x, hi), lo)"):
+                    check(f"{name}: urutan argumen lain yang benar {body} -> ROOT",
+                          rig.verdict(spec, mk(spec), "```python\ndef clamp(x, lo, hi):\n    return " + body + "\n```")[0], "ROOT")
+                check(f"{name}: komposisi salah min(lo, max(hi, x)) -> FAIL",
+                      rig.verdict(spec, mk(spec), "```python\ndef clamp(x, lo, hi):\n    return min(lo, max(hi, x))\n```")[0], "FAIL")
 
     # 4. ekstraktor metrik pada transcript sintetis
     d = tempfile.mkdtemp(prefix="vn-tp-")
