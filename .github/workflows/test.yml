@@ -32,6 +32,8 @@ jobs:
         run: python3 tests/test_adapters.py
       - name: coexistence matrix (Ponytail / i-have-adhd / Caveman surfaces)
         run: python3 tests/test_coexist.py
+      - name: offline optimizer (privacy canary, corruption, zero policy mutation)
+        run: python3 tests/test_optimize.py
       - name: benchmark instruments self-test (GOOD -> GREEN, BAD -> RED, no model calls)
         run: python3 experiments/vnext/selftest.py
       - name: presentation instruments self-test (prose classifiers + per-case contracts)

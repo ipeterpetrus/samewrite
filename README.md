@@ -174,10 +174,12 @@ hooks/install.sh · uninstall.sh   idempotent, foreign-preserving, exact-path ow
 tools/adapters.py           generate adapters/ (AGENTS.md / GEMINI.md form); --check fails CI on drift
 tools/carry.py · skills.py · prefix.py · bashcost.py · b2t_validate.py · extract.py · simulate.py
                             measure your own transcripts (read-only, stdlib only)
+tools/optimize.py           read those aggregates offline: where cost is concentrated, what moved,
+                            and whether anything justifies an experiment — or NO_ACTION
 experiments/                skill-ab (462 runs) · vnext (110) · presentation (64 pilot + 256 confirmatory)
                             — rigs, fixtures, self-tests, pre-registrations, every run ever scored
 docs/VNEXT.md               build report · docs/RELEASE_NOTES_1.1.0.md · docs/reference-audits/
-tests/                      224 assertions in eight suites, mutation-tested; CI on Python 3.9 and 3.12
+tests/                      282 assertions in nine suites, mutation-tested; CI on Python 3.9 and 3.12
 ```
 
 Measure your own sessions — nothing installed, nothing written:
@@ -190,8 +192,13 @@ python3 tools/carry.py --history ~/carry_history.jsonl   # append this run; repo
 ```
 
 The optimization loop this repo practises: measure (`carry.py`, the guard ledger) → compare history
-(`--history`) → name the largest carry source → write a candidate change → pre-register and
-benchmark it (`experiments/`) → promote by pull request. Nothing promotes itself.
+(`--history`) → `python3 tools/optimize.py`, which reads those aggregates offline and either says
+`NO_ACTION` or names a candidate with the experiment it implies → pre-register and benchmark it
+(`experiments/`) → promote by pull request. The optimizer calls no model, opens no socket, injects
+nothing into any model's context and never edits `skills/`, `hooks/` or configuration; a canary
+secret planted in a transcript, a listing and the ledger is proved absent from every output
+(`tests/test_optimize.py`). Full workflow and data contract: [docs/EVIDENCE_LOOP.md](docs/EVIDENCE_LOOP.md);
+open candidates: [`experiments/candidates/`](experiments/candidates/). Nothing promotes itself.
 
 Run the suites: `python3 -m pip install -r requirements-test.txt` (pytest is the only test-time
 dependency; the runtime is standard library) then `for t in tests/test_*.py; do python3 $t; done`.

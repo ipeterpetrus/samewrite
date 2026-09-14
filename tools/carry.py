@@ -31,10 +31,36 @@ B2T = 1 / 3.14          # chars -> tokens, measured on o200k over this corpus. S
                         # ASCII, and the constant was calibrated on the same len().
 
 
+HISTORY_SCHEMA = 1            # bump when a field's MEANING changes, never for an addition
+
+
+def samewrite_version():
+    """Version of the SameWrite that wrote the record; '' when it cannot be read."""
+    try:
+        p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         ".claude-plugin", "plugin.json")
+        with open(p, encoding="utf-8") as fh:
+            return str(json.load(fh).get("version") or "")
+    except Exception:
+        return ""
+
+
 def scan(path):
-    """-> (turns, [(turn, bytes, source)], usage_counter). Sizes only."""
+    """-> (turns, [(turn, bytes, source)], usage_counter). Sizes only.
+
+    Thin wrapper over scan_full() so existing callers keep their 3-tuple."""
+    turns, items, usage, _meta = scan_full(path)
+    return turns, items, usage
+
+
+def scan_full(path):
+    """-> (turns, items, usage, meta). `meta` holds the population identity a later
+    comparison needs — which CLI wrote the transcript and which models answered — and
+    nothing else: no path, no prompt, no content. Same single pass over the file, so
+    the metadata costs one dict lookup per line rather than a second read."""
     turn, id2name, items = 0, {}, []
     usage = collections.Counter()
+    runtimes, models = collections.Counter(), collections.Counter()
     for line in open(path, errors="replace"):
         line = line.strip()
         if not line:
@@ -43,6 +69,10 @@ def scan(path):
             o = json.loads(line)
         except Exception:
             continue
+
+        v = o.get("version")
+        if isinstance(v, str) and v:
+            runtimes[v] += 1
 
         att = o.get("attachment")
         if isinstance(att, dict):           # hook output, skill listing, reminders
@@ -54,6 +84,9 @@ def scan(path):
 
         kind, msg = o.get("type"), o.get("message")
         if kind == "assistant" and isinstance(msg, dict):
+            m = msg.get("model")
+            if isinstance(m, str) and m:
+                models[m] += 1
             u = msg.get("usage") or {}
             if u:
                 turn += 1
@@ -84,7 +117,7 @@ def scan(path):
                     items.append((turn, n, "result:" + str(id2name.get(c.get("tool_use_id")))))
                 elif c.get("type") == "text":
                     items.append((turn, len(c.get("text", "")), "human"))
-    return turn, items, usage
+    return turn, items, usage, {"runtimes": runtimes, "models": models}
 
 
 def bucket(src):
@@ -101,13 +134,14 @@ def bucket(src):
 
 def accumulate(paths, min_turns=50):
     carry, size, usage = collections.Counter(), collections.Counter(), collections.Counter()
+    runtimes, models = collections.Counter(), collections.Counter()
     turns = sessions = 0
     unreadable = short = scanned = 0
     lengths = []
     for p in paths:
         scanned += 1
         try:
-            N, items, u = scan(p)
+            N, items, u, meta = scan_full(p)
         except OSError:
             unreadable += 1
             continue
@@ -118,12 +152,14 @@ def accumulate(paths, min_turns=50):
         turns += N
         lengths.append(N)
         usage.update(u)
+        runtimes.update(meta["runtimes"])
+        models.update(meta["models"])
         for (i, n, src) in items:
             b = bucket(src)
             carry[b] += n * (N - i)
             size[b] += n
     return dict(sessions=sessions, turns=turns, lengths=sorted(lengths),
-                carry=carry, size=size, usage=usage,
+                carry=carry, size=size, usage=usage, runtimes=runtimes, models=models,
                 unreadable=unreadable, short=short, scanned=scanned)
 
 
@@ -253,8 +289,13 @@ def history(path, a, C):
     Stores shares and byte counts only: no paths, no filenames, no content.
     """
     T = a["turns"] or 1
-    now = {"ts": int(time.time()), "sessions": a["sessions"], "turns": a["turns"],
+    now = {"schema_version": HISTORY_SCHEMA, "samewrite_version": samewrite_version(),
+           "record_type": "carry_run",
+           "ts": int(time.time()), "sessions": a["sessions"], "turns": a["turns"],
            "carry_bytes": C, "scanned": a.get("scanned", 0),
+           # population identity, for comparisons that must not merge different worlds:
+           # which CLI wrote the transcripts, which models answered. Counts only.
+           "runtimes": dict(a.get("runtimes", {})), "models": dict(a.get("models", {})),
            "shares": {k: round(100 * v / C, 4) for k, v in a["carry"].most_common()},
            # Share berjumlah 100%: satu sumber naik MEMAKSA yang lain turun walau perilaku
            # mereka tak berubah sedikit pun. B/turn tidak terikat konstrain itu, jadi delta
