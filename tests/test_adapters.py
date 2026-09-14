@@ -27,9 +27,29 @@ def main():
     # 1. adapter yang ter-commit = hasil generate (drift nol)
     r = subprocess.run([sys.executable, adapters.__file__, "--check"], capture_output=True, text=True)
     check("adapters --check hijau", r.returncode, 0)
+    desc = [l for l in fm.splitlines() if l.startswith("description:")][0].split(":", 1)[1].strip()
     for name, text in adapters.render().items():
         check(f"{name}: badan byte-identik dengan SKILL.md", text.endswith(body), True)
-        check(f"{name}: tak membawa front matter Claude", "name: samewrite" in text, False)
+        if name.endswith("/SKILL.md"):
+            # Adapter berbentuk SKILL: host memuatnya sebagai skill, jadi front matter WAJIB ada —
+            # tapi front matter milik HOST itu, bukan salinan milik Claude.
+            check(f"{name}: membawa front matter host", text.startswith("---\n"), True)
+            check(f"{name}: deskripsi Claude 391 karakter TIDAK disalin", desc in text, False)
+        else:
+            # Adapter berbentuk berkas instruksi: front matter apa pun hanya jadi sampah teks.
+            check(f"{name}: tak membawa front matter Claude", "name: samewrite" in text, False)
+
+    # Hermes memotong deskripsi ke 60 karakter DI PROMPT-nya. Deskripsi yang lebih panjang tidak
+    # gagal — ia kehilangan ekor peruteannya diam-diam, dan itu lebih buruk daripada gagal.
+    h = adapters.render()["hermes/samewrite/SKILL.md"]
+    hdesc = [l for l in h.splitlines() if l.startswith("description:")][0].split(":", 1)[1].strip()
+    check("hermes: deskripsi muat dalam batas host (60)", len(hdesc) <= adapters.HERMES_DESC_LIMIT, True)
+    check("hermes: deskripsi tidak kosong", bool(hdesc), True)
+    check("hermes: name sama dengan nama direktori (syarat linter Hermes)",
+          [l for l in h.splitlines() if l.startswith("name:")][0].split(":", 1)[1].strip(),
+          "samewrite")
+    check("hermes: nol penanda khusus Claude yang diabaikan diam-diam di sana",
+          "disable-model-invocation" in h, False)
 
     # 2. --check benar-benar bisa MERAH: mutasi adapter di salinan, harap exit 1
     with tempfile.TemporaryDirectory() as d:

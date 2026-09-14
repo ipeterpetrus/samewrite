@@ -17,7 +17,7 @@ With no path at all it discovers every Claude Code profile on the machine and sa
 stderr which ones it read — a number from one profile reported as "your sessions" is
 the quiet error this replaces.
 """
-import argparse, collections, json, os, sys, time
+import argparse, collections, json, os, re, sys, time, uuid
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import profiles  # multi-profile discovery; see tools/profiles.py
 
@@ -31,11 +31,49 @@ B2T = 1 / 3.14          # chars -> tokens, measured on o200k over this corpus. S
                         # ASCII, and the constant was calibrated on the same len().
 
 
+HISTORY_SCHEMA = 2            # bump when a field's MEANING changes, never for an addition.
+                              # 0 = pre-1.2 records with no schema field · 1 = + population identity
+                              # 2 = + run_id / scope_id / evidence quality (multi-agent safety)
+MAX_LINE = 8 * 1024 * 1024    # a single transcript line larger than this is skipped and COUNTED:
+                              # one pathological tool result must not become unbounded memory, and
+                              # must not silently shrink the corpus either (evidence goes PARTIAL)
+SAFE_LABEL = re.compile(r"[\x00-\x1f\x7f-\x9f]")   # control bytes never belong in a label
+MAX_RECORD = 1 << 20          # a history record larger than this is not appended: a partial giant
+                              # line is the one shape a concurrent append can actually tear
+
+
+def samewrite_version():
+    """Version of the SameWrite that wrote the record; '' when it cannot be read."""
+    try:
+        p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         ".claude-plugin", "plugin.json")
+        with open(p, encoding="utf-8") as fh:
+            return str(json.load(fh).get("version") or "")
+    except Exception:
+        return ""
+
+
 def scan(path):
-    """-> (turns, [(turn, bytes, source)], usage_counter). Sizes only."""
+    """-> (turns, [(turn, bytes, source)], usage_counter). Sizes only.
+
+    Thin wrapper over scan_full() so existing callers keep their 3-tuple."""
+    turns, items, usage, _meta = scan_full(path)
+    return turns, items, usage
+
+
+def scan_full(path):
+    """-> (turns, items, usage, meta). `meta` holds the population identity a later
+    comparison needs — which CLI wrote the transcript and which models answered — and
+    nothing else: no path, no prompt, no content. Same single pass over the file, so
+    the metadata costs one dict lookup per line rather than a second read."""
     turn, id2name, items = 0, {}, []
     usage = collections.Counter()
+    runtimes, models = collections.Counter(), collections.Counter()
+    oversize = 0
     for line in open(path, errors="replace"):
+        if len(line) > MAX_LINE:              # counted, never silently dropped
+            oversize += 1
+            continue
         line = line.strip()
         if not line:
             continue
@@ -43,6 +81,10 @@ def scan(path):
             o = json.loads(line)
         except Exception:
             continue
+
+        v = o.get("version")
+        if isinstance(v, str) and v:
+            runtimes[v] += 1
 
         att = o.get("attachment")
         if isinstance(att, dict):           # hook output, skill listing, reminders
@@ -54,6 +96,9 @@ def scan(path):
 
         kind, msg = o.get("type"), o.get("message")
         if kind == "assistant" and isinstance(msg, dict):
+            m = msg.get("model")
+            if isinstance(m, str) and m:
+                models[m] += 1
             u = msg.get("usage") or {}
             if u:
                 turn += 1
@@ -84,11 +129,17 @@ def scan(path):
                     items.append((turn, n, "result:" + str(id2name.get(c.get("tool_use_id")))))
                 elif c.get("type") == "text":
                     items.append((turn, len(c.get("text", "")), "human"))
-    return turn, items, usage
+    return turn, items, usage, {"runtimes": runtimes, "models": models, "oversize": oversize}
 
 
 def bucket(src):
-    """Collapse sources into the buckets a rule can actually target."""
+    """Collapse sources into the buckets a rule can actually target.
+
+    Labels leave this function and go straight to a terminal, a JSON file and a candidate
+    specification, and some of them (attachment types) come from the transcript rather than from
+    this file. A transcript is untrusted input: control bytes in a label could rewrite a terminal
+    line or hide a number. Sanitising here covers every caller at once."""
+    src = SAFE_LABEL.sub("", str(src))[:64] or "(unnamed)"
     if src in ("prose", "human") or src.startswith("attach:"):
         return src
     tool = src.split(":", 1)[1] if ":" in src else src
@@ -99,18 +150,33 @@ def bucket(src):
     return "other tools"
 
 
-def accumulate(paths, min_turns=50):
+def accumulate(paths, min_turns=50, max_files=0):
     carry, size, usage = collections.Counter(), collections.Counter(), collections.Counter()
+    runtimes, models = collections.Counter(), collections.Counter()
     turns = sessions = 0
-    unreadable = short = scanned = 0
+    unreadable = short = scanned = oversize = 0
+    skipped_by_limit = 0
+    total_paths = len(paths)
     lengths = []
+    # A bound has to mean "the most RECENT N", not "the first N the filesystem listed". An
+    # alphabetical prefix of a long-lived archive is a sample of whatever was created first, which
+    # for a 24x7 population is the least informative slice there is.
+    if max_files and len(paths) > max_files:
+        try:
+            paths = sorted(paths, key=lambda q: os.path.getmtime(q), reverse=True)[:max_files]
+        except OSError:
+            paths = list(paths)[:max_files]
     for p in paths:
         scanned += 1
         try:
-            N, items, u = scan(p)
+            N, items, u, meta = scan_full(p)
         except OSError:
             unreadable += 1
             continue
+        except Exception:                      # a transcript that cannot be parsed at all
+            unreadable += 1
+            continue
+        oversize += meta.get("oversize", 0)
         if N < min_turns:                   # stubs and aborted sessions carry nothing
             short += 1
             continue
@@ -118,13 +184,25 @@ def accumulate(paths, min_turns=50):
         turns += N
         lengths.append(N)
         usage.update(u)
+        runtimes.update(meta["runtimes"])
+        models.update(meta["models"])
         for (i, n, src) in items:
             b = bucket(src)
             carry[b] += n * (N - i)
             size[b] += n
+    if max_files and scanned >= max_files:
+        skipped_by_limit = max(total_paths - max_files, 0)
+    # Provenance, not decoration: an analyser that cannot tell a complete sweep from a sweep that
+    # hit unreadable files or a file cap will happily call a bounded corpus the population.
+    quality = "COMPLETE"
+    if unreadable or oversize or skipped_by_limit:
+        quality = "PARTIAL"
+    if sessions == 0:
+        quality = "INVALID" if scanned else "EMPTY"
     return dict(sessions=sessions, turns=turns, lengths=sorted(lengths),
-                carry=carry, size=size, usage=usage,
-                unreadable=unreadable, short=short, scanned=scanned)
+                carry=carry, size=size, usage=usage, runtimes=runtimes, models=models,
+                unreadable=unreadable, short=short, scanned=scanned, oversize=oversize,
+                skipped_by_limit=skipped_by_limit, quality=quality)
 
 
 # Relative price of one token in each bucket, base input = 1.0. A bucket's share of the
@@ -244,7 +322,15 @@ def trend(records, key, min_n=4):
     return {"n": n, "days": xs[-1], "slope": slope, "mean": mean, "sd": sd, "z": z}
 
 
-def history(path, a, C):
+def new_run_id():
+    """Opaque, collision-resistant, carries nothing about the machine or the user.
+
+    Two agents can legitimately produce the same timestamp, turn count and shares; identity by
+    metrics would merge two independent observations into one and undercount the population."""
+    return uuid.uuid4().hex
+
+
+def history(path, a, C, scope_id="default", workload_class=""):
     """Append this run's shares and compare against the previous one.
 
     An observer that keeps no record can only ever say what today looks like. With a
@@ -253,8 +339,20 @@ def history(path, a, C):
     Stores shares and byte counts only: no paths, no filenames, no content.
     """
     T = a["turns"] or 1
-    now = {"ts": int(time.time()), "sessions": a["sessions"], "turns": a["turns"],
+    now = {"schema_version": HISTORY_SCHEMA, "samewrite_version": samewrite_version(),
+           "record_type": "carry_run", "run_id": new_run_id(),
+           # scope = the population this record belongs to. Merging a builder agent's sessions
+           # with a reviewer agent's produces a trend neither of them had.
+           "scope_id": str(scope_id or "default")[:64],
+           "workload_class": str(workload_class or "")[:32],
+           "evidence_quality": a.get("quality", "COMPLETE"),
+           "unreadable": a.get("unreadable", 0), "oversize": a.get("oversize", 0),
+           "skipped_by_limit": a.get("skipped_by_limit", 0),
+           "ts": int(time.time()), "sessions": a["sessions"], "turns": a["turns"],
            "carry_bytes": C, "scanned": a.get("scanned", 0),
+           # population identity, for comparisons that must not merge different worlds:
+           # which CLI wrote the transcripts, which models answered. Counts only.
+           "runtimes": dict(a.get("runtimes", {})), "models": dict(a.get("models", {})),
            "shares": {k: round(100 * v / C, 4) for k, v in a["carry"].most_common()},
            # Share berjumlah 100%: satu sumber naik MEMAKSA yang lain turun walau perilaku
            # mereka tak berubah sedikit pun. B/turn tidak terikat konstrain itu, jadi delta
@@ -284,11 +382,28 @@ def history(path, a, C):
     # than it, so the size of the record never turns into extra syscalls, and Linux
     # serialises appends to a regular file. An os.write() version was written, measured
     # against this one, and dropped: identical syscall count, so it fixed nothing.
+    line = json.dumps(now, ensure_ascii=False) + "\n"
+    if len(line.encode("utf-8")) > MAX_RECORD:      # never append what a concurrent writer could tear
+        return ["", "  history: record too large to append safely — not written."]
     try:
-        with open(path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(now, ensure_ascii=False) + "\n")
+        with open(path, "a+", encoding="utf-8") as fh:
+            # A machine that died mid-append leaves a line with no newline. Appending straight
+            # after it would GLUE this record to the fragment and destroy a good record as well
+            # as the torn one: two losses from one crash. Cost of the check is one seek.
+            fh.seek(0, os.SEEK_END)
+            if fh.tell():
+                fh.seek(fh.tell() - 1)
+                if fh.read(1) != "\n":
+                    fh.write("\n")
+            fh.write(line)
     except OSError:
         pass                                   # observing must not break measuring
+    except UnicodeDecodeError:                 # a non-UTF-8 tail: start a fresh line, lose nothing
+        try:
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write("\n" + line)
+        except OSError:
+            pass
     if not prev:
         return ["", f"  history: first record written to {os.path.basename(path)} — "
                     "run again later and this section will show what moved."]
@@ -298,6 +413,9 @@ def history(path, a, C):
     # Kriterianya ISI, bukan jumlah berkas. Rotasi log memecah satu transkrip jadi dua
     # tanpa mengubah satu turn pun — memakai jumlah berkas akan menolak perbandingan yang
     # sah. Turn adalah hal yang benar-benar diukur, jadi turn yang menentukan sebanding.
+    if str(prev.get("scope_id") or "default") != now["scope_id"]:
+        return ["", f"  previous record belongs to scope {prev.get('scope_id') or 'default'!r}, "
+                    f"this one to {now['scope_id']!r} — different populations, no delta reported."]
     p_turn = prev.get("turns") or 0
     n_turn = now["turns"] or 0
     if p_turn and n_turn and (max(p_turn, n_turn) / min(p_turn, n_turn)) > 1.5:
@@ -367,6 +485,14 @@ def main():
     ap.add_argument("--markdown", action="store_true")
     ap.add_argument("--min-turns", type=int, default=50,
                     help="ignore sessions shorter than this (default 50)")
+    ap.add_argument("--scope-id", default="default",
+                    help="opaque label for the population this run belongs to (one agent, one role, "
+                         "one profile). Records from different scopes are never compared.")
+    ap.add_argument("--workload-class", default="",
+                    help="optional opaque low-cardinality label; a change in it is a workload shift, "
+                         "not a regression")
+    ap.add_argument("--max-files", type=int, default=0,
+                    help="bounded mode: scan at most N transcripts; the record is marked PARTIAL")
     ap.add_argument("--history", metavar="PATH", default=None,
                     help="append this run's shares to PATH and print what moved since the "
                          "previous run. Shares and counts only — no paths, no content.")
@@ -380,13 +506,14 @@ def main():
     line = profiles.note(paths, roots, bool(args.files))
     if line:
         print(line, file=sys.stderr)   # stderr: --markdown output stays pipeable
-    a = accumulate(paths, args.min_turns)
+    a = accumulate(paths, args.min_turns, max_files=args.max_files)
     b2t = (1.0 / args.b2t) if args.b2t else None
     sys.stdout.write(render(a, args.markdown, b2t))
     if args.history:
         C = sum(a["carry"].values())
         if C:
-            sys.stdout.write("\n".join(history(args.history, a, C)) + "\n")
+            sys.stdout.write("\n".join(history(args.history, a, C, scope_id=args.scope_id,
+                                                workload_class=args.workload_class)) + "\n")
     # exit non-zero when nothing was recognised: a zero-record run is a schema mismatch,
     # not a finding, and a pipeline must be able to tell the two apart.
     # Exit bukan-nol menandai SCHEMA MISMATCH ("tak ada record dikenali"), bukan "carry nol".
