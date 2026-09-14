@@ -7,3 +7,4 @@ experiments/vnext/cfg_vnext/
 experiments/vnext/runs/*.log
 experiments/presentation/cfg_pres/
 experiments/presentation/runs/*.log
+experiments/presentation/cfg_probe/
