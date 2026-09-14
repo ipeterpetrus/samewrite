@@ -12,8 +12,8 @@ hook, and the measurement tools behind every number here — including the exper
 | the same intent as a 4.7 kB always-on block | **−0.8%** over the sentence (p = 0.86) | pre-registered A/B |
 | this skill vs the previous SameWrite on correctness and cost | non-inferior: 26 vs 25 correct of 32; cost within noise | confirmatory run, 16 fresh cases × 2 reps |
 
-> **Status:** 1.1.0 is a release **candidate** on [PR #2](https://github.com/ipeterpetrus/samewrite/pull/2).
-> The marketplace path below installs whatever `main` carries — 1.0.0 until the PR is merged.
+> **Status:** 1.1.0 is on `main` and is what the marketplace path below installs.
+> Upgrading from 1.0.0 is covered in [Install](#install).
 
 ## Install
 

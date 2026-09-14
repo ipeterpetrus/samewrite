@@ -1,6 +1,7 @@
 # SameWrite vNext — build report (2026-09-14/15)
 
-**CURRENT state is §13 (release-candidate pass) on top of §12 (hardening + confirmatory run).** §1–§9 are the first build (HISTORICAL:
+**Released as v1.1.0** — PR #2 merged into `main` as merge commit `835ecb8` (ancestry preserved).
+**CURRENT state is §13 (release pass) on top of §12 (hardening + confirmatory run).** §1–§9 are the first build (HISTORICAL:
 the mode machinery they describe was removed in §11), §11 the continuation (SUPERSEDED where §12
 differs). Everything is measured here, labelled `EXTERNALLY_REPORTED`, or labelled `UNTESTED`.
 
@@ -611,7 +612,7 @@ Per hardening §27, `READY_TO_MERGE` requires `HUMAN_OUTPUT=PROVEN`. It is not.
 | DUPLICATE_RUNTIME / NORMAL_MODE_CLAIMED | NO / NO |
 | BENCHMARK_INSTRUMENTS / INFRA separated from model failure | SELFTESTED (86 + 38 + 78) / YES |
 
-**STATUS = NOT_READY_TO_MERGE** on the human-output gate alone. Everything else is green. The P2
+**STATUS = NOT_READY_TO_MERGE** on the human-output gate alone — the verdict as of §12, **superseded by §13.1**, which retired that gate from the core release criteria. Everything else is green. The P2
 sentence stays opt-in (`SAMEWRITE_OUTPUT_HOOK=1`), off by default; the default remains the
 description-only skill, whose correctness and cost are non-inferior to the previous SameWrite (D vs B:
 26 vs 25 ROOT, 23 vs 22 human_ok). The Owner may still merge as an experimental release with these

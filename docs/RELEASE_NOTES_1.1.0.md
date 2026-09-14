@@ -1,4 +1,4 @@
-# SameWrite 1.1.0 — release notes (draft; no tag or GitHub Release until `main` carries it)
+# SameWrite 1.1.0 — release notes
 
 **One sentence.** One canonical `samewrite` skill that spends a coding agent's tokens where they
 matter — context, tool output, edits, retries — and leaves evidence that can fail; the measurement
