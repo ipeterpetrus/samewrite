@@ -12,7 +12,9 @@ hook, and the measurement tools behind every number here — including the exper
 | the same intent as a 4.7 kB always-on block | **−0.8%** over the sentence (p = 0.86) | pre-registered A/B |
 | this skill vs the previous SameWrite on correctness and cost | non-inferior: 26 vs 25 correct of 32; cost within noise | confirmatory run, 16 fresh cases × 2 reps |
 
-> **Status:** 1.1.0 is on `main` and is what the marketplace path below installs.
+> **Status:** 1.1.0 is on `main` and is what the marketplace path below installs. 1.2.0 is in
+> review: the skill and hooks are byte-identical to 1.1.0, and everything in it is the measurement
+> layer hardened for many agents running continuously ([release notes](docs/RELEASE_NOTES_1.2.0.md)).
 > Upgrading from 1.0.0 is covered in [Install](#install).
 
 ## Install
@@ -176,10 +178,13 @@ tools/carry.py · skills.py · prefix.py · bashcost.py · b2t_validate.py · ex
                             measure your own transcripts (read-only, stdlib only)
 tools/optimize.py           read those aggregates offline: where cost is concentrated, what moved,
                             and whether anything justifies an experiment — or NO_ACTION
+                            (--scope-id keeps several agents' populations apart; see docs/MULTI_AGENT.md)
 experiments/                skill-ab (462 runs) · vnext (110) · presentation (64 pilot + 256 confirmatory)
                             — rigs, fixtures, self-tests, pre-registrations, every run ever scored
-docs/VNEXT.md               build report · docs/RELEASE_NOTES_1.1.0.md · docs/reference-audits/
-tests/                      282 assertions in nine suites, mutation-tested; CI on Python 3.9 and 3.12
+experiments/scale/          how the sweep scales (1k and 10k sessions) and why there is no index
+docs/VNEXT.md               build report · docs/RELEASE_NOTES_1.1.0.md · _1.2.0.md · docs/reference-audits/
+docs/MULTI_AGENT.md         many agents, running all the time · docs/AI_VOS_PROFILE.md (one profile)
+tests/                      400 assertions in eleven suites, mutation-tested; CI on Python 3.9 and 3.12
 ```
 
 Measure your own sessions — nothing installed, nothing written:
@@ -199,6 +204,12 @@ nothing into any model's context and never edits `skills/`, `hooks/` or configur
 secret planted in a transcript, a listing and the ledger is proved absent from every output
 (`tests/test_optimize.py`). Full workflow and data contract: [docs/EVIDENCE_LOOP.md](docs/EVIDENCE_LOOP.md);
 open candidates: [`experiments/candidates/`](experiments/candidates/). Nothing promotes itself.
+
+Running more than one agent, or running them continuously? Records carry a `--scope-id`, and
+populations from different scopes are counted and named but never averaged; evidence that came from
+an incomplete sweep cannot produce a candidate; candidate ids are deterministic so a scheduler that
+calls this hourly writes no duplicate proposals. Contract, exit codes and the measured resource
+budget: [docs/MULTI_AGENT.md](docs/MULTI_AGENT.md).
 
 Run the suites: `python3 -m pip install -r requirements-test.txt` (pytest is the only test-time
 dependency; the runtime is standard library) then `for t in tests/test_*.py; do python3 $t; done`.

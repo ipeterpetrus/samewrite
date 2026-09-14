@@ -34,9 +34,15 @@ evidence rather than dressed up as a recommendation.
 ## What is recorded
 
 `tools/carry.py --history` appends one aggregate record per run: schema version, SameWrite version,
-timestamp, session and turn counts, carry shares and bytes-per-turn by **source label**, and the
-population identity (which CLI versions wrote the transcripts, which models answered). The guard
-ledger (`SAMEWRITE_LEDGER`) records size and outcome per `Write` check.
+timestamp, session and turn counts, carry shares and bytes-per-turn by **source label**, the
+population identity (which CLI versions wrote the transcripts, which models answered), a random
+`run_id`, the opaque `scope_id` and `workload_class` you passed, and the sweep's own
+`evidence_quality`. The guard ledger (`SAMEWRITE_LEDGER`) records size and outcome per `Write` check.
+
+`scope_id` and `workload_class` are written verbatim and never parsed, so they must not carry a
+hostname, a username or a project name. They exist so that several agents' records can share one
+file without being averaged into a population that describes nobody — see
+[docs/MULTI_AGENT.md](MULTI_AGENT.md).
 
 Never recorded: prompt text, assistant prose, source code, file contents, tool-result contents,
 file names, paths, secrets, hidden reasoning. `tests/test_optimize.py` plants a canary secret in a
@@ -53,6 +59,10 @@ candidate file. The machine identity in the ledger is a short hash, not a hostna
 - It never compares corpora that are not comparable (a run over one project versus the whole archive
   is a change of scope, not movement), never reports a trend from fewer than four comparable records,
   and never merges populations across a host-version change that moved the numbers.
+- It never merges two scopes, never claims a direction from timestamps that cannot be ordered, and
+  never turns an incomplete sweep into a candidate unless you say the bounded corpus was the target
+  (`--accept-partial`). A finding is labelled `SCOPE_LOCAL`: it speaks for the population that was
+  measured and for no other.
 
 ## Reading the report
 
@@ -66,7 +76,8 @@ candidates                   what cleared its threshold, and the experiment it i
 policy mutation              always NONE
 ```
 
-`--json` prints the same aggregates for scripting. `--emit-candidate DIR` writes one
+A valid run exits 0, including `NO_ACTION`; `--strict-exit` maps the status to the exit code for a
+scheduler. `--json` prints the same aggregates for scripting. `--emit-candidate DIR` writes one
 `HYPOTHESIS.md` per candidate: observation, hypothesis, incumbent, primary metric, correctness and
 safety gates, instruction budget, risk, benchmark required, promotion criterion. Those files are
 specifications for a human, not instructions for a model.

@@ -11,7 +11,8 @@ import optimize  # noqa: E402
 
 P = F = 0
 CANARY = "SAMEWRITE_CANARY_SECRET_DO_NOT_LEAK_7f83a1c9"
-EMPTY_HIST = {"comparable": [], "total": 0, "rejected": {}, "dropped": [], "clock_ok": True}
+EMPTY_HIST = {"comparable": [], "total": 0, "in_scope": 0, "rejected": {}, "dropped": [],
+              "time_order": "ok"}
 
 
 def check(label, got, want):
@@ -68,12 +69,18 @@ def main():
         check(f"valid_record: {label}", optimize.valid_record(obj)[0], want)
 
     p = write(os.path.join(d, "corrupt.jsonl"),
-              [rec(100, {"Bash": 50.0, "Read": 50.0}), "{tidak lengkap", "", "null",
-               rec(100, {"Bash": 50.0, "Read": 50.0})])                      # duplikat persis
+              [rec(100, {"Bash": 50.0, "Read": 50.0}, run_id="a" * 32), "{tidak lengkap", "", "null",
+               rec(100, {"Bash": 50.0, "Read": 50.0}, run_id="a" * 32)])     # penulisan ULANG run yang sama
     recs, rejected, lines = optimize.load_history(p)
     check("JSONL rusak: satu record sah bertahan", len(recs), 1)
     check("baris tak terparse dihitung", rejected["unparseable line"], 1)
-    check("duplikat dihitung, tak dihitung dua kali", rejected["duplicate record"], 1)
+    check("run_id sama (retry) dihitung sekali", rejected["duplicate run_id (retry)"], 1)
+    # Dua AGEN boleh menghasilkan metrik identik. Tanpa run_id itu dua pengamatan, bukan duplikat:
+    # membuang salah satunya akan mengecilkan populasi yang sedang diukur.
+    p2 = write(os.path.join(d, "twin.jsonl"),
+               [rec(100, {"Bash": 50.0, "Read": 50.0}, run_id="b" * 32),
+                rec(100, {"Bash": 50.0, "Read": 50.0}, run_id="c" * 32)])
+    check("metrik identik dari dua run BERBEDA tetap dua record", len(optimize.load_history(p2)[0]), 2)
     check("berkas tak ada -> nol record, tanpa exception", optimize.load_history(empty)[0], [])
 
     # ---------------------------------------------------------------- comparability & clock
@@ -83,8 +90,13 @@ def main():
     recs, _, _ = optimize.load_history(p)
     keep, dropped = optimize.comparable(recs)
     check("korpus menyusut 10x -> record lama TIDAK dibandingkan", (len(keep), len(dropped)), (1, 1))
-    check("jam mundur terdeteksi", optimize.clock_ok([rec(200, {"Bash": 100.0}), rec(100, {"Bash": 100.0})]), False)
-    check("jam maju: ok", optimize.clock_ok([rec(100, {"Bash": 100.0}), rec(200, {"Bash": 100.0})]), True)
+    check("jam mundur terdeteksi",
+          optimize.time_order([rec(200, {"Bash": 100.0}), rec(100, {"Bash": 100.0})]), "reversed")
+    check("jam maju: ok",
+          optimize.time_order([rec(100, {"Bash": 100.0}), rec(200, {"Bash": 100.0})]), "ok")
+    check("stempel waktu identik -> ambigu, bukan tren",
+          optimize.time_order([rec(100, {"Bash": 100.0}), rec(100, {"Bash": 90.0, "Read": 10.0})]),
+          "ambiguous")
 
     rows = [rec(100 + i * 86400, {"Bash": 30.0 + i * 5, "Read": 70.0 - i * 5},
                 turns=1000 * (10 if i == 0 else 1)) for i in range(5)]
@@ -166,8 +178,8 @@ def main():
     check("JSON: path TIDAK muncul", (tp in js) or (d in js), False)
     payload = json.loads(js)
     check("JSON: hanya agregat (nol isi alat)", "carry_shares" in (payload.get("live") or {}), True)
-    check("JSON: hasil dinyatakan", payload["result"] in ("CANDIDATE", "NO_ACTION"), True)
-    check("JSON: mutasi kebijakan NONE", payload["policy_mutation"], "NONE")
+    check("JSON: hasil dinyatakan", payload["status"] in ("CANDIDATE", "NO_ACTION"), True)
+    check("JSON: mutasi kebijakan NONE", payload["policy_mutation"], False)
 
     cand = os.path.join(d, "candidates")
     rc, out = run(["--history", hist, "--ledger", led, "--scan", os.path.join(d, "profile"),

@@ -34,6 +34,12 @@ jobs:
         run: python3 tests/test_coexist.py
       - name: offline optimizer (privacy canary, corruption, zero policy mutation)
         run: python3 tests/test_optimize.py
+      - name: multi-agent suite (scope isolation, 64 concurrent writers, crash, reentrancy, clock skew)
+        run: python3 tests/test_multiagent.py
+      - name: mutation suite (every AI-VOS invariant must go RED when its implementation is broken)
+        run: python3 tests/test_mutation.py
+      - name: sweep scaling harness (small size in CI; the 1k/10k numbers are in docs/MULTI_AGENT.md)
+        run: python3 experiments/scale/scan_scale.py --sizes 200
       - name: benchmark instruments self-test (GOOD -> GREEN, BAD -> RED, no model calls)
         run: python3 experiments/vnext/selftest.py
       - name: presentation instruments self-test (prose classifiers + per-case contracts)
