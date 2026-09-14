@@ -5,15 +5,15 @@
     "url": "https://github.com/ipeterpetrus"
   },
   "metadata": {
-    "description": "Measure where a coding-agent session's tokens go, then test whether the instructions you install are worth what they cost.",
-    "version": "1.0.0"
+    "description": "Token-efficient coding-agent skill for Claude Code, with the measurement tools and published experiments behind it.",
+    "version": "1.1.0"
   },
   "plugins": [
     {
       "name": "samewrite",
       "source": "./",
       "category": "productivity",
-      "description": "Edit-discipline skill: anchored Edit under ~25% changed, rewrite over ~40%, and the one-sentence terseness instruction that beat every kilobyte block it was tested against.",
+      "description": "Token-efficient coding-agent skill: reduce context, tool noise, unnecessary edits and retries while preserving correctness and evidence. Ships the samewrite skill (plus the edit-discipline compatibility alias); the optional no-op-write guard hook stays a separate, deliberate install.",
       "homepage": "https://github.com/ipeterpetrus/samewrite"
     }
   ]

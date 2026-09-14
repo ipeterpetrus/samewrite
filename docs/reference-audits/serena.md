@@ -1,0 +1,57 @@
+# Reference audit: serena
+
+Read-only audit of a depth-1 clone, 2026-09-14, by a subagent with path:line citations.
+Coverage label is in the first line (FULL only where every non-binary tracked file was read).
+Numeric claims quoted from the reference are EXTERNALLY_REPORTED — none was re-run by SameWrite.
+
+```
+REPO serena @ 403ad0a562bbc86ff5a0e26c23544dbd99235c15 license=MIT (LICENSE:1, pyproject.toml:69) lang=Python (439 .py; src/ 217, test/ 714, docs/ 43) files=1065 read_fully=3 (claude-code.yml, memory_maintenance.md, .serena/.gitignore) partial=13 → SCOPED
+
+WHAT: MCP server (README.md:17-19) exposing LSP/JetBrains-backed symbol-level read/edit tools + a project memory system so an agent reads "only the bodies you need" instead of whole files (system_prompt.yml:12-14).
+
+TOOLS (MCP name = snake_case of class minus "Tool", tools_base.py:193-199; in Claude Code = mcp__serena__<name>):
+get_symbols_overview | src/serena/tools/symbol_tools.py:36-91 | depth (-1→0; .java/.kt→1, :56-60), max_answer_chars; overflow ladder depth-0 overview → kind counts (:79-91). Docstring: "should be the first tool to call when you want to understand a new file" (:46)
+find_symbol | symbol_tools.py:134-245 | depth=0, include_body=False ("Use judiciously" :181; forces depth=0 :196), include_info, include_kinds/exclude_kinds, substring_matching, max_matches (-1; over-limit → path→name_path shortlist only :217-218), max_answer_chars
+find_referencing_symbols | symbol_tools.py:252-339 | include/exclude_kinds, max_answer_chars; body NEVER included (:283); snippet = 1 line before/after (:304); ladder refs-without-context → per-file counts → "Found N references." (:336)
+find_implementations | symbol_tools.py:342-397 | include_info, kinds, max_answer_chars (no body :372)
+find_declaration | symbol_tools.py:399-480 | include_body=False (:409), include_info
+get_diagnostics_for_file | symbol_tools.py:482-535 | start_line=0, end_line=-1, max_answer_chars
+read_file | src/serena/tools/file_tools.py:26-56 | start_line=0 / end_line=None (0-based inclusive, negative = from end :36-37), max_answer_chars ("no content will be returned" if exceeded :38-40; NO shortening ladder)
+list_dir | file_tools.py:94-112 | recursive, skip_ignored_files, max_answer_chars
+find_file | file_tools.py:135-140 | file_mask, relative_path (no size bound)
+search_for_pattern | file_tools.py:543-663 | context_lines_before/after=0, paths_include_glob/paths_exclude_glob, relative_path, restrict_search_to_code_files, skip_ignored_files, multiline, max_answer_chars; 5-step ladder first_lines_full → first_lines_truncated → line_numbers_only → per_file_counts → summary (:652-658). "Prefer symbolic operations if you know which symbols you are looking for!" (:558)
+write_memory(max_chars)/read_memory/list_memories(topic)/edit_memory/rename_memory/delete_memory | src/serena/tools/memory_tools.py:9-122
+onboarding | src/serena/tools/workflow_tools.py:10-30 (at most once per conversation :18) · initial_instructions | :32-46 (returns rendered system prompt)
+
+GUIDANCE TEXT (src/serena/resources/config/prompt_templates/system_prompt.yml):
+:8-9 "Work resource-efficiently: don't read or generate content the task doesn't need."
+:12-14 "Avoid reading whole files unless necessary — acquire information step by step, using the symbolic tools to get an overview of symbols and their relations, then reading only the bodies you need."
+:14-15 "Once you have read a full file, there is no point re-analysing it with the symbolic read tools — you already have it."
+:17-19 search_for_pattern when symbol name/location unknown → "first find candidates for symbols or files, and then proceed with the symbolic tools."
+:25-29 "You only read the bodies of symbols when you need to" · known target → find_symbol `Foo/__init__` include_body=True; unknown → `Foo` include_body=False depth=1, then bodies.
+:41 "Line numbers returned by Serena's tools are 0-based!"
+:43-47 batch independent calls in one turn — "Every separate round-trip re-sends the whole growing context, so maximizing parallel tool calls is the single biggest lever on cost".
+cc_system_prompt_override :60-121 (Claude Code): built-in Read/Glob/Grep/Edit "SECONDARY and must not be used on code files when a Serena equivalent exists" (:68-70); mapping table :82-95; exceptions :97-103 (serena failed / not parseable / regex across many files as discovery step / "read a few lines" / "absolutely have to read the full file"); required workflow :110-113 "1. get_symbols_overview … 2. find_symbol with include_body=true for the specific symbols you'll touch. Read only the symbols you need — not the whole file. 3. Edit with replace_symbol_body…"; self-check before every Read/Glob/Grep/Edit (:117-121); "Understand before changing" (:128).
+contexts/claude-code.yml:2-33: "Read -> FORBIDDEN for discovery. Use get_symbols_overview, then find_symbol with include_body… Glob -> Allowed for discovery only. Grep -> Allowed for discovery only; follow up reads or reference searches must be Serena." Disallowed rationalizations "I already know the path" / "one Read call is faster than three Serena calls" (:28-32).
+onboarding prompt simple_tool_outputs.yml:5-41: "Read only the files needed; do not load entire directory trees." (:35-36)
+
+OUTPUT LIMITS: tools_base.py:281-311 `_limit_length`: max_answer_chars -1 → `default_max_tool_answer_chars` = 150_000 chars (config/serena_config.py:898; serena_config.template.yml:174); over limit → "The answer is too long (N characters). You can adjust your query or raise the max_answer_chars parameter." then tries each shortened_result_factory in order, first that fits wins, else message only (:299-310). Graded ladders per tool listed above. Tool timeout 240s (serena_config.py:51).
+
+MEMORY/STATE: project memories = `<root>/.serena/memories/<name>.md` (memories/memory_manager.py:46); global = `$SERENA_HOME/memories/global/` (config/serena_config.py:114; SERENA_HOME default `~/.serena`, hooks.py:18). `.serena/project.yml` (checked in; language_servers, project_name), `.serena/project.local.yml` + `.serena/cache/` gitignored (.serena/.gitignore:1-2; cache = pickled LSP document-symbol cache, solidlsp/ls.py:349-358). Cross-refs `mem:<name>` in backticks, graph root `mem:core` (resources/memory_maintenance.md:5-13; seeded on onboarding, workflow_tools.py:26-28); onboarding writes core/tech_stack/suggested_commands/conventions/task_completion (+ per-module `<module>/core`) (simple_tool_outputs.yml:15-31). Add/update threshold: "only stable, non-obvious project conventions… Do not add: quick-read facts; generic language/framework knowledge; one-off task notes; volatile line-level details" (memory_maintenance.md:25-28). `serena memories check` validates refs (:36). Hook state: `$SERENA_HOME/hook_data/<session_id>/tool_use_counter.pkl` (hooks.py:42,153).
+
+CLAIMS: README has NO numeric token/benchmark figure — only qualitative: "faster, more efficiently and more reliably" (README.md:24), "much more token-efficient than typical alternatives" (:169), plus agent self-testimonials (:48-62). No benchmark dir; docs/04-evaluation/ = agent self-evaluation on ~20 tasks, explicitly "Why Not Benchmarks?" (docs/04-evaluation/010_methodology.md:141-155). Numeric, all [EXTERNALLY_REPORTED, agent self-assessed]: "Edit is 3x more token-efficient for small tweaks"; "Serena is ~2x more token-efficient for full-body rewrites"; "crossover point is approximately 50% of the method body changing" (docs/04-evaluation/030_results/040_glm_on_tianshou.md:170,187,335); "~35-50%" of session where Serena applies (050_junie_plugin_on_tianshou.md:320); "30-50% of a normal coding session is built-in-natural" (020_codex_on_jbplugin.md:630-631); "~4.5x less payload" built-ins for tiny edits (010_methodology.md:75).
+
+OWNED IDENTIFIERS: MCP tool names above (+ replace_symbol_body, insert_before/after_symbol, rename_symbol, safe_delete_symbol, replace_content, replace_in_files, delete_lines/replace_lines/insert_at_line, activate_project, get_current_config, execute_shell_command, restart_language_server, type_hierarchy/move/inline via JetBrains). Hook matcher `mcp__serena__*` (docs/02-usage/030_clients.md:180). CLI: `serena`, `serena-agent`, `serena-hooks` (pyproject.toml:64-66); `serena {init,setup,start-mcp-server,print-system-prompt,project {create,index,health-check…},memories {list,write,read,delete,rename,edit,check,auto-prefix-references},mode,context,config,tools,prompts {print-cc-system-prompt-override…}}` (cli.py:173-1502); `serena-hooks {remind,auto-approve,activate,cleanup} --client=claude-code` (030_clients.md:175-206). Env: SERENA_HOME, SERENA_FILE_ENCODING, SERENA_LOG_FORMAT, SERENA_DASHBOARD_DIR, SERENA_USAGE_REPORTING, SERENA_SOLIDITY_STATE_DIR, SERENA_FOLDER_LOCATION. Dirs: `.serena/`, `~/.serena/`. Token `mem:`. Concepts "context"/"mode" (YAML names: claude-code, codex, ide, agent…).
+
+COMPOSE NOTES:
+- In the claude-code context serena EXCLUDES its own read_file, search_for_pattern, list_dir, find_file, execute_shell_command (claude-code.yml:35-41). So a ladder must keep rung 0-1 (Glob/Grep -n -C discovery, ranged Read offset/limit) on Claude built-ins in BOTH cases; serena only adds the middle rungs. Phrase capability-conditionally: "if a loaded tool is named get_symbols_overview/find_symbol/find_referencing_symbols → rung 2 = overview(depth 0), rung 3 = find_symbol depth=1 include_body=false, rung 4 = include_body=true on the named symbol only, rung 5 = find_referencing_symbols; otherwise rung 2 = Grep -n '^(class|def|func|fn|export) ' file, rung 3-4 = Read offset/limit on the matched span, rung 5 = Grep -n <symbol> across repo".
+- Do not contradict serena's cc override: on code files serena forbids Read for discovery and Edit outright (:22-26, system_prompt.yml:68-70). samewrite should state "when serena is present its code-file rules win; samewrite governs non-code files and the pre-serena discovery step" — otherwise two instruction sources fight and serena's hook will deny.
+- Encode serena's stop rules verbatim-ish: full file already read → skip symbolic re-analysis (:14-15); ≤"a few lines" → ranged read is fine (:102); regex across many files → Grep as discovery then symbolic follow-up (:99-101).
+- Line-number mismatch: serena 0-based (:41) vs Claude Read 1-based; the ladder must say which base each rung reports.
+- Batch independent rungs in one turn (:43-47) — same lever applies to plain Read/Grep.
+
+BORROW CANDIDATES:
+1. Graded overflow ladder (full → first-lines → line-numbers-only → per-file counts → summary) → src/serena/tools/tools_base.py:281-311 + file_tools.py:652-658, symbol_tools.py:336 — as instruction: "if a result would exceed N lines, return the next-coarser form instead of truncating".
+2. Three-step symbol-first workflow + disallowed-rationalization list → system_prompt.yml:25-29,110-113; contexts/claude-code.yml:22-32.
+3. Memory graph with `mem:` refs, `mem:core` root, add/update threshold, "referrer says when to read, memory doesn't" → src/serena/resources/memory_maintenance.md:5-28; onboarding layout simple_tool_outputs.yml:15-31.
+4. Raw-read burst nudge with cooldown: 3 reads / 3 greps / 4 mixed on code-extension files → one deny per 120s → src/serena/hooks.py:153-166,190-200,291-297 — as instruction "after 3 consecutive raw reads on code files, climb a rung" or as a PreToolUse hook pattern (matcher on Read/Grep, not mcp__serena__*, to avoid collision).```

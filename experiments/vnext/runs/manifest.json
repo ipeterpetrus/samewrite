@@ -1,0 +1,58 @@
+{
+  "generated_from": "the data files themselves, 2026-09-14",
+  "evidence_classes": {
+    "pilot": "pre-registered contrasts, n=1 per arm x fixture; direction/size estimate only, not a significance claim",
+    "calibration": "pipeline smoke; never an effect estimate"
+  },
+  "files": [
+    {
+      "path": "pilot1.jsonl",
+      "evidence_class": "pilot",
+      "preregistered": true,
+      "analysis_eligible": false,
+      "n": 110,
+      "unit": "runs",
+      "arms": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "D2",
+        "E",
+        "F",
+        "G",
+        "H",
+        "I",
+        "J"
+      ],
+      "model": "claude-haiku-4-5-20251001",
+      "cli": "2.1.270",
+      "sha256": "40825c0f09a228c38111dd064708bcf25eb70c142ad809a63467c51074f46158",
+      "note": "verdicts as scored at run time; 4 rows mis-scored (3x .pytest_cache counted as an added file, 1x correct clamp argument order rejected) \u2014 superseded by pilot1.rescored.jsonl"
+    },
+    {
+      "path": "pilot1.rescored.jsonl",
+      "evidence_class": "pilot",
+      "preregistered": true,
+      "analysis_eligible": true,
+      "n": 110,
+      "unit": "runs",
+      "sha256": "32cc43ab823276d151c5a62aaa54d9e7037205f461f0d8a17c247f039f5e6830",
+      "note": "same runs re-scored from the preserved working directories with rig.verdict() after the tool-artifact fix; verdict_original kept per row"
+    },
+    {
+      "path": "smoke.jsonl",
+      "evidence_class": "calibration",
+      "preregistered": false,
+      "analysis_eligible": false,
+      "n": 4,
+      "unit": "runs",
+      "sha256": "f530dfef3bb99f66dea8c247ae322f50a28e5a82f16fe6cacfac90caa327a7ae"
+    }
+  ],
+  "skill_snapshot": {
+    "arm_D_skill_sha256_prefix": "e7760ff275326fac",
+    "committed_skill_sha256_prefix": "1a1b27ac795b384a",
+    "note": "arm D/D2/H/I/J ran the SKILL.md body before one sentence (the measured terseness prefix) was added to its Presentation section; the listing entry was identical"
+  }
+}

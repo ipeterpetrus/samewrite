@@ -1,0 +1,46 @@
+# Reference audit: i-have-adhd
+
+Read-only audit of a depth-1 clone, 2026-09-14, by a subagent with path:line citations.
+Coverage label is in the first line (FULL only where every non-binary tracked file was read).
+Numeric claims quoted from the reference are EXTERNALLY_REPORTED — none was re-run by SameWrite.
+
+```
+REPO i-have-adhd @ 4092de07ce3ed88389d77c0d623b7af89b40ac0e license=MIT (LICENSE:1-3, © 2026 Ayoub Ghriss) files=64 read_fully=63/63 non-binary (logo.png = only binary) → FULL
+Top-level dirs: evals/ extensions/ hooks/ scripts/ skills/ tests/ + dot-dirs .agents/ .claude-plugin/ .codex-plugin/ .cursor/ .github/ .opencode/
+
+SKILL: skills/i-have-adhd/SKILL.md, 7207 B. Frontmatter: name i-have-adhd, `disable-model-invocation: true` (:4), description says "Invoke with /i-have-adhd; stays on until 'stop adhd mode'" (:3). .cursor/skills/i-have-adhd/SKILL.md = byte-identical mirror, CI-enforced (.github/workflows/cursor-skill-sync.yml:22).
+ Rules (:33-117): 1 lead with next action ("first line is something the reader can do... command, path, or snippet goes first" :35-40); 2 number multi-step tasks, "no step contains 'and then' twice" (:44); 3 end with ONE next action "<2 minutes" (:59); 4 suppress tangents, surface once at end (:66-71); 5 restate state every turn "Step 3 of 5 done" + use harness task tool, one in-progress (:75-80); 6 concrete time estimates (:84-87); 7 make wins visible (:91-94); 8 errors matter-of-fact: "Never 'Uh oh'... State cause and fix" (:98-101); 9 cap lists to 5 visible per group, retain rest internally, "shapes presentation only" (:105-107); 10 forbidden openers/recaps/closers list (:111-117).
+ Persistence prose (:15-19): "apply to every response for the rest of the session... If unsure whether they still apply, they do." Off only on "stop adhd mode" / "normal mode", confirm in one line.
+ Overrides (:121-128): explain/walk-through = full length; destructive → confirm; debug spiral after 3 "still broken" turns; ambiguity → one question; rule-vs-task → task wins shape stays; rule-vs-harness → "system prompt outranks this skill" (:128). Pre-send check (:132-142): delete announce-sentence, closer, "by the way", empty hedges, idioms; verify first+last line.
+
+TRIGGERS: ON = `/i-have-adhd` (Claude Code/Qwen/Grok/Zed/Cursor), `$i-have-adhd` (Codex, INSTALL.md:184), `/skill:i-have-adhd` (Kimi INSTALL.md:495; Pi alias), `pi --adhd` flag. OFF = "stop adhd mode" | "normal mode" (SKILL.md:19).
+ Detection: Claude Code/Codex/Gemini/Cursor/OpenCode = PROSE ONLY, model-honored, no hook parses input. Pi/OMP extension = mechanical: `event.text.trim().toLowerCase()` exact-match against `STOP_PHRASES = new Set(["stop adhd mode","normal mode"])` (extensions/i-have-adhd.ts:27,211-221), only while `enabled`; `/skill:i-have-adhd` exact-match intercepted (:216); command args `on|off|stop` lowercased (:190-202); disabled-state passthrough tested (scripts/check_pi_extension.py:387-400).
+
+HOOKS (all repo hooks; grep confirms NO UserPromptSubmit/PreToolUse/Stop/SubagentStart/PreCompact anywhere):
+ - Claude Code+Codex | hooks/hooks.json:5-11 | SessionStart matcher "startup|resume|clear|compact", timeout 30, statusMessage "Checking i-have-adhd always-on flag..." | command = `node -e` dynamic import of `$CLAUDE_PLUGIN_ROOT||$PLUGIN_ROOT/hooks/always-on.mjs`, `.catch(()=>{})`.
+ - hooks/always-on.mjs | READS `$CLAUDE_CONFIG_DIR/.i-have-adhd-always` (default ~/.claude) (:16-20) + ../skills/i-have-adhd/SKILL.md (:23-25); strips frontmatter regex (:31); STDOUT banner "ADHD MODE ACTIVE (always-on). The ruleset below applies to every response. \"stop adhd mode\" turns it off for this session; delete <flag> to turn always-on off for good." + body (:36-40). WRITES nothing. Any failure → exit 0. Env: CLAUDE_CONFIG_DIR, CLAUDE_PLUGIN_ROOT, PLUGIN_ROOT, HOME.
+ - hooks/always-on.sh / always-on.ps1 | same semantics, not wired in hooks.json (fallbacks; parity-tested tests/test_always_on_hooks.py:98-135).
+ - OpenCode .opencode/plugins/i-have-adhd.mjs | `config` hook adds skills path + `config.command['i-have-adhd']` only if absent (:58-72) | `experimental.chat.system.transform` appends banner+body to LAST system prompt EVERY turn while `$XDG_CONFIG_HOME/opencode/.i-have-adhd-always` exists (:38-42,78-97).
+ - Pi/OMP extensions/i-have-adhd.ts | events input/session_start/session_tree/session_compact (:211-239) | READS `<agentDir>/.i-have-adhd-always` (:115), `<agentDir>/i-have-adhd.json` {alwaysOn,hideStatus} (:42-50), flag `--adhd` (:181) | WRITES session entries customType `i-have-adhd-state` {enabled} (:22,175), hidden messages `i-have-adhd-rules` / `i-have-adhd-disabled` (:23-24,138-157) | env PI_CODING_AGENT_DIR (INSTALL.md:660).
+ - Gemini extension: GEMINI.md:5 `@./skills/i-have-adhd/SKILL.md` = always-on when installed as extension.
+
+COMMANDS: no Claude Code commands/ dir — `/i-have-adhd` is the skill itself. OpenCode `.opencode/command/i-have-adhd.md` (JSON-frontmatter, :1-8). Pi `registerCommand("i-have-adhd")` [on|off|stop] (:187-209). Gemini custom command skills/i-have-adhd/agents/gemini.toml → ~/.gemini/commands/i-have-adhd.toml (INSTALL.md:304-307). Codex agents/openai.yaml `allow_implicit_invocation: false`. Marketplace/plugin name everywhere = `i-have-adhd` (install `i-have-adhd@i-have-adhd`).
+
+STATUSLINE/CONFIG: Claude Code path touches NO settings.json and NO statusLine (grep: zero hits in code). Pi footer only: `ctx.ui.setStatus("i-have-adhd", "● ADHD ON")` (:119-128), suppressible via hideStatus. OpenCode config hook preserves foreign/user values (adds only when missing; dedups skills.paths; tests test_opencode_plugin.py:92-101). Docs only: pt-BR/vi/ko INSTALL translations (older snapshot) tell USER to set Pi `settings.json {"enableSkillCommands": true}` (INSTALL.vi.md:404-408) — English INSTALL.md dropped it; no code writes it.
+
+PERSISTENCE: Claude Code on-demand = prose only; skill text sits in transcript; NO mechanical re-injection after compaction/resume/clear (only `/i-have-adhd` again). Claude Code always-on = flag file + SessionStart on startup|resume|clear|compact re-injects full body. Subagents: nothing (no SubagentStart hook) — mode does not propagate. Pi/OMP: enabled state read back from session branch entries (getSavedState :81-96, saved choice beats alwaysOn) → survives resume/fork/reload; `session_compact` → syncContext re-injects only if latest marker missing (context-compat.ts:41-61 latest-marker-wins; rules injected once, not per request, verified check_pi_extension.py:322-325). OpenCode always-on = every-turn system transform (immune to compaction); on-demand = prose.
+
+CLAIMS: README.md has NO benchmark numbers — only Before/After prose example (:41-65) and "10 rules" list. EXTERNALLY_REPORTED (self-run by author) evals/RESULTS.md: "Date 2026-08-02, Model claude-opus-4-8, Cases 14, Trials 3, 84 rows"; weighted baseline 4.045 → candidate 4.473 (+0.427), blockers 7→3, "wins 10 of 14, ties 2, loses 2" (:29-32); "Release gate: FAILED" (:38); judge = same model family (:106-108); cost $2.67+$0.92. Scorer self-test: YES — tests/test_run_evals.py (weights, gate, pairing, duplicates, frontmatter strip), tests/test_judge.py (stable blind labels, end-to-end stub runner, malformed verdict skip). CI does NOT run evals, only unit tests + plugin load (plugin-load-check.yml, pi-load-check.yml).
+
+COLLISION RISKS for a sibling plugin — AVOID:
+ - phrases: "normal mode" (shared generic stop phrase; also Ponytail's), "stop adhd mode", banner strings "ADHD MODE ACTIVE"/"ADHD MODE OFF", "● ADHD ON", disable reply "ADHD mode disabled."
+ - state keys: `i-have-adhd-state`, `i-have-adhd-rules`, `i-have-adhd-disabled`, status key `i-have-adhd`, Pi flag `adhd`
+ - file paths: ~/.claude/.i-have-adhd-always, $CLAUDE_CONFIG_DIR/.i-have-adhd-always, ~/.config/opencode/.i-have-adhd-always, ~/.pi/agent/.i-have-adhd-always, ~/.pi/agent/i-have-adhd.json, ~/.gemini/commands/i-have-adhd.toml, ~/.grok/rules/i-have-adhd.md, .cursor/skills/i-have-adhd/
+ - commands/names: /i-have-adhd, /skill:i-have-adhd, $i-have-adhd, plugin+marketplace `i-have-adhd`, OpenCode config.command['i-have-adhd']
+ - semantic: both plugins inject "applies to every response" blocks at SessionStart with undefined ordering; ADHD rule 9 (5-item cap) and rule 2 (numbered lists) will fight any samewrite shape rule; SKILL.md:128 yields only to the HARNESS system prompt, not to a sibling skill — samewrite needs an explicit precedence clause. Do NOT ship a `normal mode` stop phrase (would disable both).
+
+BORROW CANDIDATES (mechanism → path):
+ 1. Flag-file-gated, fail-silent SessionStart injection with frontmatter strip, matcher "startup|resume|clear|compact" → hooks/hooks.json:5-11 + hooks/always-on.mjs:15-44
+ 2. Latest-marker-wins context sync (inject once, re-inject after compaction, disabled-notice cancels) → extensions/context-compat.ts:41-61 + extensions/i-have-adhd.ts:105-159
+ 3. Blind paired eval: sha256-permuted labels, judge-only rubric slice, release gate + stub-runner tests → scripts/judge.py:153-168, scripts/run_evals.py:148-186, tests/test_judge.py:179-258
+ 4. Cross-runtime hook parity test (node/sh/pwsh must emit identical output) → tests/test_always_on_hooks.py:98-135```

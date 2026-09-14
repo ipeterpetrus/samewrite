@@ -13,7 +13,7 @@ def run(payload, env=None):
     e = dict(os.environ); e.pop("SAMEWRITE_ALLOW_NOOP", None)
     e["SAMEWRITE_ROOT"] = ROOT[0]              # guard dibatasi ke pohon kerja; tes menyetelnya
     if env: e.update(env)
-    p = subprocess.run(["/usr/bin/python3", G], input=json.dumps(payload),
+    p = subprocess.run([sys.executable, G], input=json.dumps(payload),
                        capture_output=True, text=True, timeout=20, env=e)
     denied = '"deny"' in p.stdout
     return denied, p.stdout, p.returncode
@@ -119,7 +119,7 @@ with tempfile.TemporaryDirectory() as d:
           bash("cat > %s/id_rsa <<'EOF'\nline1\nline2\nEOF" % ROOT[0]), False)
     # 8: fail-open
     check("stdin bukan JSON -> allow",
-          subprocess.run(["/usr/bin/python3", G], input="{bukan json",
+          subprocess.run([sys.executable, G], input="{bukan json",
                          capture_output=True, text=True).stdout.find('"deny"') >= 0, False)
     check("tool_input hilang -> allow",
           run({"tool_name": "Write"})[0], False)
@@ -261,7 +261,7 @@ with tempfile.TemporaryDirectory() as d:
         for blk, by in ((1, 900), (2, 800), (9, 5000)):
             fh.write(json.dumps({"ts": int(time.time()), "host": "t", "event": "checked",
                                  "same": False, "blocks": blk, "bytes": by}) + "\n")
-    out = subprocess.run(["/usr/bin/python3", REP, rl], capture_output=True, text=True).stdout
+    out = subprocess.run([sys.executable, REP, rl], capture_output=True, text=True).stdout
     check("report: ledger lama tanpa frac -> aturan blok lama", "2 of 3" in out, True)
 
     # frac menang atas blocks: 9 blok tapi hanya 5% berkas berubah = tetap muat di Edit.
@@ -272,16 +272,16 @@ with tempfile.TemporaryDirectory() as d:
                              "same": False, "blocks": 9, "frac": 0.05, "bytes": 900}) + "\n")
         fh.write(json.dumps({"ts": int(time.time()), "host": "t", "event": "checked",
                              "same": False, "blocks": 1, "frac": 0.90, "bytes": 900}) + "\n")
-    outf = subprocess.run(["/usr/bin/python3", REP, rlf], capture_output=True, text=True).stdout
+    outf = subprocess.run([sys.executable, REP, rlf], capture_output=True, text=True).stdout
     check("report: frac mengalahkan blocks", "1 of 2" in outf, True)
-    outm = subprocess.run(["/usr/bin/python3", REP, rlf, "--markdown"],
+    outm = subprocess.run([sys.executable, REP, rlf, "--markdown"],
                           capture_output=True, text=True).stdout
     check("markdown: host di-hash, bukan nama mesin", ("host-" in outm and "| `t` |" not in outm), True)
     rl2 = os.path.join(d, "rep2.jsonl")
     with open(rl2, "w") as fh:
         fh.write(json.dumps({"ts": int(time.time()), "host": "t", "event": "checked",
                              "same": True, "bytes": 10}) + "\n")
-    out2 = subprocess.run(["/usr/bin/python3", REP, rl2], capture_output=True, text=True).stdout
+    out2 = subprocess.run([sys.executable, REP, rl2], capture_output=True, text=True).stdout
     check("tanpa data blok -> baris Edit tak dicetak", "Rewrites that changed" in out2, False)
 
 print(f"\n{PASS} PASS / {FAIL} FAIL")

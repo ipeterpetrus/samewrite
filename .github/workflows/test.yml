@@ -4,6 +4,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false            # laporkan KEDUA versi Python, jangan batalkan satu karena yang lain gagal
       matrix:
         python: ["3.9", "3.12"]
     steps:
@@ -11,6 +12,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - name: test dependency (pytest is NOT preinstalled on the runner — CI 14-Sep failed on exactly this)
+        run: |
+          python -m pip install --quiet -r requirements-test.txt
+          python -m pytest --version
       - name: guard suite
         run: python3 tests/test_write_noop_guard.py
       - name: profile discovery suite
@@ -23,6 +28,14 @@ jobs:
         run: python3 tests/test_skills.py
       - name: health suite
         run: python3 tests/test_health.py
+      - name: adapters drift + command surface + version pins
+        run: python3 tests/test_adapters.py
+      - name: coexistence matrix (Ponytail / i-have-adhd / Caveman surfaces)
+        run: python3 tests/test_coexist.py
+      - name: benchmark instruments self-test (GOOD -> GREEN, BAD -> RED, no model calls)
+        run: python3 experiments/vnext/selftest.py
+      - name: presentation instruments self-test (prose classifiers + per-case contracts)
+        run: python3 experiments/presentation/selftest_pres.py
       - name: README assertion count matches reality
         # README menyebut satu angka; angka itu pernah basi (124 vs 160 nyata, 13-Sep).
         # Klaim yang tak ada penegaknya membusuk diam-diam — di repo yang seluruh isinya
@@ -36,7 +49,7 @@ jobs:
               m = re.search(r"(\d+) PASS", out)
               assert m, f"{f}: tak mencetak hitungan PASS"
               total += int(m.group(1))
-          claim = re.search(r"(\d+) assertions in six suites", open("README.md").read())
+          claim = re.search(r"(\d+) assertions in \w+ suites", open("README.md").read())
           assert claim, "README tak lagi menyebut jumlah assertion — perbarui uji ini"
           assert int(claim.group(1)) == total, \
               f"README bilang {claim.group(1)} assertion, suite menjalankan {total}"
