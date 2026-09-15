@@ -164,7 +164,7 @@ def longrun(days, cycles, out, plateau=20):
                 f = optimize.analyse(lv, h, None, None, scope=role)
                 st = optimize.overall_status(f, h, lv, optimize.population(keep), False)
                 statuses[st] += 1
-                w, e, _fail = optimize.emit_candidates(f, cand)
+                w, e, _fail, _rr, _uv = optimize.emit_candidates(f, cand)
                 written += len(w)
                 existing += len(e)
                 day_new += len(w)

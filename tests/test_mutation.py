@@ -41,9 +41,13 @@ def oracle(toolsdir, body):
                     "unreadable": 0, "oversize": 0, "skipped_by_limit": 0, "quality": quality,
                     "carry": collections.Counter(carry_map or {{"Bash": 90, "Read": 10}})}}
         def rec(ts, shares, scope="default", turns=1000, run_id=None):
+            # Since 1.3.1 a COMPLETE claim is checked against the record's own acquisition
+            # counters, so a fixture meaning "a clean sweep" writes them.
             return {{"schema_version": 2, "record_type": "carry_run", "ts": ts, "sessions": 40,
                     "turns": turns, "carry_bytes": 10**7, "scope_id": scope, "workload_class": "",
-                    "evidence_quality": "COMPLETE", "run_id": run_id or carry.new_run_id(),
+                    "evidence_quality": "COMPLETE", "scanned": 40,
+                    "unreadable": 0, "oversize": 0, "skipped_by_limit": 0,
+                    "run_id": run_id or carry.new_run_id(),
                     "shares": shares, "bpt": {{k: 1.0 for k in shares}}}}
         def w(path, rows):
             with open(path, "w", encoding="utf-8") as fh:
@@ -72,6 +76,241 @@ def mutant(pairs):
 
 # --------------------------------------------------------------------------- the invariants
 CASES = [
+    # ---------------------------------------------------------------- 1.3.1 adversarial blockers
+    ("H1: klaim COMPLETE diperiksa terhadap counter record itu sendiri",
+     [("optimize.py",
+       "    return worst_quality([claimed, derive_quality(rec)])",
+       "    return claimed")],
+     """
+     r = rec(100, {"Bash": 50.0, "Read": 50.0}); r["unreadable"] = 5
+     assert optimize.quality_of(r) == "PARTIAL", "klaim COMPLETE dipercaya walau counter membantah"
+     z = rec(100, {"Bash": 50.0, "Read": 50.0}); z["sessions"] = 0
+     assert optimize.quality_of(z) == "INVALID", "populasi mustahil tetap COMPLETE"
+     """),
+
+    ("H2: baris transkrip yang tak bisa di-parse menurunkan kualitas sapuan",
+     [("carry.py",
+       "    if unreadable or oversize or skipped_by_limit or malformed:",
+       "    if unreadable or oversize or skipped_by_limit:")],
+     """
+     import os as _os, json as _j
+     root = _os.path.join(D, "prof", "projects", "-w"); _os.makedirs(root, exist_ok=True)
+     q = _os.path.join(root, "s0.jsonl")
+     with open(q, "w", encoding="utf-8") as fh:
+         for t in range(60):
+             fh.write(_j.dumps({"type": "user", "message": {"role": "user", "content": []}}) + chr(10))
+             fh.write(_j.dumps({"type": "assistant", "message": {"role": "assistant",
+                      "usage": {"input_tokens": 10, "output_tokens": 5},
+                      "content": [{"type": "tool_use", "id": "t", "name": "Bash",
+                                   "input": {"command": "ls"}}]}}) + chr(10))
+         fh.write('{"type": "assistant", "message": {"role": "assis')
+     a = carry.accumulate([q], min_turns=10)
+     assert a["quality"] == "PARTIAL", "sapuan yang kehilangan baris tetap mengaku COMPLETE"
+     """),
+
+    ("H3: provenance melekat pada finding dari sumbernya, bukan dari posisinya",
+     [("optimize.py",
+       "        return finding(*a, evidence_source=\"sampled\", evidence_quality=quality,\n"
+       "                       partial_accepted=accepted, **kw)",
+       "        return finding(*a, evidence_source=\"sampled\", **kw)")],
+     """
+     live = acc(40, turns=2000, quality="PARTIAL")
+     cold = {"cold": 8, "entries": 10, "cold_bytes": 5000, "total_bytes": 6000}
+     out = optimize.analyse(live, EMPTY_HIST, None, cold, scope="s", accept_partial=True,
+                            effective="PARTIAL")
+     cands = [f for f in out if f["state"] == "CANDIDATE"]
+     assert cands, "fixture tak menghasilkan kandidat"
+     for f in cands:
+         assert f["effective_evidence_quality"] == "PARTIAL", f["id"] + " kehilangan provenance"
+         assert f["partial_evidence_accepted"] is True, f["id"] + " kehilangan penerimaan"
+     """),
+
+    ("H4: populasi yang bergeser host tidak boleh melahirkan kandidat",
+     [("optimize.py",
+       "    usable = emittable(quality, accept_partial) and population_ok",
+       "    usable = emittable(quality, accept_partial)")],
+     """
+     recs = [rec(100 + i*86400*7, {"Bash": 20.0 + i*9, "Read": 80.0 - i*9}) for i in range(9)]
+     h = {"comparable": recs, "total": 9, "in_scope": 9, "rejected": {}, "dropped": [],
+          "time_order": "ok"}
+     out = optimize.analyse(None, h, None, None, scope="default", effective="COMPLETE",
+                            population_ok=False)
+     assert not [f for f in out if f["state"] == "CANDIDATE"], \
+         "kandidat lahir saat populasi dinyatakan bukan satu dunia"
+     """),
+
+    ("H5: artefak yang tak terbaca bukan artefak tepercaya",
+     [("optimize.py",
+       "    except UnicodeDecodeError:\n        return ARTIFACT_UNKNOWN, {}",
+       "    except UnicodeDecodeError:\n        return ARTIFACT_CURRENT, {}")],
+     """
+     import os as _os
+     q = _os.path.join(D, "bad.md")
+     body = ("candidate_id: x" + chr(10) + "effective_evidence_quality: ").encode() + bytes([255, 254])
+     open(q, "wb").write(body)
+     st, _f = optimize.artifact_metadata(q)
+     assert st == optimize.ARTIFACT_UNKNOWN, "artefak tak terdekode dianggap mutakhir"
+     """),
+
+    ("H5b: penanda di dalam prosa bukan provenance",
+     [("optimize.py",
+       '    if fields.get("effective_evidence_quality", "") in QUALITY_RANK:',
+       '    if "effective_evidence_quality" in text:')],
+     """
+     import os as _os
+     q = _os.path.join(D, "prose.md")
+     L = chr(10)
+     open(q, "w", encoding="utf-8").write(
+         "candidate_id: x" + L + L + "## Notes" + L +
+         "this predates effective_evidence_quality: provenance" + L)
+     st, _f = optimize.artifact_metadata(q)
+     assert st == optimize.ARTIFACT_PRE_131, "kalimat prosa dihitung sebagai provenance"
+     """),
+
+    ("M1: candidates_existing tetap id, bukan prosa",
+     [("optimize.py",
+       "             ARTIFACT_PRE_131: review_required,",
+       "             ARTIFACT_PRE_131: existing,")],
+     """
+     import os as _os
+     f = optimize.analyse(acc(), EMPTY_HIST, None, None, scope="x")[0]
+     out = _os.path.join(D, "m1")
+     optimize.emit_candidates([f], out)
+     p = _os.path.join(out, f["candidate_id"], "HYPOTHESIS.md")
+     t = open(p, encoding="utf-8").read()
+     open(p, "w", encoding="utf-8").write(chr(10).join(
+         l for l in t.splitlines() if not l.startswith("effective_evidence_quality:")))
+     _w, e, _fail, rr, _uv = optimize.emit_candidates([f], out)
+     assert e == [] and rr == [f["candidate_id"]], \
+         "artefak pre-1.3.1 dilaporkan sebagai existing tepercaya"
+     """),
+
+    ("M2: record tak layak tidak boleh menjadi anchor perbandingan",
+     [("optimize.py",
+       "    newest = max(eligible, key=lambda r: r.get(\"ts\") or 0)",
+       "    newest = max(recs, key=lambda r: r.get(\"ts\") or 0)")],
+     """
+     recs = [rec(100 + i*86400*7, {"Bash": 20.0 + i*9, "Read": 80.0 - i*9}) for i in range(9)]
+     bad = rec(9999999999, {"Bash": 50.0, "Read": 50.0})
+     bad["evidence_quality"] = "INVALID"; bad["workload_class"] = "audit"; bad["turns"] = 99
+     keep, _dropped = optimize.comparable(recs + [bad])
+     assert len(keep) == 9, "record INVALID terbaru menentukan populasi lalu menghilang"
+     """),
+
+    ("M3: satu definisi sampel terbatas untuk semua pembaca",
+     [("carry.py",
+       "        return sorted(paths, key=lambda q: os.path.getmtime(q), reverse=True)[:max_files]",
+       "        return paths[:max_files]")],
+     """
+     import os as _os
+     root = _os.path.join(D, "m3"); _os.makedirs(root, exist_ok=True)
+     qs = []
+     for i in range(4):
+         q = _os.path.join(root, "s%d.jsonl" % i)
+         open(q, "w").write("{}" + chr(10))
+         _os.utime(q, (1700000000 + i*1000, 1700000000 + i*1000)); qs.append(q)
+     got = carry.bounded_paths(qs, 2)
+     assert got == sorted(qs, key=_os.path.getmtime, reverse=True)[:2], \
+         "sampel terbatas bukan N terbaru"
+     """),
+
+    # ---------------------------------------------------------------- SW-1303 partial evidence
+    ("bukti parsial di HISTORY tetap menutup promosi",
+     [("optimize.py",
+       "    qs = [quality_of(r) for r in (comparable_records or [])]",
+       "    qs = []")],
+     """
+     recs = [rec(1000 + i*86400*7, {"Bash": 20.0 + i*9, "Read": 80.0 - i*9}) for i in range(9)]
+     for r in recs: r["evidence_quality"] = "PARTIAL"
+     keep, _ = optimize.comparable(recs)
+     q = optimize.effective_quality(None, keep)
+     assert q == "PARTIAL", f"kualitas history diabaikan: {q}"
+     assert not optimize.emittable(q, False), "bukti PARTIAL lolos tanpa --accept-partial"
+     """),
+
+    ("live COMPLETE tak boleh menutupi history PARTIAL",
+     [("optimize.py",
+       '    if live:\n        qs.append(live.get("quality") or "UNKNOWN")\n    return worst_quality(qs)',
+       '    if live:\n        return live.get("quality") or "UNKNOWN"\n    return worst_quality(qs)')],
+     """
+     recs = [rec(1000 + i*86400*7, {"Bash": 20.0 + i*9, "Read": 80.0 - i*9}) for i in range(9)]
+     for r in recs: r["evidence_quality"] = "PARTIAL"
+     keep, _ = optimize.comparable(recs)
+     q = optimize.effective_quality(acc(quality="COMPLETE"), keep)
+     assert q == "PARTIAL", f"sweep live yang lengkap menutupi history parsial: {q}"
+     """),
+
+    ("evidence_quality yang HILANG bukan COMPLETE",
+     [("optimize.py", '    claimed = q if isinstance(q, str) and q in QUALITY_RANK else "UNKNOWN"\n', '    claimed = q if isinstance(q, str) and q in QUALITY_RANK else "COMPLETE"\n')],
+     """
+     # Counter BERSIH supaya derive_quality mengembalikan COMPLETE; dengan begitu HANYA cabang
+     # "klaim hilang" yang menentukan jawabannya. Tanpa counter bersih, derive_quality sendiri
+     # sudah UNKNOWN dan mutan tetap HIJAU — invariannya tak terjaga.
+     r = {"schema_version": 2, "sessions": 40, "scanned": 40,
+          "unreadable": 0, "oversize": 0, "skipped_by_limit": 0}
+     assert optimize.derive_quality(r) == "COMPLETE", "fixture tak sampai ke cabang yang diuji"
+     assert optimize.quality_of(r) == "UNKNOWN", "record schema-2 tanpa evidence_quality dibaca COMPLETE"
+     assert not optimize.emittable(optimize.quality_of(r), False), "record tanpa kualitas dipromosikan"
+     """),
+
+    ("INVALID tidak pernah disahkan oleh --accept-partial",
+     [("optimize.py",
+       '    return quality == "COMPLETE" or (quality == "PARTIAL" and bool(accept_partial))',
+       '    return quality == "COMPLETE" or bool(accept_partial)')],
+     """
+     assert not optimize.emittable("INVALID", True), "INVALID lolos lewat --accept-partial"
+     assert not optimize.emittable("UNKNOWN", True), "UNKNOWN lolos lewat --accept-partial"
+     assert optimize.emittable("PARTIAL", True), "PARTIAL yang diterima justru ditolak"
+     """),
+
+    ("kandidat dari bukti parsial tetap membawa penandanya",
+     [("optimize.py",
+       "effective_evidence_quality: {f.get('effective_evidence_quality', 'UNKNOWN')}\n"
+       "partial_evidence_accepted: {str(bool(f.get('partial_evidence_accepted'))).lower()}\n",
+       "")],
+     """
+     f = optimize.finding("x", "CANDIDATE", "h", "e", scope="s")
+     f["effective_evidence_quality"] = "PARTIAL"; f["partial_evidence_accepted"] = True
+     t = optimize.spec_text(f)
+     assert "effective_evidence_quality: PARTIAL" in t, "provenance kualitas hilang dari kandidat"
+     assert "partial_evidence_accepted: true" in t, "penanda penerimaan hilang dari kandidat"
+     """),
+
+    ("schema 0/1 tak bisa menyatakan kualitas yang ia dahului",
+     [("optimize.py",
+       "    if schema < SCHEMA_WITH_QUALITY:\n        return \"UNKNOWN\"",
+       "    if False:\n        return \"UNKNOWN\"")],
+     """
+     # Counter BERSIH: kalau tidak, derive_quality sudah mengembalikan UNKNOWN sendiri dan mutan
+     # gerbang skema tetap HIJAU — invariannya tak terjaga.
+     clean = {"schema_version": 1, "evidence_quality": "COMPLETE", "sessions": 40, "scanned": 40,
+              "unreadable": 0, "oversize": 0, "skipped_by_limit": 0}
+     assert optimize.quality_of(clean) == "UNKNOWN", "record schema-1 dipercaya menyatakan COMPLETE"
+     """),
+
+    ("retry dgn sapuan lebih buruk tidak mencuci provenance",
+     [("optimize.py",
+       "                if worse != quality_of(kept):",
+       "                if False:")],
+     """
+     rid = "c"*32
+     a = rec(100, {"Bash": 50.0, "Read": 50.0}, run_id=rid); a["evidence_quality"] = "COMPLETE"
+     b = rec(100, {"Bash": 50.0, "Read": 50.0}, run_id=rid); b["evidence_quality"] = "PARTIAL"
+     p = w(os.path.join(D, "retry.jsonl"), [a, b])
+     kept, _rej, _n = optimize.load_history(p)
+     assert "PARTIAL" in {optimize.quality_of(r) for r in kept}, "kualitas retry yang buruk hilang"
+     """),
+
+    ("status tidak boleh bertentangan dgn berkas kandidat yang ditulis",
+     [("optimize.py",
+       '    if any(f["state"] == "CANDIDATE" for f in findings):\n        return "CANDIDATE"\n    if not emittable(q, accept_partial):',
+       '    if not emittable(q, accept_partial):')],
+     """
+     f = [{"state": "CANDIDATE", "id": "ledger-x"}]
+     st = optimize.overall_status(f, {"comparable": []}, None, {}, False, effective="PARTIAL")
+     assert st == "CANDIDATE", f"status {st} sementara kandidat tetap ditulis"
+     """),
+
     ("scope isolation: populasi berbeda tak pernah dilebur",
      [("optimize.py",
        """        if scope_of(r) != n_scope:
@@ -96,10 +335,21 @@ CASES = [
      """),
 
     ("fail-closed: bukti PARTIAL tak boleh melahirkan kandidat",
-     [("optimize.py", 'usable = accept_partial or quality == "COMPLETE"', "usable = True")],
+     # Sebelum 1.3.1 mutasi ini menyasar `usable = accept_partial or quality == "COMPLETE"`,
+     # yang hanya menjaga jalur LIVE. Sekarang menyasar satu gerbang yang sama untuk live DAN
+     # history, dan oracle-nya menguji kedua jalur itu.
+     [("optimize.py", "    usable = emittable(quality, accept_partial)", "    usable = True")],
      """
      f = optimize.analyse(acc(quality="PARTIAL"), EMPTY_HIST, None, None, scope="s")
      assert [x["state"] for x in f] == ["OBSERVED"], "kandidat lahir dari sapuan setengah jadi"
+     recs = [rec(1000 + i*86400*7, {"Bash": 20.0 + i*9, "Read": 80.0 - i*9}) for i in range(9)]
+     for r in recs: r["evidence_quality"] = "PARTIAL"
+     keep, dropped = optimize.comparable(recs)
+     h = {"comparable": keep, "total": len(recs), "in_scope": len(recs), "rejected": {},
+          "dropped": dropped, "time_order": "ok"}
+     g = optimize.analyse(None, h, None, None, scope="default")
+     assert not [x for x in g if x["state"] == "CANDIDATE"], \
+         "kandidat lahir dari history yang seluruhnya PARTIAL"
      """),
 
     ("candidate_id membawa scope: dua peran tak menabrak satu berkas",
@@ -115,15 +365,14 @@ CASES = [
     ("nol spam usulan: kandidat yang ada tidak ditulis ulang",
      [("optimize.py",
        """        if os.path.exists(p):
-            existing.append(f["candidate_id"])
-            continue""",
+            # Never rewritten, never deleted — only classified.""",
        """        if False:
-            pass""")],
+            # Never rewritten, never deleted — only classified.""")],
      """
      f = optimize.analyse(acc(), EMPTY_HIST, None, None, scope="x")[0]
      out = os.path.join(D, "c")
      optimize.emit_candidates([f], out)
-     w2, e2, _ = optimize.emit_candidates([f], out)
+     w2, e2, _f2, _rr, _uv = optimize.emit_candidates([f], out)
      assert (len(w2), len(e2)) == (0, 1), "penjadwal menulis ulang usulan yang sama tiap siklus"
      """),
 

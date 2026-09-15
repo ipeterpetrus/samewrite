@@ -28,9 +28,13 @@ def check(label, got, want):
 
 
 def rec(ts, shares, scope="default", turns=1000, sessions=40, **kw):
+    # Since 1.3.1 a COMPLETE claim is checked against the record's own acquisition counters, so a
+    # fixture that means "a clean sweep" has to write them — which is what carry.history() has
+    # always produced. A record that omits them is exercised deliberately below.
     r = {"schema_version": 2, "record_type": "carry_run", "ts": ts, "sessions": sessions,
          "turns": turns, "carry_bytes": 10 ** 7, "scanned": 100, "scope_id": scope,
          "workload_class": "", "evidence_quality": "COMPLETE",
+         "unreadable": 0, "oversize": 0, "skipped_by_limit": 0,
          "run_id": kw.pop("run_id", None) or carry.new_run_id(),
          "shares": shares, "bpt": {k: 1.0 for k in shares}}
     r.update(kw)
@@ -239,11 +243,11 @@ def main():
     check("candidate_id membawa scope-nya", f1["candidate_id"].split("-")[-2], "x")
 
     out2 = os.path.join(d, "cand_dedup")
-    w, e, _fail = optimize.emit_candidates([f1], out2)
+    w, e, _fail, _rr, _uv = optimize.emit_candidates([f1], out2)
     check("emisi pertama menulis", (len(w), len(e)), (1, 0))
-    w, e, _fail = optimize.emit_candidates([f2], out2)
+    w, e, _fail, _rr, _uv = optimize.emit_candidates([f2], out2)
     check("emisi kedua dgn bukti setara: EXISTING, nol penulisan ulang", (len(w), len(e)), (0, 1))
-    w, e, _fail = optimize.emit_candidates([far], out2)
+    w, e, _fail, _rr, _uv = optimize.emit_candidates([far], out2)
     check("bukti yang benar-benar bergerak: kandidat baru ditulis", (len(w), len(e)), (1, 0))
 
     # ------------------------------------------------------------ 8b. identitas tren stabil
@@ -314,6 +318,20 @@ def main():
     check("jalan sah -> exit 0 (penjadwal tak salah baca 'nihil' sbg rusak)", rc, 0)
     rc, _ = run(["--history", rise, "--ledger", empty, "--scan", "--strict-exit"])
     check("--strict-exit memetakan status ke exit code", rc, optimize.STATUS["CANDIDATE"])
+    # 1.3.1: record yang mengklaim COMPLETE tanpa menunjukkan counter-nya tidak bisa dipromosikan.
+    # Dicek di sini supaya penambahan counter ke fixture di atas tidak menyembunyikan aturan baru.
+    import json as _json
+    bare = os.path.join(d, "bare.jsonl")
+    with open(bare, "w", encoding="utf-8") as fh:
+        for r in [rec(100 + i * 86400 * 7, {"Bash": 20.0 + i * 9, "Read": 80.0 - i * 9})
+                  for i in range(9)]:
+            for k in ("unreadable", "oversize", "skipped_by_limit"):
+                r.pop(k, None)
+            fh.write(_json.dumps(r) + chr(10))
+    rc, raw = run(["--history", bare, "--ledger", empty, "--scan", "--json"])
+    ob = _json.loads(raw[raw.index("{"):raw.rindex("}") + 1])
+    check("record tanpa counter akuisisi tidak dipromosikan", ob["status"], "PARTIAL_EVIDENCE")
+    check("dan kualitas efektifnya UNKNOWN", ob["effective_evidence_quality"], "UNKNOWN")
     rc, _ = run(["--history", empty, "--ledger", empty, "--scan", "--strict-exit"])
     check("nol bukti + --strict-exit -> INSUFFICIENT_DATA", rc, optimize.STATUS["INSUFFICIENT_DATA"])
 

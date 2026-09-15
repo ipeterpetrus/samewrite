@@ -70,6 +70,7 @@ def scan_full(path):
     usage = collections.Counter()
     runtimes, models = collections.Counter(), collections.Counter()
     oversize = 0
+    malformed = 0
     for line in open(path, errors="replace"):
         if len(line) > MAX_LINE:              # counted, never silently dropped
             oversize += 1
@@ -80,6 +81,10 @@ def scan_full(path):
         try:
             o = json.loads(line)
         except Exception:
+            # A line that will not parse is evidence this sweep did not get. Skipping it is right —
+            # one torn tail must not discard a whole transcript — but skipping it SILENTLY is how a
+            # sweep that lost evidence goes on to describe itself as complete.
+            malformed += 1
             continue
 
         v = o.get("version")
@@ -129,7 +134,8 @@ def scan_full(path):
                     items.append((turn, n, "result:" + str(id2name.get(c.get("tool_use_id")))))
                 elif c.get("type") == "text":
                     items.append((turn, len(c.get("text", "")), "human"))
-    return turn, items, usage, {"runtimes": runtimes, "models": models, "oversize": oversize}
+    return turn, items, usage, {"runtimes": runtimes, "models": models, "oversize": oversize,
+                                "malformed": malformed}
 
 
 def bucket(src):
@@ -150,22 +156,33 @@ def bucket(src):
     return "other tools"
 
 
+def bounded_paths(paths, max_files=0):
+    """The N transcripts a bounded sweep looks at. ONE definition, for every caller.
+
+    A bound has to mean "the most RECENT N", not "the first N the filesystem listed": an
+    alphabetical prefix of a long-lived archive samples whatever was created first, which for a
+    24x7 population is the least informative slice there is. Two halves of one run that bound their
+    corpus differently are not measuring the same population, however close their numbers look.
+    """
+    paths = list(paths)
+    if not max_files or len(paths) <= max_files:
+        return paths
+    try:
+        return sorted(paths, key=lambda q: os.path.getmtime(q), reverse=True)[:max_files]
+    except OSError:
+        return paths[:max_files]
+
+
 def accumulate(paths, min_turns=50, max_files=0):
     carry, size, usage = collections.Counter(), collections.Counter(), collections.Counter()
     runtimes, models = collections.Counter(), collections.Counter()
     turns = sessions = 0
     unreadable = short = scanned = oversize = 0
+    malformed = 0
     skipped_by_limit = 0
     total_paths = len(paths)
     lengths = []
-    # A bound has to mean "the most RECENT N", not "the first N the filesystem listed". An
-    # alphabetical prefix of a long-lived archive is a sample of whatever was created first, which
-    # for a 24x7 population is the least informative slice there is.
-    if max_files and len(paths) > max_files:
-        try:
-            paths = sorted(paths, key=lambda q: os.path.getmtime(q), reverse=True)[:max_files]
-        except OSError:
-            paths = list(paths)[:max_files]
+    paths = bounded_paths(paths, max_files)
     for p in paths:
         scanned += 1
         try:
@@ -177,6 +194,7 @@ def accumulate(paths, min_turns=50, max_files=0):
             unreadable += 1
             continue
         oversize += meta.get("oversize", 0)
+        malformed += meta.get("malformed", 0)
         if N < min_turns:                   # stubs and aborted sessions carry nothing
             short += 1
             continue
@@ -195,14 +213,14 @@ def accumulate(paths, min_turns=50, max_files=0):
     # Provenance, not decoration: an analyser that cannot tell a complete sweep from a sweep that
     # hit unreadable files or a file cap will happily call a bounded corpus the population.
     quality = "COMPLETE"
-    if unreadable or oversize or skipped_by_limit:
+    if unreadable or oversize or skipped_by_limit or malformed:
         quality = "PARTIAL"
     if sessions == 0:
         quality = "INVALID" if scanned else "EMPTY"
     return dict(sessions=sessions, turns=turns, lengths=sorted(lengths),
                 carry=carry, size=size, usage=usage, runtimes=runtimes, models=models,
                 unreadable=unreadable, short=short, scanned=scanned, oversize=oversize,
-                skipped_by_limit=skipped_by_limit, quality=quality)
+                malformed=malformed, skipped_by_limit=skipped_by_limit, quality=quality)
 
 
 # Relative price of one token in each bucket, base input = 1.0. A bucket's share of the
@@ -347,6 +365,10 @@ def history(path, a, C, scope_id="default", workload_class=""):
            "workload_class": str(workload_class or "")[:32],
            "evidence_quality": a.get("quality", "COMPLETE"),
            "unreadable": a.get("unreadable", 0), "oversize": a.get("oversize", 0),
+           # added in 1.3.1: lines this sweep could not parse. Additive; an older record simply
+           # does not report it, and a reader treats absence as "not reported", never as proof of
+           # zero.
+           "malformed_lines": a.get("malformed", 0),
            "skipped_by_limit": a.get("skipped_by_limit", 0),
            "ts": int(time.time()), "sessions": a["sessions"], "turns": a["turns"],
            "carry_bytes": C, "scanned": a.get("scanned", 0),
