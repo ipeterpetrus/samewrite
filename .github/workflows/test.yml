@@ -32,6 +32,8 @@ jobs:
         run: python3 tests/test_adapters.py
       - name: evidence quality — no candidate from evidence nobody accepted (SW-1303)
         run: python3 tests/test_evidence_quality.py
+      - name: evidence integrity — self-consistent records, torn transcripts, provenance, side effects
+        run: python3 tests/test_evidence_integrity.py
       - name: the evidence-quality harness can actually fail (anti false-green)
         run: python3 tests/test_harness_selfcheck.py
       - name: install commands still describe this repository (paths, pins, archive shape)

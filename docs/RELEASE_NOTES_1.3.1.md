@@ -114,9 +114,49 @@ conservative direction is the safe one, and `--accept-partial` is the documented
 cost is stated rather than hidden: with a partial history on file, a live-only proposal waits for a
 complete sweep or an explicit acceptance.
 
+## Five more holes, found by the full independent review of this branch
+
+The complete diff was handed to an independent adversarial reviewer, which **blocked it**. Five HIGH
+findings, every one reproduced here before being accepted. Three were introduced by the first cut of
+this patch; two were older holes that ran straight through the new gate.
+
+| | what it was | where it came from |
+|---|---|---|
+| **H1** | a record claimed `COMPLETE` while its own counters recorded 5 unreadable files, 2 oversize lines and a file cap — and was promoted. A record with `sessions=turns=carry_bytes=0` was promoted too. | pre-existing: `valid_record()` never checked the counters |
+| **H2** | a torn JSON line in a transcript was skipped silently, so a sweep that lost evidence still reported `COMPLETE`. No history needed to defeat the gate. | pre-existing: `carry.scan_full()` swallowed `json.loads` failures with no counter |
+| **H3** | a candidate built from **accepted-PARTIAL** evidence was written with `effective_evidence_quality: COMPLETE` | this patch: provenance was stamped by a finding's position in a list |
+| **H4** | `HOST_BEHAVIOR_SHIFT` reported status 30 and exit 40 while writing a candidate file | this patch's own invariant, broken on a path it did not cover |
+| **H5** | the pre-1.3.1 artifact check was a substring search: prose satisfied it, an unreadable file counted as current, and invalid UTF-8 **crashed the run** | this patch |
+
+Now:
+
+- **A claim is checked against the record's own counters.** `derive_quality()` mirrors the producer's
+  rule in `carry.accumulate()` — the one place that knows how a sweep went — and a record's quality
+  is the worst of what it claims and what it can show. A counter that is negative, non-numeric or a
+  boolean makes the record `INVALID`. A schema-2 record that shows no counters at all cannot claim
+  completeness; it is `UNKNOWN`.
+- **A sweep that loses a line says so.** Malformed lines are counted, degrade the sweep to `PARTIAL`,
+  and travel into the history record as `malformed_lines`.
+- **Provenance is attached where a finding is created**, from the evidence that created it, through
+  `sampled()` and `from_ledger()`. No finding infers its source from list position.
+- **One promotion gate.** A population the analyser has declared is not one world is not evidence you
+  may promote from. A status that refuses promotion now leaves no candidate file behind, on every
+  path.
+- **Artifacts are parsed, not grepped.** `artifact_metadata()` reads the header block structurally
+  and reports `PROVEN_CURRENT`, `PRE_1_3_1_REVIEW_REQUIRED` or `UNREADABLE_OR_UNVERIFIABLE`. Anything
+  that cannot be read, decoded or parsed is unverifiable — never trusted, never rewritten, never
+  deleted.
+
+Three MEDIUM findings closed with them: `candidates_existing` keeps its original meaning as bare ids
+(the review states moved to their own additive fields, so a consumer treating an id as an id no
+longer breaks on upgrade); an unusable record can no longer become the comparability anchor and
+strand a complete population; and `carry.bounded_paths()` is now the single definition of a bounded
+sample, so the carry sweep and the listing scan stop measuring different files under `--max-files`.
+
 ## How it is held
 
-A frozen 15-case matrix (A–O) written before the implementation, five mutation cases that each go
-RED when the fix is reversed, a self-check that plants three corruptions in the regression harness
-and requires the harness itself to fail, and the real integration path — six bounded sweeps through
-`carry.py`, then `optimize.py` — asserted end to end.
+A frozen 15-case matrix (A–O) and a second frozen matrix for the five blockers, both written with
+their expected outcomes before the implementation; **29 mutation cases** that each go RED when the
+fix they guard is reversed; a self-check that plants three corruptions in the regression harness and
+requires the harness itself to fail; and the real integration path — six bounded sweeps through
+`carry.py`, then `optimize.py` — asserted end to end. 645 assertions across fifteen suites.

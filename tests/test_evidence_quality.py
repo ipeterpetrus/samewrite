@@ -179,10 +179,16 @@ def body():
           optimize.quality_of({"schema_version": 1}), "UNKNOWN")
     check("an unrecognised evidence_quality is UNKNOWN",
           optimize.quality_of({"evidence_quality": "PROBABLY_FINE"}), "UNKNOWN")
-    check("a recognised value passes through when the schema can attest it",
-          optimize.quality_of({"schema_version": 2, "evidence_quality": "PARTIAL"}), "PARTIAL")
+    # Since 1.3.1 a claim is only as good as the counters backing it, so these fixtures state the
+    # acquisition counters a real sweep always writes. The counter-less case is asserted below
+    # rather than left implicit.
+    CLEAN = {"unreadable": 0, "oversize": 0, "skipped_by_limit": 0}
+    check("a recognised value passes through when the schema and counters attest it",
+          optimize.quality_of(dict(CLEAN, schema_version=2, evidence_quality="PARTIAL")), "PARTIAL")
     check("the same value on a record with no schema at all is UNKNOWN",
           optimize.quality_of({"evidence_quality": "PARTIAL"}), "UNKNOWN")
+    check("a schema-2 record that shows no counters cannot claim completeness",
+          optimize.quality_of({"schema_version": 2, "evidence_quality": "COMPLETE"}), "UNKNOWN")
     check("worst-of picks the worst, not the most common",
           optimize.worst_quality(["COMPLETE", "COMPLETE", "PARTIAL", "COMPLETE"]), "PARTIAL")
     check("worst-of over nothing is COMPLETE (a finding with no sampled evidence is not degraded)",
@@ -277,8 +283,9 @@ def body():
     # H01 — a schema-1 record cannot attest a field its own writer never had
     check("schema 1 claiming COMPLETE is UNKNOWN, not COMPLETE",
           optimize.quality_of({"schema_version": 1, "evidence_quality": "COMPLETE"}), "UNKNOWN")
-    check("schema 2 claiming COMPLETE is trusted",
-          optimize.quality_of({"schema_version": 2, "evidence_quality": "COMPLETE"}), "COMPLETE")
+    check("schema 2 claiming COMPLETE is trusted when its counters agree",
+          optimize.quality_of({"schema_version": 2, "evidence_quality": "COMPLETE",
+                               "unreadable": 0, "oversize": 0, "skipped_by_limit": 0}), "COMPLETE")
     h01 = history("h_schema1.jsonl", moving(schema=1, quality="COMPLETE"))
     rc, j, n = run(h01)
     check("a whole history of schema-1 COMPLETE claims cannot promote", j.get("status"),
