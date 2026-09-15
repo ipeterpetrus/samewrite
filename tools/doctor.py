@@ -261,7 +261,12 @@ def main():
     if drift:
         print("\n  version drift     " + ", ".join(f"{h} has {v}, this checkout is {ver}"
                                                    for h, v in drift))
-        print("                    expected on a release branch: the tag is not published yet")
+        # Two ordinary reasons, and neither is a fault: the host is on an older published release
+        # and can be upgraded with its own install command, or this checkout is a release branch
+        # whose tag does not exist yet. Which one it is depends on facts this tool cannot see from
+        # here, so it says both rather than guessing one.
+        print("                    either the host is on an older release, or this checkout is "
+              "ahead of\n                    what is published. Not an error by itself.")
 
     c = hosts[0]
     print("\nClaude Code detail")
