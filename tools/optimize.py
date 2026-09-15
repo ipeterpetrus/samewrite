@@ -72,14 +72,30 @@ STATES = ("OBSERVED", "HYPOTHESIS", "CANDIDATE", "EXPERIMENTAL", "PROVEN", "REJE
 QUALITY_RANK = {"COMPLETE": 0, "PARTIAL": 1, "EMPTY": 2, "UNKNOWN": 3, "INVALID": 4}
 
 
-def quality_of(rec):
-    """Evidence quality of one history record. A MISSING value is UNKNOWN, never COMPLETE.
+SCHEMA_WITH_QUALITY = 2          # the first history schema that records how a sweep was taken
 
-    Schema 0/1 predates the field entirely, so absence proves nothing about how that sweep was
-    taken. Reading it as COMPLETE is the same class of error as reading a truncated log as a pass:
-    it converts "not recorded" into "fine". Such a record stays readable and stays visible in
-    reports — it simply cannot carry a promotion.
+
+def quality_of(rec):
+    """Evidence quality of one history record. UNKNOWN unless the record can actually attest it.
+
+    Two ways a record fails to attest:
+
+      * the value is missing or unrecognised;
+      * the record declares a schema older than the field itself. Schema 0/1 predates
+        `evidence_quality`, so a schema-1 record carrying COMPLETE is asserting something its own
+        writer could not have known. That is not provenance, it is a claim — from a hand-edited
+        file or a migration that back-filled a default — and trusting it would reopen the hole this
+        release closes through a side door.
+
+    Either way the record stays readable and stays visible in reports. It simply cannot carry a
+    promotion. Reading "not recorded" as "fine" is how a truncated log becomes a pass.
     """
+    try:
+        schema = int(rec.get("schema_version") or 0)
+    except (TypeError, ValueError):
+        schema = 0
+    if schema < SCHEMA_WITH_QUALITY:
+        return "UNKNOWN"
     q = rec.get("evidence_quality")
     return q if isinstance(q, str) and q in QUALITY_RANK else "UNKNOWN"
 
@@ -227,14 +243,24 @@ def load_history(path):
                 continue
             ok, why = valid_record(o)
             (recs.append(o) if ok else rejected.__setitem__(why, rejected[why] + 1))
-    seen, uniq = set(), []
+    seen, uniq = {}, []
     for r in recs:
         rid = r.get("run_id")
         if isinstance(rid, str) and rid:
             if rid in seen:
                 rejected["duplicate run_id (retry)"] += 1
+                # The retry is dropped as an observation, but not as PROVENANCE. One run_id that
+                # says COMPLETE once and PARTIAL once cannot be resolved in favour of the better
+                # claim: the sweep that reported less is part of what this id actually saw. Keep
+                # the worse quality on the record that survives.
+                kept = seen[rid]
+                worse = worst_quality([quality_of(kept), quality_of(r)])
+                if worse != quality_of(kept):
+                    kept["evidence_quality"] = worse
+                    kept["schema_version"] = max(int(kept.get("schema_version") or 0),
+                                                 SCHEMA_WITH_QUALITY)
                 continue
-            seen.add(rid)
+            seen[rid] = r
         uniq.append(r)
     return uniq, rejected, lines
 
@@ -538,13 +564,18 @@ def overall_status(findings, hist, live, pop, accept_partial, effective=None):
     if pop.get("host_shift"):
         return "HOST_BEHAVIOR_SHIFT"
     q = effective if effective is not None else effective_quality(live, hist.get("comparable"))
+    # A status that says PARTIAL_EVIDENCE while candidate files sit on disk is a contradiction a
+    # machine cannot resolve. Findings that draw on no sampled evidence — the hook ledger counts
+    # writes that were actually denied, which no sweep bound can make partial — are still
+    # promotable, so if anything WAS produced the status says so and the refused sampled evidence
+    # travels in effective_evidence_quality instead of being smuggled into the status word.
+    if any(f["state"] == "CANDIDATE" for f in findings):
+        return "CANDIDATE"
     if not emittable(q, accept_partial):
         # One status for "this evidence may not carry a promotion"; the precise reason travels in
         # effective_evidence_quality so automation need not parse prose and the CLI's documented
         # status vocabulary and exit codes stay exactly as they were.
         return "PARTIAL_EVIDENCE"
-    if any(f["state"] == "CANDIDATE" for f in findings):
-        return "CANDIDATE"
     if not live and len(hist.get("comparable", [])) < MIN_HISTORY_FOR_TREND:
         return "INSUFFICIENT_DATA"
     return "NO_ACTION"
@@ -639,7 +670,16 @@ def emit_candidates(findings, outdir):
         d = os.path.join(outdir, f["candidate_id"])
         p = os.path.join(d, "HYPOTHESIS.md")
         if os.path.exists(p):
-            existing.append(f["candidate_id"])
+            # An artifact written before 1.3.1 carries no evidence provenance, so it may be the
+            # residue of the defect this release fixes — a proposal built on evidence nobody
+            # accepted. It is never rewritten or deleted here; it is named separately so a reviewer
+            # knows it has not been re-derived under the current rule.
+            try:
+                stale = "effective_evidence_quality:" not in open(p, encoding="utf-8").read()
+            except OSError:
+                stale = False
+            existing.append(f["candidate_id"] + (" [pre-1.3.1: no evidence provenance, re-review]"
+                                                 if stale else ""))
             continue
         try:
             os.makedirs(d, exist_ok=True)

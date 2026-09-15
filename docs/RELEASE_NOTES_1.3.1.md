@@ -95,6 +95,25 @@ contract.
 | `TRUTH_RULE` | **NOT_PROMOTED** |
 | observer behaviour | `carry.history()` is untouched; the append protocol and its documented cosmetic blank line are unchanged |
 
+## Four more holes, found by adversarial review of this fix
+
+An independent reviewer was given the diff and asked to make the patched optimizer promote evidence
+that should fail closed. It found four ways, all reproduced here before being closed:
+
+| | |
+|---|---|
+| a schema-1 record carrying `evidence_quality: COMPLETE` | Schema 0/1 predates the field, so such a claim comes from a hand-edited file or a migration default — not from the sweep. Any record declaring a schema older than 2 is now `UNKNOWN` whatever it asserts. |
+| a retry that reported a worse sweep | The same `run_id` saying `COMPLETE` once and `PARTIAL` once was resolved in favour of the better claim, because the duplicate was dropped whole. The retry is still dropped as an observation, but its worse quality now survives on the record that remains. |
+| `PARTIAL_EVIDENCE` while candidate files existed | Ledger findings count writes a hook actually denied, which no sweep bound can make partial, so they stay promotable. The status now reports what the run produced; the refused sampled evidence travels in `effective_evidence_quality` instead of being smuggled into the status word. A machine is never told `PARTIAL_EVIDENCE` while a candidate sits on disk. |
+| candidates written before this release | They carry no provenance and were reported as ordinary `existing`. They are still never rewritten or deleted, but they are now named as `pre-1.3.1: no evidence provenance, re-review`. |
+
+One reviewer finding was **not** taken: that a partial history should not demote a concentration
+finding measured purely from a complete live sweep. That is true of the measurement, and the gate
+here is deliberately broader — one quality for the whole run. For a patch closing a fail-open, the
+conservative direction is the safe one, and `--accept-partial` is the documented way through. The
+cost is stated rather than hidden: with a partial history on file, a live-only proposal waits for a
+complete sweep or an explicit acceptance.
+
 ## How it is held
 
 A frozen 15-case matrix (A–O) written before the implementation, five mutation cases that each go

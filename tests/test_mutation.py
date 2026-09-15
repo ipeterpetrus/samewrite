@@ -101,8 +101,13 @@ CASES = [
     ("evidence_quality yang HILANG bukan COMPLETE",
      [("optimize.py", '    q = rec.get("evidence_quality")\n    return q if isinstance(q, str) and q in QUALITY_RANK else "UNKNOWN"\n', '    q = rec.get("evidence_quality")\n    return q if isinstance(q, str) and q in QUALITY_RANK else "COMPLETE"\n')],
      """
-     assert optimize.quality_of({"schema_version": 1}) == "UNKNOWN", "record lama dibaca COMPLETE"
-     assert not optimize.emittable(optimize.quality_of({}), False), "record tanpa kualitas dipromosikan"
+     # Schema 2 DECLARES that it records quality, lalu tidak mencantumkannya. Hanya bentuk ini
+     # yang sampai ke default nilai-hilang; schema 0/1 sudah dijegal lebih dulu oleh gerbang skema,
+     # jadi memakai schema 1 di sini membuat mutan tetap HIJAU dan invariannya tak terjaga.
+     assert optimize.quality_of({"schema_version": 2}) == "UNKNOWN", \
+         "record schema-2 tanpa evidence_quality dibaca COMPLETE"
+     assert not optimize.emittable(optimize.quality_of({"schema_version": 2}), False), \
+         "record tanpa kualitas dipromosikan"
      """),
 
     ("INVALID tidak pernah disahkan oleh --accept-partial",
@@ -126,6 +131,38 @@ CASES = [
      t = optimize.spec_text(f)
      assert "effective_evidence_quality: PARTIAL" in t, "provenance kualitas hilang dari kandidat"
      assert "partial_evidence_accepted: true" in t, "penanda penerimaan hilang dari kandidat"
+     """),
+
+    ("schema 0/1 tak bisa menyatakan kualitas yang ia dahului",
+     [("optimize.py",
+       "    if schema < SCHEMA_WITH_QUALITY:\n        return \"UNKNOWN\"",
+       "    if False:\n        return \"UNKNOWN\"")],
+     """
+     assert optimize.quality_of({"schema_version": 1, "evidence_quality": "COMPLETE"}) == "UNKNOWN", \
+         "record schema-1 dipercaya menyatakan COMPLETE"
+     """),
+
+    ("retry dgn sapuan lebih buruk tidak mencuci provenance",
+     [("optimize.py",
+       "                if worse != quality_of(kept):",
+       "                if False:")],
+     """
+     rid = "c"*32
+     a = rec(100, {"Bash": 50.0, "Read": 50.0}, run_id=rid); a["evidence_quality"] = "COMPLETE"
+     b = rec(100, {"Bash": 50.0, "Read": 50.0}, run_id=rid); b["evidence_quality"] = "PARTIAL"
+     p = w(os.path.join(D, "retry.jsonl"), [a, b])
+     kept, _rej, _n = optimize.load_history(p)
+     assert "PARTIAL" in {optimize.quality_of(r) for r in kept}, "kualitas retry yang buruk hilang"
+     """),
+
+    ("status tidak boleh bertentangan dgn berkas kandidat yang ditulis",
+     [("optimize.py",
+       '    if any(f["state"] == "CANDIDATE" for f in findings):\n        return "CANDIDATE"\n    if not emittable(q, accept_partial):',
+       '    if not emittable(q, accept_partial):')],
+     """
+     f = [{"state": "CANDIDATE", "id": "ledger-x"}]
+     st = optimize.overall_status(f, {"comparable": []}, None, {}, False, effective="PARTIAL")
+     assert st == "CANDIDATE", f"status {st} sementara kandidat tetap ditulis"
      """),
 
     ("scope isolation: populasi berbeda tak pernah dilebur",
@@ -182,10 +219,9 @@ CASES = [
     ("nol spam usulan: kandidat yang ada tidak ditulis ulang",
      [("optimize.py",
        """        if os.path.exists(p):
-            existing.append(f["candidate_id"])
-            continue""",
+            # An artifact written before 1.3.1 carries no evidence provenance, so it may be the""",
        """        if False:
-            pass""")],
+            # An artifact written before 1.3.1 carries no evidence provenance, so it may be the""")],
      """
      f = optimize.analyse(acc(), EMPTY_HIST, None, None, scope="x")[0]
      out = os.path.join(D, "c")

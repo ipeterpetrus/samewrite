@@ -179,8 +179,10 @@ def body():
           optimize.quality_of({"schema_version": 1}), "UNKNOWN")
     check("an unrecognised evidence_quality is UNKNOWN",
           optimize.quality_of({"evidence_quality": "PROBABLY_FINE"}), "UNKNOWN")
-    check("a recognised value passes through",
-          optimize.quality_of({"evidence_quality": "PARTIAL"}), "PARTIAL")
+    check("a recognised value passes through when the schema can attest it",
+          optimize.quality_of({"schema_version": 2, "evidence_quality": "PARTIAL"}), "PARTIAL")
+    check("the same value on a record with no schema at all is UNKNOWN",
+          optimize.quality_of({"evidence_quality": "PARTIAL"}), "UNKNOWN")
     check("worst-of picks the worst, not the most common",
           optimize.worst_quality(["COMPLETE", "COMPLETE", "PARTIAL", "COMPLETE"]), "PARTIAL")
     check("worst-of over nothing is COMPLETE (a finding with no sampled evidence is not degraded)",
@@ -266,6 +268,76 @@ def body():
     rc_ok, _j, _n = run(history("h_ok.jsonl", moving()), strict=True)
     check("--strict-exit still returns the CANDIDATE code on complete evidence", rc_ok,
           optimize.STATUS["CANDIDATE"])
+
+    # ------------------------------------------------------------ closed after adversarial review
+    # Four bypasses an independent reviewer found in the first cut of this fix. Each is held here
+    # so it cannot be reopened quietly.
+    print("\nbypasses found by adversarial review, now closed")
+
+    # H01 — a schema-1 record cannot attest a field its own writer never had
+    check("schema 1 claiming COMPLETE is UNKNOWN, not COMPLETE",
+          optimize.quality_of({"schema_version": 1, "evidence_quality": "COMPLETE"}), "UNKNOWN")
+    check("schema 2 claiming COMPLETE is trusted",
+          optimize.quality_of({"schema_version": 2, "evidence_quality": "COMPLETE"}), "COMPLETE")
+    h01 = history("h_schema1.jsonl", moving(schema=1, quality="COMPLETE"))
+    rc, j, n = run(h01)
+    check("a whole history of schema-1 COMPLETE claims cannot promote", j.get("status"),
+          "PARTIAL_EVIDENCE")
+    check("and writes nothing", n, 0)
+
+    # H02 — a retry that reports a worse sweep keeps its provenance
+    rid = "c" * 32
+    pair = moving(n=8) + [rec(1000 + 8 * 86400 * 7, {"Bash": 92.0, "Read": 8.0}, "COMPLETE"),
+                          rec(1000 + 8 * 86400 * 7, {"Bash": 92.0, "Read": 8.0}, "PARTIAL")]
+    pair[-2]["run_id"] = pair[-1]["run_id"] = rid
+    h02 = history("h_retry.jsonl", pair)
+    kept, rej, _ = optimize.load_history(h02)
+    check("the duplicate is still dropped as an observation",
+          rej["duplicate run_id (retry)"], 1)
+    check("but its worse quality survives on the record that remains",
+          "PARTIAL" in {optimize.quality_of(r) for r in kept}, True)
+    rc, j, n = run(h02)
+    check("so a COMPLETE-then-PARTIAL retry cannot promote", j.get("status"), "PARTIAL_EVIDENCE")
+    check("and writes nothing", n, 0)
+
+    # H04 — status may not contradict what is on disk
+    led = os.path.join(WORK, "ledger.jsonl")
+    with open(led, "w", encoding="utf-8") as fh:
+        for i in range(300):
+            fh.write(json.dumps({"ts": 1 + i, "host": "h", "event": "checked", "bytes": 10}) + "\n")
+    out = tempfile.mkdtemp(dir=WORK)
+    r = subprocess.run([PY, os.path.join(TOOLS, "optimize.py"), "--history",
+                        history("h_led.jsonl", moving(quality="PARTIAL")), "--scan", "--json",
+                        "--ledger", led, "--emit-candidate", out], capture_output=True, text=True)
+    j = json.loads(r.stdout)
+    files = sum(len(f) for _r, _d, f in os.walk(out))
+    check("a run that wrote a candidate does not report PARTIAL_EVIDENCE",
+          (j.get("status") == "PARTIAL_EVIDENCE" and files > 0), False)
+    check("the ledger candidate is still produced from evidence sampling cannot degrade",
+          files >= 1, True)
+    check("and the refused sampled evidence is still visible to a machine",
+          j.get("effective_evidence_quality"), "PARTIAL")
+    check("the sampled findings themselves are not promoted",
+          [f["state"] for f in j["findings"] if f["id"].startswith("trend-")], ["OBSERVED"])
+
+    # H05 — an artifact written before this release is not a current one
+    out5 = tempfile.mkdtemp(dir=WORK)
+    hp5 = history("h_pre131.jsonl", moving())
+    subprocess.run([PY, os.path.join(TOOLS, "optimize.py"), "--history", hp5, "--scan",
+                    "--emit-candidate", out5], capture_output=True, text=True)
+    made = [os.path.join(rt, f) for rt, _d, fs in os.walk(out5) for f in fs]
+    check("a candidate was written to age", len(made), 1)
+    if made:
+        txt = open(made[0], encoding="utf-8").read()
+        open(made[0], "w", encoding="utf-8").write("\n".join(
+            l for l in txt.splitlines()
+            if not l.startswith(("effective_evidence_quality:", "partial_evidence_accepted:"))))
+        r5 = subprocess.run([PY, os.path.join(TOOLS, "optimize.py"), "--history", hp5, "--scan",
+                             "--emit-candidate", out5], capture_output=True, text=True)
+        check("a pre-1.3.1 artifact is named as needing re-review, not reported as current",
+              "pre-1.3.1" in r5.stdout, True)
+        check("and it is neither rewritten nor deleted",
+              "effective_evidence_quality:" not in open(made[0], encoding="utf-8").read(), True)
 
     # ------------------------------------------------------------ the real AI-VOS path
     # Not a synthetic history: drive the actual commands a 24x7 operator runs. Bounded sweeps are
