@@ -42,15 +42,31 @@ def repo_version():
         return "?"
 
 
-def run(cmd, timeout=60):
-    """-> (rc, text). A tool that is not installed is not a crash, it is an answer."""
+def run(cmd, timeout=60, merge=True):
+    """-> (rc, text). A tool that is not installed is not a crash, it is an answer.
+
+    `merge=False` keeps stderr OUT of the result. That matters for JSON probes: a shell wrapper or
+    a shim can print a banner to stderr, and merging it into stdout corrupts the document. This
+    exact thing happened here — a quota-warning banner made a healthy `codex plugin list --json`
+    unparseable, and the doctor reported NOT_OBSERVABLE for a host it could see perfectly well."""
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        return p.returncode, (p.stdout or "") + (p.stderr or "")
+        return p.returncode, (p.stdout or "") + ((p.stderr or "") if merge else "")
     except FileNotFoundError:
         return 127, ""
     except Exception as e:
         return -1, f"{type(e).__name__}"
+
+
+def first_json(text):
+    """The first complete JSON object in `text`, ignoring anything printed around it."""
+    i = text.find("{")
+    while i != -1:
+        try:
+            return json.JSONDecoder().raw_decode(text[i:])[0]
+        except ValueError:
+            i = text.find("{", i + 1)
+    return None
 
 
 def walk(root):
@@ -148,18 +164,15 @@ def codex():
     rc, v = run([binary, "--version"])
     out["version"] = v.strip().splitlines()[0] if rc == 0 else None
     out["home"] = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
-    rc, j = run([binary, "plugin", "list", "--json"], timeout=180)
+    rc, j = run([binary, "plugin", "list", "--json"], timeout=180, merge=False)
     out["cli_lists_samewrite"] = None
-    if rc == 0 and "{" in j:
-        try:
-            d = json.loads(j[j.index("{"):])
-            hits = [p for p in d.get("installed", []) if p.get("name") == "samewrite"]
-            out["cli_lists_samewrite"] = bool(hits)
-            if hits:
-                out["installed_version"] = hits[0].get("version")
-                out["enabled"] = hits[0].get("enabled")
-        except Exception:
-            pass
+    d = first_json(j) if rc == 0 else None
+    if isinstance(d, dict):
+        hits = [q for q in d.get("installed", []) if q.get("name") == "samewrite"]
+        out["cli_lists_samewrite"] = bool(hits)
+        if hits:
+            out["installed_version"] = hits[0].get("version")
+            out["enabled"] = hits[0].get("enabled")
     out["status"] = OK if out.get("cli_lists_samewrite") else (
         NO if out.get("cli_lists_samewrite") is False else UNK)
     return out
