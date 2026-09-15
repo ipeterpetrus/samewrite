@@ -160,7 +160,18 @@ def main():
         check(f"{n} penulis paralel: pembaca menerima semuanya", (len(recs), sum(rej.values())), (n, 0))
 
     # ------------------------------------------------------------ 5. konsistensi pasca-crash
-    good = open(os.path.join(d, "conc32.jsonl"), encoding="utf-8").read().splitlines()
+    # Blank lines are filtered out of the SETUP, not out of an assertion. Under 64 concurrent
+    # writers the append guard in carry.history() occasionally emits one: the kernel extends a file
+    # page by page, so an in-flight append is briefly visible as a tail with no newline, the guard
+    # cannot tell that from a crash-truncated tail, and it inserts a separator that turns out not to
+    # have been needed. Measured on this machine: ~10 rounds in 40 at 64 writers, and with the guard
+    # removed entirely, 0 in 40 — so the guard is the source and the effect is cosmetic. Every
+    # record still lands intact (64 lines, 64 parsed, 64 distinct run_ids in every round) and both
+    # readers skip blank lines. What this section tests is that a TORN line is rejected and the good
+    # records around it survive; an unrelated blank line in the fixture would shift the slice below
+    # and fail that test for a reason it is not about.
+    good = [l for l in open(os.path.join(d, "conc32.jsonl"), encoding="utf-8").read().splitlines()
+            if l.strip()]
     torn = os.path.join(d, "torn.jsonl")
     with open(torn, "w", encoding="utf-8") as fh:
         fh.write("\n".join(good[:10]) + "\n")
