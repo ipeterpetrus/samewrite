@@ -24,11 +24,11 @@ refused install all clean up after themselves, and your own shell traps are unto
 routes are **pinned to a release tag**, not to `main`, so what you install today is what you
 inspected. Claude Code and Codex use their own package managers, with their own update semantics.
 
-The pinned URLs name **the same version as this README** — read this file at tag `v1.3.0` and the
-commands install `v1.3.0`. That is the point of pinning: a reader must never install a different
-version than the one whose text they just read. On an unreleased branch those two URLs 404 until
-the tag is published; the commands are still the right commands, they are just not yet downloadable.
-`python3 tests/test_install_paths.py` checks the shape they depend on without a network.
+The pinned URLs name **the same version as this README**: read this file at tag `v1.3.0` and the
+commands install `v1.3.0`. That is the whole point of pinning — nobody should end up installing a
+version other than the one whose text they just read. `python3 tests/test_install_paths.py` checks
+that pairing offline, which is also how a release branch catches a stale pin before anyone
+publishes it.
 
 After installing on Claude Code, **start a new session** — a running session cannot pick up a skill
 that was installed after it started.
