@@ -1,52 +1,82 @@
 # samewrite
 
-**Token-efficient coding-agent skill that reduces avoidable context, tool noise, edits and retries
-while preserving correctness — and measures whether the optimization actually pays.** One canonical
-skill, one optional hook, and the measurement tools behind every number here.
+**Spend tokens on reasoning, not repetition.**
+
+SameWrite is an evidence-driven efficiency skill for coding agents: less avoidable context, tool
+noise, editing and retry work, without trading away correctness.
 
 **Measured, not promised. Losing experiments stay published.**
 
-| measured fact | number | how |
+## Install — one command per host
+
+| host | install | invoke |
 |---|---|---|
-| where a session's tokens actually go | Bash + Read results **63.8%** of carry; injected scaffolding 15.3%; prose 5.6%; Write/Edit 9.5% | 1,316 Claude Code transcripts, 237,541 turns |
-| overwrites byte-identical to what is on disk | **20.8%** (154/741) — the guard hook denies them | same corpus |
-| one terseness sentence vs no instruction | **−22.7%** output tokens, English replication **−19.6%**, facts kept 100% | pre-registered A/B, 16 pairs each |
-| the same intent as a 4.7 kB always-on block | **−0.8%** over the sentence (p = 0.86) | pre-registered A/B |
-| this skill vs the previous SameWrite on correctness and cost | non-inferior: 26 vs 25 correct of 32; cost within noise | confirmatory run, 16 fresh cases × 2 reps |
+| **Claude Code** | `claude plugin marketplace add ipeterpetrus/samewrite && claude plugin install samewrite@samewrite` | `/samewrite` |
+| **Codex** | `codex plugin marketplace add ipeterpetrus/samewrite && codex plugin add samewrite@samewrite` | `$samewrite`, or let it route on the description |
+| **Hermes Agent** | `hermes skills install https://raw.githubusercontent.com/ipeterpetrus/samewrite/v1.2.1/adapters/hermes/samewrite/SKILL.md --yes` | `/samewrite` |
+| **OpenClaw** | `d=$(mktemp -d) && curl -fsSL https://github.com/ipeterpetrus/samewrite/archive/refs/tags/v1.2.1.tar.gz \| tar -xz -C "$d" && openclaw skills install "$d"/samewrite-*/skills/samewrite && rm -rf "$d"` | `$samewrite` or `/skill samewrite` |
 
-> **Status:** 1.2.1 is on `main` and is what the marketplace path below installs. The skill and
-> hooks it ships are byte-identical to 1.1.0 — everything new is the measurement layer, hardened for
-> many agents running continuously, and it adds **zero** bytes to what a model reads
-> ([1.2.0 notes](docs/RELEASE_NOTES_1.2.0.md), [1.2.1 patch](docs/RELEASE_NOTES_1.2.1.md)).
-> Its headline experiment came back
-> **NOT_PROVEN**: overall token savings were not established, and that result is published rather
-> than buried. Upgrading from 1.0.0 or 1.1.0 is covered in [Install](#install).
+Every command above was executed in an isolated home or state directory and is reported only
+because it worked there. The two raw-URL routes are **pinned to a release tag**, not to `main`, so
+what you install today is what you inspected. Claude Code and Codex use their own package managers,
+which carry their own update semantics.
 
-## Install
+The pinned URLs name **`v1.2.1`, the current published release**. They move to `v1.3.0` when 1.3.0
+is actually released — not when this branch says 1.3.0. A README that advertises a tag nobody can
+download yet is the same defect as a status line claiming a version that is not on `main`.
 
-```
-/plugin marketplace add ipeterpetrus/samewrite
-/plugin install samewrite@samewrite
-```
-
-Or copy `skills/samewrite/` into `~/.claude/skills/`. That is the whole skill: one listing entry
-of **415 bytes** (~104 tokens), carried by every turn, and a 4.7 kB body loaded only when you type
-`/samewrite` or the model decides to invoke it. Measured, not estimated — and in headless
-`claude -p` runs the body was invoked 0 times in 174 runs, so for those the 415 bytes is the whole
-cost.
-
-Optional, separate on purpose — the guard that denies a `Write` identical to what is already on
-disk (60 lines, fail-open, no network):
+After installing on Claude Code, **start a new session** — a running session cannot pick up a skill
+that was installed after it started.
 
 ```bash
-git clone https://github.com/ipeterpetrus/samewrite && cd samewrite
-python3 tests/test_write_noop_guard.py     # 64 PASS expected
-bash hooks/install.sh                      # registers PreToolUse(Write); backs up settings.json
-bash hooks/uninstall.sh                    # removes only samewrite's entries, nothing else
+python3 tools/doctor.py     # what is actually installed, observed rather than assumed
 ```
 
-Upgrading from 1.0.0: `/plugin update samewrite@samewrite`. `/edit-discipline` keeps working as a
-hidden alias; rerunning `hooks/install.sh` recognises the 1.0.0 hook entry and adds nothing.
+## Supported hosts
+
+| host | core skill | unused body | host-specific extras | observer | tested against |
+|---|---|---|---|---|---|
+| Claude Code | **VERIFIED** | 0 B body · 415 B listing | write no-op guard, optional output sentence | generic offline | 2.1.271 |
+| Codex | **VERIFIED** | `NOT_OBSERVABLE` | native plugin, no hooks | generic offline | codex-cli 0.153.2 |
+| Hermes Agent | **VERIFIED** | 0 B body · 80 B listing | none | `DEFERRED_BY_SCOPE` | 0.21.3 / `437116f` |
+| OpenClaw | **VERIFIED** | 0 B body · ~440 B catalog | none | `UNTESTED` | 2026.9.4 / `388f57a` |
+
+The write guard and the output sentence are **Claude Code hooks**. They are not ported to the other
+hosts and are not claimed there. The skill body is identical everywhere: all four hosts load the
+same file, and where a host caps its routing description the adapter shortens *that field only*.
+
+Codex's unused-body cost is `NOT_OBSERVABLE` rather than a number, because measuring it would mean
+intercepting a prompt the host does not expose. Native support is verified independently of it.
+
+## Turning things on and off
+
+| component | default | on | off | model-context cost |
+|---|---|---|---|---|
+| SameWrite core | installed = discoverable; body loads on demand | host install command above | uninstall via the host | listing entry only until invoked |
+| Claude write no-op guard | **off** | `bash hooks/install.sh` | `bash hooks/uninstall.sh` (removes every SameWrite hook entry, not the guard alone) | 0 prompt bytes — a deterministic hook |
+| Claude compact output sentence | **off** | `bash hooks/install.sh --human-output` | `bash hooks/uninstall.sh` | ~170 B once per session. **NOT_PROVEN** to improve anything |
+| observer / history | manual | `python3 tools/carry.py --history ~/logs/carry_history.jsonl` | stop invoking it | **0** |
+| optimizer | manual | `python3 tools/optimize.py` | stop invoking it | **0**, and zero model calls |
+
+There are no modes. Nothing runs in the background, nothing is scheduled, and no daemon is
+installed. "Off" means you do not run it.
+
+## The strongest measured facts
+
+| measured | number | scope |
+|---|---|---|
+| where a session's tokens actually go | Bash + Read results **63.8%** of carry | 1,316 Claude Code transcripts, 237,541 turns |
+| overwrites byte-identical to what is already on disk | **20.8%** (154/741) — the guard denies them | same corpus |
+| one terseness sentence vs no instruction | **−22.7%** output tokens, facts kept 100% | pre-registered A/B, 16 pairs |
+| the same intent as a 4.7 kB always-on block | **−0.8%** over the sentence, p = 0.86 | pre-registered A/B |
+| observer added to a model's context | **0 bytes** | hashed policy tree, 80 transcripts |
+| Hermes unused skill body | **0 bytes** | isolated profile, 11/11 checks |
+| removing one stale hand-copied skill from a real profile | **−251 B per turn** | one machine's configuration, not a product saving |
+
+**Overall end-to-end token savings remain `NOT_PROVEN`.** The best measurement is −1.7%, cheaper on
+8 of 10 fixtures at p = 0.109 — smaller than the same rig's variance between two byte-identical
+arms. It is published in full under [evidence](#experiments-that-lose-stay-published) rather than
+rounded into a headline.
 
 ## 30 seconds
 
@@ -127,6 +157,7 @@ token-efficiency claim that has never been allowed to fail is not evidence.
 | vNext cost improvement over the previous skill | **within noise** | correctness was non-inferior, so the release shipped on correctness, not on a cost claim |
 | `bash-output-shaping`, the strongest candidate the optimizer found | **REJECTED — duplicated by platform behaviour** | 30,731 real Bash results: median 449 B, p90 2,246 B, **none above 30 kB**. The host already caps and spills to a file. See [docs/CANDIDATES.md](docs/CANDIDATES.md) |
 | the AI-VOS role matrix, 80 runs on Opus 5 | **NOT_PROVEN** | two byte-identical arms differed by more than any effect measured, so the honest answer is that this rig cannot resolve it at this sample size |
+| a persistent status-reporting rule, 130 runs on Opus 5 | **NOT_PROMOTED** | we tested whether one sentence could reduce unsupported success claims. It did not meet the pre-registered threshold, so no rule shipped. The baseline was already 4/24, and the remaining failures clustered in evidence *sampling* — truncated output, version mismatch, conflicting state — not in wording. See [experiments/truth/RESULTS.md](experiments/truth/RESULTS.md) |
 
 ## How it compares
 
@@ -171,6 +202,7 @@ avoid.
 |---|---|
 | **measured** | Bash + Read share of carry in the measured corpus · 20.8% of overwrites byte-identical to disk · the terseness experiment's −22.7% output tokens · Hermes: 80 B listing and **0 B** unused body · quality non-inferior on the tested fixtures · the observer adds **zero** default model-context bytes |
 | **NOT_PROVEN** | overall end-to-end SameWrite token savings. Observed −1.7%, cheaper on 8 of 10 fixtures, p = 0.109, and smaller than the rig's own measured null-vs-null variance |
+| **NOT_PROMOTED** | a persistent status-reporting rule. Tested over 130 runs on a benchmark whose null calibration passed; it did not meet the pre-registered threshold, so nothing shipped |
 | **UNTESTED** | GPT-5.6 Sol portability (the attempt returned 10/10 infrastructure errors) · the observer over native Hermes session history |
 
 ## Works with other agent skills
@@ -226,25 +258,20 @@ hidden reasoning tokens are not observable and are not claimed.
 
 ## Support matrix
 
-| host | status |
-|---|---|
-| Claude Code 2.1.270 (skill, hooks, installer) | VERIFIED — headless runs, clean-install and 1.0.0 → 1.1.0 upgrade acceptance |
-| Hermes Agent 0.21.3 (`1ad89ac`) — skill via `adapters/hermes/` | VERIFIED — installed into an isolated profile, discovered, listed, loaded, invoked and uninstalled; 11/11 checks |
-| Hermes Agent — observer / optimizer | UNTESTED — they run there (ordinary offline Python, exit 0) but have no reader for Hermes session files, so they measure nothing |
-| Hermes Agent — Claude Code hooks | NOT_APPLICABLE — `PreToolUse` / `SessionStart` are Claude Code contracts; Hermes' `pre_tool_call` shell hooks are a different surface and none is installed |
-| Codex / OpenCode via `adapters/AGENTS.samewrite.md` | INSTRUCTION_ONLY — a verification run on `gpt-5.6-sol` was attempted and returned **10/10 `INFRA_ERROR` (account usage limit)**, so the channel is UNTESTED, not passing and not failing |
-| Gemini CLI via `adapters/GEMINI.samewrite.md` | INSTRUCTION_ONLY |
-| Pi / OMP | UNSUPPORTED |
-| Windows paths | UNTESTED (POSIX paths with spaces and metacharacters are tested) |
+See [Supported hosts](#supported-hosts) at the top. Labels used there, and what each one costs to
+earn:
 
-**Hermes Agent.** SameWrite's canonical skill is installed and loaded by Hermes without
-transformation; the generated adapter differs from the Claude file in one field only, because
-Hermes truncates a skill description to 60 characters in its system prompt and the canonical
-description is 391. Measured in an isolated profile with no API key set: an **unused** SameWrite
-skill costs **80 bytes** in the system prompt and **0 bytes** of body — progressive loading is
-real, not claimed. Loading it on demand pulls 4,503 bytes. Reproduce with
-`experiments/hermes/acceptance_hermes.py`. Claude Code's hooks are Claude-specific and are not
-installed into Hermes.
+| label | means |
+|---|---|
+| `VERIFIED` | installed and exercised on that host in an isolated profile, by this repository's own acceptance script |
+| `DEFERRED_BY_SCOPE` | possible, audited, deliberately not built — see [docs/HERMES_OBSERVER.md](docs/HERMES_OBSERVER.md) |
+| `UNTESTED` | not run; never inferred from another host |
+| `NOT_OBSERVABLE` | the host does not expose what would have to be measured |
+| `INSTRUCTION_ONLY` | a generated instruction file, not a loaded skill |
+
+Codex / OpenCode via `adapters/AGENTS.samewrite.md` and Gemini CLI via `adapters/GEMINI.samewrite.md`
+remain `INSTRUCTION_ONLY`. Windows paths are `UNTESTED`; POSIX paths with spaces and metacharacters
+are tested.
 
 ## Safety / correctness
 
