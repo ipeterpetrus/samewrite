@@ -13,6 +13,21 @@ here reproduces its file paths, clause identifiers, revision hashes or wording; 
 only the mapping, stated in terms a reader outside that system can check against their own. Where
 the two designs disagree, this document says so rather than smoothing it over.
 
+**Binding.** This profile is bound to one revision of that material, by content:
+
+```text
+AI_VOS_PROFILE_BINDING = 463d02a1e79815ec   (sha256 over 9 canonical files, path-ordered, content only)
+```
+
+It is a digest of the bytes, not of the other system's commit ids — someone holding the same
+material reproduces the number, and someone who does not learns nothing from it. If it changes,
+this mapping is stale until re-read; that is the only thing the number is for.
+
+Re-read for this release: the canonical set was read again at its **current on-disk state**, and
+the mapping above still holds. It was **not** fetched or updated — `AI_VOS_MUTATION=NO` covers a
+`git fetch` into a governed workspace as much as it covers an edit, so the binding records what is
+actually there rather than what a network round-trip might have made of it.
+
 ## The correction that matters most
 
 An earlier draft of this profile described AI-VOS as "one 24x7 multi-agent deployment" with roles

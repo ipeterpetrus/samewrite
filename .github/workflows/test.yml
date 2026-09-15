@@ -30,6 +30,12 @@ jobs:
         run: python3 tests/test_health.py
       - name: adapters drift + command surface + version pins
         run: python3 tests/test_adapters.py
+      - name: install commands still describe this repository (paths, pins, archive shape)
+        run: python3 tests/test_install_paths.py
+      - name: the published OpenClaw one-liner cleans up on every outcome
+        # Offline: a local file:// tarball and a stub host. An install command that litters /tmp on
+        # failure is the kind of bug that only ever shows up on someone else's machine.
+        run: bash tests/test_oneliner_cleanup.sh
       - name: coexistence matrix (Ponytail / i-have-adhd / Caveman surfaces)
         run: python3 tests/test_coexist.py
       - name: offline optimizer (privacy canary, corruption, zero policy mutation)

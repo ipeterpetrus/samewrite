@@ -1,6 +1,6 @@
 {
   "repo": "NousResearch/hermes-agent",
-  "commit": "1ad89ac018f26a4f21817ebf37bb09f508656d63",
+  "commit": "437116f9497c80d242ce034ff7f5d81dc277a337",
   "version": "0.21.3",
   "measured": {
     "prompt_total_bytes": 1267,

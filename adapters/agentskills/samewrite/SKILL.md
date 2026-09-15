@@ -1,6 +1,6 @@
 ---
 name: samewrite
-description: Cheapest path to a correct, verified code change.
+description: Precision layer for code changes — read to the semantic scope, ask only when the ambiguity is material, make the minimum correct change, leave evidence that could have failed, and answer result-first with only what a human needs to act or verify. Use when editing existing code, fixing a bug, overwriting a file, or when session cost matters. Composes with Ponytail, Caveman and i-have-adhd.
 ---
 
 # samewrite

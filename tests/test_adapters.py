@@ -31,10 +31,17 @@ def main():
     for name, text in adapters.render().items():
         check(f"{name}: badan byte-identik dengan SKILL.md", text.endswith(body), True)
         if name.endswith("/SKILL.md"):
-            # Adapter berbentuk SKILL: host memuatnya sebagai skill, jadi front matter WAJIB ada —
-            # tapi front matter milik HOST itu, bukan salinan milik Claude.
-            check(f"{name}: membawa front matter host", text.startswith("---\n"), True)
-            check(f"{name}: deskripsi Claude 391 karakter TIDAK disalin", desc in text, False)
+            # Dua kelas adapter berbentuk SKILL, dan syaratnya BERBEDA:
+            #   passthrough  — berkas kanonik apa adanya (permukaan AgentSkills portabel)
+            #   host-shaped  — metadata dibentuk ulang utk batas host (Hermes memotong 60 karakter)
+            # Menuntut keduanya "jangan menyalin deskripsi kanonik" menghukum yang passthrough
+            # justru karena melakukan hal yang benar.
+            check(f"{name}: membawa front matter", text.startswith("---\n"), True)
+            passthrough = name.startswith("agentskills/")
+            if passthrough:
+                check(f"{name}: byte-identik dgn SKILL.md kanonik", text == skill, True)
+            else:
+                check(f"{name}: deskripsi kanonik TIDAK disalin ke host ber-batas", desc in text, False)
         else:
             # Adapter berbentuk berkas instruksi: front matter apa pun hanya jadi sampah teks.
             check(f"{name}: tak membawa front matter Claude", "name: samewrite" in text, False)
@@ -50,6 +57,29 @@ def main():
           "samewrite")
     check("hermes: nol penanda khusus Claude yang diabaikan diam-diam di sana",
           "disable-model-invocation" in h, False)
+
+    # Permukaan AgentSkills portabel: validator rujukan AgentSkills itu TERTUTUP — kunci top-level
+    # tak dikenal = error. `disable-model-invocation` pada alias Claude persis kunci semacam itu,
+    # dan Codex MENGABAIKANNYA diam-diam sehingga alias jadi TERLIHAT di sana. Jadi permukaan
+    # portabel hanya boleh memuat skill yang sah menurut spec.
+    ALLOWED = {"name", "description", "license", "allowed-tools", "metadata", "compatibility"}
+    ag = adapters.render()["agentskills/samewrite/SKILL.md"]
+    agfm = ag.split("---", 2)[1]
+    agkeys = [l.split(":", 1)[0].strip() for l in agfm.strip().splitlines()
+              if ":" in l and not l.startswith((" ", "\t", "#"))]
+    check("agentskills: nol kunci di luar spec", [k for k in agkeys if k not in ALLOWED], [])
+    check("agentskills: name == nama direktori", 
+          [l.split(":", 1)[1].strip() for l in agfm.strip().splitlines()
+           if l.startswith("name:")][0], "samewrite")
+    check("agentskills: badan byte-identik dgn kanonik", ag.endswith(body), True)
+    check("agentskills: alias khusus-Claude TIDAK diekspor",
+          "disable-model-invocation" in ag, False)
+
+    cx = json.load(open(os.path.join(ROOT, ".codex-plugin", "plugin.json")))
+    cpj = json.load(open(os.path.join(ROOT, ".claude-plugin", "plugin.json")))
+    check("codex manifest menunjuk permukaan portabel, bukan skills/",
+          cx.get("skills"), "./adapters/agentskills")
+    check("codex manifest versinya sama dgn plugin.json", cx.get("version"), cpj["version"])
 
     # 2. --check benar-benar bisa MERAH: mutasi adapter di salinan, harap exit 1
     with tempfile.TemporaryDirectory() as d:
@@ -91,6 +121,27 @@ def main():
     for sec in ("## Context", "## Ask only if material", "## Root cause", "## Verification", "## Output"):
         check(f"kebijakan '{sec}' hanya ada di samewrite (nol duplikat runtime)",
               (sec in body, sec in abody), (True, False))
+
+    # 5b. SATU kosakata hash, dan badan yang benar-benar identik di setiap host.
+    # `endswith(body)` di atas memakai definisi yang dinormalkan (lstrip). Cek ini memakai byte
+    # MENTAH sesudah delimiter penutup — definisi yang dipakai setiap angka yang kita terbitkan.
+    # Tanpa ini, satu baris komentar di badan adapter lolos diam-diam dan klaim "identik di mana
+    # pun" berubah jadi klaim yang butuh catatan kaki.
+    surfaces = {name: adapters.hashes(os.path.join(ROOT, path))
+                for name, path in adapters.SURFACES}
+    bodies = {h[2] for h in surfaces.values()}
+    check("BODY_SHA256 identik di keempat host", len(bodies), 1)
+    canon = surfaces["CLAUDE (canonical)"]
+    check("BODY_SHA256 kanonik = badan mentah sesudah front matter",
+          canon[2], adapters.hashes(os.path.join(ROOT, "skills/samewrite/SKILL.md"))[2])
+    # Hermes HARUS berbeda sebagai berkas — kalau tidak, deskripsinya tidak dipendekkan sama
+    # sekali dan host memotongnya sendiri, yang justru mau dihindari.
+    check("FULL_FILE_SHA256 Hermes berbeda dari kanonik (metadata memang dibentuk ulang)",
+          surfaces["HERMES"][0] != canon[0], True)
+    r = subprocess.run([sys.executable, adapters.__file__, "--hashes"], capture_output=True, text=True)
+    check("adapters --hashes hijau", r.returncode, 0)
+    check("laporan hash menyebut CROSS_HOST_BODY_IDENTITY = PASS",
+          "CROSS_HOST_BODY_IDENTITY = PASS" in r.stdout, True)
 
     # 6. hook output opsional = kalimat PERTAMA bagian "## Output" (satu teks kanonik, nol drift)
     out_sec = body.split("## Output", 1)[1]
