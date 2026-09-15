@@ -13,8 +13,8 @@ noise, editing and retry work, without trading away correctness.
 |---|---|---|
 | **Claude Code** | `claude plugin marketplace add ipeterpetrus/samewrite && claude plugin install samewrite@samewrite` | `/samewrite` |
 | **Codex** | `codex plugin marketplace add ipeterpetrus/samewrite && codex plugin add samewrite@samewrite` | `$samewrite`, or let it route on the description |
-| **Hermes Agent** | `hermes skills install https://raw.githubusercontent.com/ipeterpetrus/samewrite/v1.3.0/adapters/hermes/samewrite/SKILL.md --yes` | `/samewrite` |
-| **OpenClaw** | `(d=$(mktemp -d) && trap 'rm -rf "$d"' EXIT && curl -fsSL https://github.com/ipeterpetrus/samewrite/archive/refs/tags/v1.3.0.tar.gz \| tar -xz -C "$d" && openclaw skills install "$d"/samewrite-*/skills/samewrite)` | `$samewrite` or `/skill samewrite` |
+| **Hermes Agent** | `hermes skills install https://raw.githubusercontent.com/ipeterpetrus/samewrite/v1.3.1/adapters/hermes/samewrite/SKILL.md --yes` | `/samewrite` |
+| **OpenClaw** | `(d=$(mktemp -d) && trap 'rm -rf "$d"' EXIT && curl -fsSL https://github.com/ipeterpetrus/samewrite/archive/refs/tags/v1.3.1.tar.gz \| tar -xz -C "$d" && openclaw skills install "$d"/samewrite-*/skills/samewrite)` | `$samewrite` or `/skill samewrite` |
 
 Every command above was executed against the real host in an isolated home or state directory, and
 is reported only because it worked there. The OpenClaw line additionally runs its download, extract
@@ -24,8 +24,8 @@ refused install all clean up after themselves, and your own shell traps are unto
 routes are **pinned to a release tag**, not to `main`, so what you install today is what you
 inspected. Claude Code and Codex use their own package managers, with their own update semantics.
 
-The pinned URLs name **the same version as this README**: read this file at tag `v1.3.0` and the
-commands install `v1.3.0`. That is the whole point of pinning — nobody should end up installing a
+The pinned URLs name **the same version as this README**: read this file at tag `v1.3.1` and the
+commands install `v1.3.1`. That is the whole point of pinning — nobody should end up installing a
 version other than the one whose text they just read. `python3 tests/test_install_paths.py` checks
 that pairing offline, which is also how a release branch catches a stale pin before anyone
 publishes it.
@@ -314,7 +314,7 @@ experiments/scale/          how the sweep scales (1k and 10k sessions) and why t
 docs/VNEXT.md               build report · docs/RELEASE_NOTES_1.1.0.md · _1.2.0.md · _1.2.1.md · _1.3.0.md
                             docs/reference-audits/ — nine projects read at pinned commits
 docs/MULTI_AGENT.md         many agents, running all the time · docs/AI_VOS_PROFILE.md (one profile)
-tests/                      444 assertions in twelve suites, mutation-tested; CI on Python 3.9 and 3.12
+tests/                      541 assertions in fourteen suites, mutation-tested; CI on Python 3.9 and 3.12
                             plus two shell suites: the OpenClaw one-liner's cleanup, the OpenClaw host
 ```
 

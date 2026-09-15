@@ -72,6 +72,62 @@ def mutant(pairs):
 
 # --------------------------------------------------------------------------- the invariants
 CASES = [
+    # ---------------------------------------------------------------- SW-1303 partial evidence
+    ("bukti parsial di HISTORY tetap menutup promosi",
+     [("optimize.py",
+       "    qs = [quality_of(r) for r in (comparable_records or [])]",
+       "    qs = []")],
+     """
+     recs = [rec(1000 + i*86400*7, {"Bash": 20.0 + i*9, "Read": 80.0 - i*9}) for i in range(9)]
+     for r in recs: r["evidence_quality"] = "PARTIAL"
+     keep, _ = optimize.comparable(recs)
+     q = optimize.effective_quality(None, keep)
+     assert q == "PARTIAL", f"kualitas history diabaikan: {q}"
+     assert not optimize.emittable(q, False), "bukti PARTIAL lolos tanpa --accept-partial"
+     """),
+
+    ("live COMPLETE tak boleh menutupi history PARTIAL",
+     [("optimize.py",
+       '    if live:\n        qs.append(live.get("quality") or "UNKNOWN")\n    return worst_quality(qs)',
+       '    if live:\n        return live.get("quality") or "UNKNOWN"\n    return worst_quality(qs)')],
+     """
+     recs = [rec(1000 + i*86400*7, {"Bash": 20.0 + i*9, "Read": 80.0 - i*9}) for i in range(9)]
+     for r in recs: r["evidence_quality"] = "PARTIAL"
+     keep, _ = optimize.comparable(recs)
+     q = optimize.effective_quality(acc(quality="COMPLETE"), keep)
+     assert q == "PARTIAL", f"sweep live yang lengkap menutupi history parsial: {q}"
+     """),
+
+    ("evidence_quality yang HILANG bukan COMPLETE",
+     [("optimize.py", '    q = rec.get("evidence_quality")\n    return q if isinstance(q, str) and q in QUALITY_RANK else "UNKNOWN"\n', '    q = rec.get("evidence_quality")\n    return q if isinstance(q, str) and q in QUALITY_RANK else "COMPLETE"\n')],
+     """
+     assert optimize.quality_of({"schema_version": 1}) == "UNKNOWN", "record lama dibaca COMPLETE"
+     assert not optimize.emittable(optimize.quality_of({}), False), "record tanpa kualitas dipromosikan"
+     """),
+
+    ("INVALID tidak pernah disahkan oleh --accept-partial",
+     [("optimize.py",
+       '    return quality == "COMPLETE" or (quality == "PARTIAL" and bool(accept_partial))',
+       '    return quality == "COMPLETE" or bool(accept_partial)')],
+     """
+     assert not optimize.emittable("INVALID", True), "INVALID lolos lewat --accept-partial"
+     assert not optimize.emittable("UNKNOWN", True), "UNKNOWN lolos lewat --accept-partial"
+     assert optimize.emittable("PARTIAL", True), "PARTIAL yang diterima justru ditolak"
+     """),
+
+    ("kandidat dari bukti parsial tetap membawa penandanya",
+     [("optimize.py",
+       "effective_evidence_quality: {f.get('effective_evidence_quality', 'UNKNOWN')}\n"
+       "partial_evidence_accepted: {str(bool(f.get('partial_evidence_accepted'))).lower()}\n",
+       "")],
+     """
+     f = optimize.finding("x", "CANDIDATE", "h", "e", scope="s")
+     f["effective_evidence_quality"] = "PARTIAL"; f["partial_evidence_accepted"] = True
+     t = optimize.spec_text(f)
+     assert "effective_evidence_quality: PARTIAL" in t, "provenance kualitas hilang dari kandidat"
+     assert "partial_evidence_accepted: true" in t, "penanda penerimaan hilang dari kandidat"
+     """),
+
     ("scope isolation: populasi berbeda tak pernah dilebur",
      [("optimize.py",
        """        if scope_of(r) != n_scope:
@@ -96,10 +152,21 @@ CASES = [
      """),
 
     ("fail-closed: bukti PARTIAL tak boleh melahirkan kandidat",
-     [("optimize.py", 'usable = accept_partial or quality == "COMPLETE"', "usable = True")],
+     # Sebelum 1.3.1 mutasi ini menyasar `usable = accept_partial or quality == "COMPLETE"`,
+     # yang hanya menjaga jalur LIVE. Sekarang menyasar satu gerbang yang sama untuk live DAN
+     # history, dan oracle-nya menguji kedua jalur itu.
+     [("optimize.py", "    usable = emittable(quality, accept_partial)", "    usable = True")],
      """
      f = optimize.analyse(acc(quality="PARTIAL"), EMPTY_HIST, None, None, scope="s")
      assert [x["state"] for x in f] == ["OBSERVED"], "kandidat lahir dari sapuan setengah jadi"
+     recs = [rec(1000 + i*86400*7, {"Bash": 20.0 + i*9, "Read": 80.0 - i*9}) for i in range(9)]
+     for r in recs: r["evidence_quality"] = "PARTIAL"
+     keep, dropped = optimize.comparable(recs)
+     h = {"comparable": keep, "total": len(recs), "in_scope": len(recs), "rejected": {},
+          "dropped": dropped, "time_order": "ok"}
+     g = optimize.analyse(None, h, None, None, scope="default")
+     assert not [x for x in g if x["state"] == "CANDIDATE"], \
+         "kandidat lahir dari history yang seluruhnya PARTIAL"
      """),
 
     ("candidate_id membawa scope: dua peran tak menabrak satu berkas",

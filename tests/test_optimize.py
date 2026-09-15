@@ -26,8 +26,11 @@ def check(label, got, want):
 
 
 def rec(ts, shares, turns=1000, sessions=40, **kw):
-    r = {"schema_version": 1, "record_type": "carry_run", "ts": ts, "sessions": sessions,
-         "turns": turns, "carry_bytes": 10 ** 7, "scanned": 100,
+    # Records now say how their sweep was taken. Since 1.3.1 a record that does NOT say is UNKNOWN
+    # and cannot carry a promotion, so a fixture that means "a complete sweep" has to write it down
+    # — the legacy shape is exercised deliberately further below instead of by accident here.
+    r = {"schema_version": 2, "record_type": "carry_run", "ts": ts, "sessions": sessions,
+         "turns": turns, "carry_bytes": 10 ** 7, "scanned": 100, "evidence_quality": "COMPLETE",
          "shares": shares, "bpt": {k: 1.0 for k in shares}}
     r.update(kw)
     return r
@@ -143,13 +146,19 @@ def main():
 
     # ---------------------------------------------------------------- konsentrasi butuh korpus
     live_small = {"sessions": 3, "turns": 100, "carry": collections.Counter({"Bash": 90, "Read": 10}),
-                  "scanned": 3, "short": 0}
+                  "scanned": 3, "short": 0, "quality": "COMPLETE"}
     f = optimize.analyse(live_small, EMPTY_HIST, None, None)
     check("3 sesi: Bash 90% tetap OBSERVED (di bawah lantai)", [x["state"] for x in f], ["OBSERVED"])
     live_big = {"sessions": 40, "turns": 2000, "carry": collections.Counter({"Bash": 90, "Read": 10}),
-                "scanned": 40, "short": 0}
+                "scanned": 40, "short": 0, "quality": "COMPLETE"}
     f = optimize.analyse(live_big, EMPTY_HIST, None, None)
     check("40 sesi: Bash 90% -> CANDIDATE", f[0]["state"], "CANDIDATE")
+    # 1.3.1: a snapshot that does not record how it was swept cannot be assumed complete.
+    unknown_live = dict(live_big); unknown_live.pop("quality")
+    g = optimize.analyse(unknown_live, EMPTY_HIST, None, None)
+    check("sapuan tanpa catatan kualitas -> UNKNOWN, bukan COMPLETE",
+          optimize.effective_quality(unknown_live, []), "UNKNOWN")
+    check("dan karena itu tidak dipromosikan", [x["state"] for x in g], ["OBSERVED"])
     check("kandidat membawa gerbang anggaran instruksi", f[0]["always_on_bytes_delta"], 0)
 
     # ---------------------------------------------------------------- privasi: kenari

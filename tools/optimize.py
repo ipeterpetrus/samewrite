@@ -64,6 +64,58 @@ STATES = ("OBSERVED", "HYPOTHESIS", "CANDIDATE", "EXPERIMENTAL", "PROVEN", "REJE
 
 # machine-readable outcome. The CLI exits 0 for every VALID run by default (a scheduler must not
 # treat "nothing to do" as breakage); --strict-exit maps the status to the exit code instead.
+# ---------------------------------------------------------------- evidence quality
+# Ordered worst-last. A finding may be promoted to CANDIDATE only from COMPLETE evidence, or from
+# PARTIAL evidence the caller explicitly accepted. Everything below PARTIAL is refused outright:
+# --accept-partial says "this bounded population is the one I meant", which is a statement nobody
+# can make about evidence that is corrupt, empty, or of unestablished provenance.
+QUALITY_RANK = {"COMPLETE": 0, "PARTIAL": 1, "EMPTY": 2, "UNKNOWN": 3, "INVALID": 4}
+
+
+def quality_of(rec):
+    """Evidence quality of one history record. A MISSING value is UNKNOWN, never COMPLETE.
+
+    Schema 0/1 predates the field entirely, so absence proves nothing about how that sweep was
+    taken. Reading it as COMPLETE is the same class of error as reading a truncated log as a pass:
+    it converts "not recorded" into "fine". Such a record stays readable and stays visible in
+    reports — it simply cannot carry a promotion.
+    """
+    q = rec.get("evidence_quality")
+    return q if isinstance(q, str) and q in QUALITY_RANK else "UNKNOWN"
+
+
+def worst_quality(qualities):
+    """The worst quality in the set. Not a vote: one partial observation among nine complete ones
+    still means part of the evidence was never swept, and nine neighbours cannot launder it.
+    An empty set is COMPLETE — a finding that draws on no sampled evidence is not degraded by
+    sampling that had nothing to do with it."""
+    worst = "COMPLETE"
+    for q in qualities:
+        if QUALITY_RANK.get(q, QUALITY_RANK["UNKNOWN"]) > QUALITY_RANK[worst]:
+            worst = q if q in QUALITY_RANK else "UNKNOWN"
+    return worst
+
+
+def emittable(quality, accept_partial):
+    """May a finding at this evidence quality become a CANDIDATE?"""
+    return quality == "COMPLETE" or (quality == "PARTIAL" and bool(accept_partial))
+
+
+def effective_quality(live, comparable_records):
+    """ONE quality for the whole run, over the evidence actually ELIGIBLE to support a finding.
+
+    Eligibility is not this function's judgement — `comparable()` already made it: same scope, same
+    workload class, compatible corpus size, quality not INVALID/EMPTY. A partial record belonging
+    to another agent's scope, or to another workload class, or dropped as non-comparable, is not
+    evidence for this run and must not block it. That half matters as much as the fail-closed half:
+    a gate that blocks on evidence a finding never used is not correct, it is merely stuck.
+    """
+    qs = [quality_of(r) for r in (comparable_records or [])]
+    if live:
+        qs.append(live.get("quality") or "UNKNOWN")
+    return worst_quality(qs)
+
+
 STATUS = {"NO_ACTION": 0, "CANDIDATE": 10, "INSUFFICIENT_DATA": 20, "HOST_BEHAVIOR_SHIFT": 30,
           "PARTIAL_EVIDENCE": 40, "ALREADY_RUNNING": 41, "INTERNAL_ERROR": 50}
 
@@ -325,10 +377,13 @@ def finding(cid, state, headline, evidence, scope="default", bucket=0, hypothesi
                 date=time.strftime("%Y-%m-%d", time.gmtime()))
 
 
-def analyse(live, hist, ledger, cold, scope="default", accept_partial=False):
+def analyse(live, hist, ledger, cold, scope="default", accept_partial=False, effective=None):
     out = []
-    quality = (live or {}).get("quality", "COMPLETE") if live else "COMPLETE"
-    usable = accept_partial or quality == "COMPLETE"
+    # The quality that governs promotion is the worst across the live sweep AND the history records
+    # that actually feed these findings — not the live sweep alone. Reading only the live sweep is
+    # how a bounded history became indistinguishable from a complete one (SW-1303).
+    quality = effective if effective is not None else effective_quality(live, hist.get("comparable"))
+    usable = emittable(quality, accept_partial)
     run_ids = [r.get("run_id") for r in hist.get("comparable", []) if r.get("run_id")]
 
     # 1. concentration — only sayable over a corpus, never over one session, and never from a
@@ -390,9 +445,15 @@ def analyse(live, hist, ledger, cold, scope="default", accept_partial=False):
                 cid = "trend-" + re.sub(r"[^a-z0-9]+", "-", k.lower()).strip("-")
                 spike = (" — but the last value sits z=%+.1f from its own history, so this slope "
                          "may be one spike rather than a shift" % t["z"]) if abs(t["z"]) >= TREND_MIN_Z else ""
-                out.append(finding(cid, "CANDIDATE", f"{k} share is moving",
+                # The trend reads the comparable history directly, so it is exactly the finding
+                # SW-1303 let through: before this gate it emitted a CANDIDATE with no reference to
+                # evidence quality at all.
+                out.append(finding(cid, "CANDIDATE" if usable else "OBSERVED",
+                                   f"{k} share is moving",
                                    f"{per_month:+.1f} pp/month over {t['n']} records in scope {scope!r}, "
-                                   f"last value z={t['z']:+.1f}{spike}", scope=scope,
+                                   f"last value z={t['z']:+.1f}{spike}"
+                                   + ("" if usable else f" — evidence is {quality}, not a population"),
+                                   scope=scope,
                                    # DIRECTION, not magnitude. A fitted slope decays as its window
                                    # grows even when the world stopped moving, so bucketing the
                                    # magnitude mints a fresh proposal every time the estimator
@@ -405,6 +466,15 @@ def analyse(live, hist, ledger, cold, scope="default", accept_partial=False):
                                    layer="investigation only", always_on_bytes=0, evidence_runs=run_ids,
                                    invariants=(SCOPE_INVARIANT,),
                                    benchmark="identify the cause before proposing a rule"))
+    # Every finding above draws on the sampled corpus, so each carries the run's effective quality.
+    # The ledger findings below do not: they count writes a hook actually denied, which no sweep
+    # bound can make partial. Stamping them with a sampling verdict they never depended on would be
+    # the overbroad half of this fix.
+    for f in out:
+        f["effective_evidence_quality"] = quality
+        f["partial_evidence_accepted"] = bool(accept_partial and quality == "PARTIAL")
+    sampled_count = len(out)
+
     # 3. the guard: does it still pay for itself? (rule retirement is a first-class outcome)
     if ledger and ledger["writes"]:
         if ledger["writes"] >= LEDGER_MIN_WRITES:
@@ -454,14 +524,24 @@ def analyse(live, hist, ledger, cold, scope="default", accept_partial=False):
                                "skill listing is mostly used, or evidence is not a population", ev, scope=scope,
                                bucket=bucket_of(share), metric="cold share of the skill listing",
                                invariants=(SCOPE_INVARIANT,)))
+    for f in out[sampled_count:]:
+        # ledger findings: not drawn from the sampled corpus
+        f.setdefault("effective_evidence_quality", "COMPLETE")
+        f.setdefault("partial_evidence_accepted", False)
+    for f in out:
+        f["effective_evidence_quality"] = f.get("effective_evidence_quality", quality)
+        f["partial_evidence_accepted"] = f.get("partial_evidence_accepted", False)
     return out
 
 
-def overall_status(findings, hist, live, pop, accept_partial):
+def overall_status(findings, hist, live, pop, accept_partial, effective=None):
     if pop.get("host_shift"):
         return "HOST_BEHAVIOR_SHIFT"
-    q = (live or {}).get("quality", "COMPLETE") if live else "COMPLETE"
-    if q in ("PARTIAL", "INVALID") and not accept_partial:
+    q = effective if effective is not None else effective_quality(live, hist.get("comparable"))
+    if not emittable(q, accept_partial):
+        # One status for "this evidence may not carry a promotion"; the precise reason travels in
+        # effective_evidence_quality so automation need not parse prose and the CLI's documented
+        # status vocabulary and exit codes stay exactly as they were.
         return "PARTIAL_EVIDENCE"
     if any(f["state"] == "CANDIDATE" for f in findings):
         return "CANDIDATE"
@@ -484,6 +564,8 @@ optimizer_version: {f['optimizer_version']}
 threshold_schema_version: {f['threshold_schema_version']}
 samewrite_version: {f['samewrite_version']}
 evidence_bucket: {f['evidence_bucket']}
+effective_evidence_quality: {f.get('effective_evidence_quality', 'UNKNOWN')}
+partial_evidence_accepted: {str(bool(f.get('partial_evidence_accepted'))).lower()}
 evidence_run_ids: {runs}
 created_at: {f['date']}
 
@@ -603,11 +685,28 @@ class Lock:
 
 
 # ---------------------------------------------------------------- rendering
-def render(live, hist, ledger, cold, pop, findings, sources, status, scope, scopes_seen):
+def render(live, hist, ledger, cold, pop, findings, sources, status, scope, scopes_seen,
+           effective=None, accept_partial=False):
     L = ["SameWrite Health — evidence-adaptive optimizer", ""]
     L.append(f"status    : {status}   scope: {scope}"
              + (f"   (history also holds: {', '.join(sorted(s for s in scopes_seen if s != scope))})"
                 if len(scopes_seen) > 1 else ""))
+    if effective is not None:
+        L.append(f"evidence  : {effective}"
+                 + ("   (accepted with --accept-partial)" if accept_partial and effective == "PARTIAL"
+                    else ""))
+        if not emittable(effective, accept_partial):
+            # Refusing without saying why teaches the reader to ignore the refusal.
+            why = {"PARTIAL": "part of the corpus was never swept — a file cap, an unreadable "
+                              "transcript, or an oversize line",
+                   "UNKNOWN": "a record does not record how its sweep was taken (schema 0/1), so "
+                              "completeness cannot be established",
+                   "INVALID": "a sweep ran but produced no usable session",
+                   "EMPTY": "there was nothing to sweep"}.get(effective, "evidence is not a population")
+            L.append(f"            no candidate may be promoted from this evidence: {why}.")
+            if effective == "PARTIAL":
+                L.append("            pass --accept-partial if this bounded corpus IS the population "
+                         "you meant.")
     L.append("scope")
     L.append(f"  history   : {sources['history'] or '(none)'} — {hist['total']} records, "
              f"{hist['in_scope']} in this scope, {len(hist['comparable'])} comparable, "
@@ -734,8 +833,12 @@ def main(argv=None):
             cold = None
 
     pop = population(keep, live)
-    findings = analyse(live, hist, ledger, cold, scope=scope, accept_partial=a.accept_partial)
-    status = overall_status(findings, hist, live, pop, a.accept_partial)
+    # Computed ONCE and handed to every consumer: the report, the JSON, the candidate emitter and
+    # the status. Three copies of this rule would be three chances for them to disagree.
+    effective = effective_quality(live, hist.get("comparable"))
+    findings = analyse(live, hist, ledger, cold, scope=scope, accept_partial=a.accept_partial,
+                       effective=effective)
+    status = overall_status(findings, hist, live, pop, a.accept_partial, effective=effective)
     sources = {"history": safe(a.history) if os.path.exists(a.history) else "",
                "ledger": safe(a.ledger) if ledger else ""}
 
@@ -758,7 +861,12 @@ def main(argv=None):
             "status": status, "status_code": STATUS.get(status, STATUS["INTERNAL_ERROR"]),
             "scope": {"analysed": scope, "known": scopes_seen, "records_in_scope": len(scoped),
                       "comparable": len(keep)},
+            # unchanged meaning: the quality of THIS run's live sweep alone
             "evidence_quality": (live or {}).get("quality", "NO_SCAN") if live else "NO_SCAN",
+            # added in 1.3.1: the worst quality across the live sweep AND the comparable history,
+            # i.e. the value that actually decides whether a finding may be promoted
+            "effective_evidence_quality": effective,
+            "partial_evidence_accepted": bool(a.accept_partial and effective == "PARTIAL"),
             "history": {"records": len(recs), "comparable": len(keep),
                         "rejected": dict(rejected), "time_order": hist["time_order"]},
             "ledger": ledger,
@@ -778,7 +886,8 @@ def main(argv=None):
             "policy_mutation": False,
         }, indent=2))
     else:
-        print(render(live, hist, ledger, cold, pop, findings, sources, status, scope, scopes_seen))
+        print(render(live, hist, ledger, cold, pop, findings, sources, status, scope, scopes_seen,
+                     effective=effective, accept_partial=a.accept_partial))
         for c in written:
             print(f"  candidate written: {c}")
         for c in existing:
