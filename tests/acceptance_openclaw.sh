@@ -66,9 +66,13 @@ chk "alias still invocable by a human" "$AUSER" "true"
 
 echo
 echo "--- [4] what an UNUSED skill costs"
+# Bytes, via the one definition this project publishes (tools/adapters.py: everything after the
+# closing front-matter delimiter). Counting characters here and printing them as "B" was off by 72
+# on a file with 72 multi-byte characters — small, wrong, and exactly the labelling error the hash
+# audit was about.
 BODY=$(/usr/bin/python3 -c "
-s=open('$OPENCLAW_STATE_DIR/skills/samewrite/SKILL.md').read()
-print(len(s.split('---',2)[2]))
+import sys; sys.path.insert(0, '$ROOT/tools'); import adapters
+print(len(adapters.body_bytes('$OPENCLAW_STATE_DIR/skills/samewrite/SKILL.md')))
 ")
 CATALOG=$(( ${#NAME} + DESC + 40 ))
 echo "  MEASURED  catalog entry  ~${CATALOG} B  (name + description + location line)"
