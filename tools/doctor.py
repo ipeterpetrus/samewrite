@@ -237,15 +237,31 @@ def main():
     off = offline()
     ver = repo_version()
 
+    # REPOSITORY_VERSION is what this checkout says it is; INSTALLED_VERSION is what a host
+    # actually loaded. On a release branch these differ by definition, and printing one number as
+    # though it were both is how a report claims a version nobody has. They are named separately
+    # here and compared out loud.
+    drift = [(h["host"], h["installed_version"]) for h in hosts
+             if h.get("installed_version") and h["installed_version"] != ver]
+
     if a.json:
-        print(json.dumps({"samewrite_repo_version": ver, "hosts": hosts, "offline": off}, indent=2))
+        print(json.dumps({"repository_version": ver,
+                          # kept for compatibility with anything reading the 1.3 dev output
+                          "samewrite_repo_version": ver,
+                          "version_drift": [{"host": h, "installed_version": v} for h, v in drift],
+                          "hosts": hosts, "offline": off}, indent=2))
         return 0
 
-    print(f"SameWrite {ver} — doctor (read-only; every line below was checked, not assumed)\n")
-    print(f"{'host':<14}{'status':<16}{'installed':<12}host version")
+    print("SameWrite doctor — read-only; every line below was checked, not assumed\n")
+    print(f"REPOSITORY_VERSION  {ver}   (this checkout — not evidence that any host has it)")
+    print(f"{'host':<14}{'status':<16}{'INSTALLED_VERSION':<20}host version")
     for h in hosts:
         print(f"{h['host']:<14}{h.get('status', UNK):<16}"
-              f"{str(h.get('installed_version') or '-'):<12}{h.get('version') or '-'}")
+              f"{str(h.get('installed_version') or '-'):<20}{h.get('version') or '-'}")
+    if drift:
+        print("\n  version drift     " + ", ".join(f"{h} has {v}, this checkout is {ver}"
+                                                   for h, v in drift))
+        print("                    expected on a release branch: the tag is not published yet")
 
     c = hosts[0]
     print("\nClaude Code detail")

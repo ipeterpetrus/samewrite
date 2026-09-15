@@ -13,17 +13,22 @@ noise, editing and retry work, without trading away correctness.
 |---|---|---|
 | **Claude Code** | `claude plugin marketplace add ipeterpetrus/samewrite && claude plugin install samewrite@samewrite` | `/samewrite` |
 | **Codex** | `codex plugin marketplace add ipeterpetrus/samewrite && codex plugin add samewrite@samewrite` | `$samewrite`, or let it route on the description |
-| **Hermes Agent** | `hermes skills install https://raw.githubusercontent.com/ipeterpetrus/samewrite/v1.2.1/adapters/hermes/samewrite/SKILL.md --yes` | `/samewrite` |
-| **OpenClaw** | `d=$(mktemp -d) && curl -fsSL https://github.com/ipeterpetrus/samewrite/archive/refs/tags/v1.2.1.tar.gz \| tar -xz -C "$d" && openclaw skills install "$d"/samewrite-*/skills/samewrite && rm -rf "$d"` | `$samewrite` or `/skill samewrite` |
+| **Hermes Agent** | `hermes skills install https://raw.githubusercontent.com/ipeterpetrus/samewrite/v1.3.0/adapters/hermes/samewrite/SKILL.md --yes` | `/samewrite` |
+| **OpenClaw** | `(d=$(mktemp -d) && trap 'rm -rf "$d"' EXIT && curl -fsSL https://github.com/ipeterpetrus/samewrite/archive/refs/tags/v1.3.0.tar.gz \| tar -xz -C "$d" && openclaw skills install "$d"/samewrite-*/skills/samewrite)` | `$samewrite` or `/skill samewrite` |
 
-Every command above was executed in an isolated home or state directory and is reported only
-because it worked there. The two raw-URL routes are **pinned to a release tag**, not to `main`, so
-what you install today is what you inspected. Claude Code and Codex use their own package managers,
-which carry their own update semantics.
+Every command above was executed against the real host in an isolated home or state directory, and
+is reported only because it worked there. The OpenClaw line additionally runs its download, extract
+and install steps inside a subshell with an `EXIT` trap: a failed download, a corrupt archive or a
+refused install all clean up after themselves, and your own shell traps are untouched
+(`bash tests/test_oneliner_cleanup.sh` forces each of those failures offline). The two raw-URL
+routes are **pinned to a release tag**, not to `main`, so what you install today is what you
+inspected. Claude Code and Codex use their own package managers, with their own update semantics.
 
-The pinned URLs name **`v1.2.1`, the current published release**. They move to `v1.3.0` when 1.3.0
-is actually released — not when this branch says 1.3.0. A README that advertises a tag nobody can
-download yet is the same defect as a status line claiming a version that is not on `main`.
+The pinned URLs name **the same version as this README** — read this file at tag `v1.3.0` and the
+commands install `v1.3.0`. That is the point of pinning: a reader must never install a different
+version than the one whose text they just read. On an unreleased branch those two URLs 404 until
+the tag is published; the commands are still the right commands, they are just not yet downloadable.
+`python3 tests/test_install_paths.py` checks the shape they depend on without a network.
 
 After installing on Claude Code, **start a new session** — a running session cannot pick up a skill
 that was installed after it started.
@@ -42,8 +47,11 @@ python3 tools/doctor.py     # what is actually installed, observed rather than a
 | OpenClaw | **VERIFIED** | 0 B body · ~440 B catalog | none | `UNTESTED` | 2026.9.4 / `388f57a` |
 
 The write guard and the output sentence are **Claude Code hooks**. They are not ported to the other
-hosts and are not claimed there. The skill body is identical everywhere: all four hosts load the
-same file, and where a host caps its routing description the adapter shortens *that field only*.
+hosts and are not claimed there. The skill body is identical everywhere, and that is checked rather
+than asserted: `BODY_SHA256` — every byte after the closing front-matter delimiter — is
+`7edec9f21e0bd505…` on all four hosts (`python3 tools/adapters.py --hashes`). The *file* hashes
+differ, because front matter is exactly what a host shapes: where a host caps its routing
+description, the adapter shortens **that field only**.
 
 Codex's unused-body cost is `NOT_OBSERVABLE` rather than a number, because measuring it would mean
 intercepting a prompt the host does not expose. Native support is verified independently of it.
@@ -303,10 +311,11 @@ tools/optimize.py           read those aggregates offline: where cost is concent
 experiments/                skill-ab (462 runs) · vnext (110) · presentation (64 pilot + 256 confirmatory)
                             — rigs, fixtures, self-tests, pre-registrations, every run ever scored
 experiments/scale/          how the sweep scales (1k and 10k sessions) and why there is no index
-docs/VNEXT.md               build report · docs/RELEASE_NOTES_1.1.0.md · _1.2.0.md · _1.2.1.md
+docs/VNEXT.md               build report · docs/RELEASE_NOTES_1.1.0.md · _1.2.0.md · _1.2.1.md · _1.3.0.md
                             docs/reference-audits/ — nine projects read at pinned commits
 docs/MULTI_AGENT.md         many agents, running all the time · docs/AI_VOS_PROFILE.md (one profile)
-tests/                      425 assertions in eleven suites, mutation-tested; CI on Python 3.9 and 3.12
+tests/                      444 assertions in twelve suites, mutation-tested; CI on Python 3.9 and 3.12
+                            plus two shell suites: the OpenClaw one-liner's cleanup, the OpenClaw host
 ```
 
 Measure your own sessions — nothing installed, nothing written:

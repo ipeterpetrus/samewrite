@@ -39,6 +39,39 @@ HERMES_DESC = "Cheapest path to a correct, verified code change."
 AGENTSKILLS_DIR = "agentskills"
 
 
+# One definition of "the body", used by every hash this project prints.
+#
+# The hash vocabulary drifted once and produced two different sha256 values for the same artifact
+# in two documents: one caller hashed the whole file, another hashed a body it had normalised
+# first. Both numbers were correct about something and neither said which, so a reader comparing
+# them saw a divergence that did not exist. A single function ends that class of contradiction —
+# an agreed definition that only lives in prose is not a definition.
+#
+#   FULL_FILE_SHA256 — every byte of the file, front matter included. Differs per host by design.
+#   BODY_SHA256      — every byte AFTER the closing front-matter delimiter, unmodified. Must be
+#                      identical on every host: that is the claim "one canonical behaviour".
+CLOSE = b"\n---\n"
+
+
+def body_bytes(path):
+    """Bytes after the closing front-matter delimiter, verbatim. No stripping, no normalisation."""
+    raw = open(path, "rb").read()
+    if not raw.startswith(b"---\n"):
+        raise SystemExit(f"{path}: no front matter")
+    i = raw.find(CLOSE, 4)
+    if i < 0:
+        raise SystemExit(f"{path}: front matter is never closed")
+    return raw[i + len(CLOSE):]
+
+
+def hashes(path):
+    """-> (FULL_FILE_SHA256, full size, BODY_SHA256, body size) for one artifact."""
+    import hashlib
+    raw, body = open(path, "rb").read(), body_bytes(path)
+    return (hashlib.sha256(raw).hexdigest(), len(raw),
+            hashlib.sha256(body).hexdigest(), len(body))
+
+
 def split(text):
     """-> (front matter, body). Front matter = blok '---' pertama."""
     if not text.startswith("---\n"):
@@ -59,15 +92,53 @@ def render():
         f"{AGENTSKILLS_DIR}/samewrite/SKILL.md": "---\n" + fm + "---\n\n" + body,
         # Hermes Agent: a real skill directory, name == directory name, body byte-identical.
         # Only the description is host-shaped, and it is shorter than the host's own cut-off.
+        # No generated-by header in a SKILL adapter's BODY. It is one comment line, but it makes
+        # this host's body differ from the canonical body under any honest byte-for-byte
+        # definition — and then "the body is identical everywhere" needs a footnote, which is
+        # exactly the kind of almost-true claim this project refuses to ship. The do-not-edit
+        # warning is already enforced mechanically by the CI drift check, which is stronger than
+        # a comment anyone can ignore. Instruction-file adapters keep the header: they have no
+        # frontmatter, no body/metadata split, and a human may paste them somewhere by hand.
         "hermes/samewrite/SKILL.md": (
             "---\n"
             "name: samewrite\n"
             f"description: {HERMES_DESC}\n"
-            "---\n\n" + HEADER + body),
+            "---\n\n" + body),
     }
 
 
+# Where each host's installable artifact actually lives. OpenClaw installs the canonical file
+# unchanged, so it shares a row's path with Claude — and its identical hash is a fact about the
+# install route, not a copy-paste.
+SURFACES = [
+    ("CLAUDE (canonical)", "skills/samewrite/SKILL.md"),
+    ("CODEX / AGENTSKILLS", "adapters/agentskills/samewrite/SKILL.md"),
+    ("HERMES", "adapters/hermes/samewrite/SKILL.md"),
+    ("OPENCLAW", "skills/samewrite/SKILL.md"),
+]
+
+
+def report():
+    """Print the cross-host hash table. Exit 1 if the bodies are not all identical."""
+    rows = [(n, hashes(os.path.join(ROOT, p))) for n, p in SURFACES]
+    print(f"{'artifact':22}{'FULL_FILE_SHA256':>18}{'bytes':>8}"
+          f"{'BODY_SHA256':>20}{'bytes':>8}{'desc':>6}")
+    for name, (fh, fn, bh, bn) in rows:
+        path = dict((n, p) for n, p in SURFACES)[name]
+        d = 0
+        for line in open(os.path.join(ROOT, path), encoding="utf-8"):
+            if line.startswith("description:"):
+                d = len(line.split(":", 1)[1].strip())
+                break
+        print(f"{name:22}{fh[:16]:>18}{fn:>8}{bh[:16]:>20}{bn:>8}{d:>6}")
+    same = len({bh for _, (_, _, bh, _) in rows}) == 1
+    print("\nCROSS_HOST_BODY_IDENTITY = " + ("PASS" if same else "FAIL"))
+    return 0 if same else 1
+
+
 def main(argv):
+    if "--hashes" in argv:
+        return report()
     want = render()
     if "--check" in argv:
         bad = []

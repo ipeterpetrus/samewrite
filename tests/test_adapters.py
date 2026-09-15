@@ -122,6 +122,27 @@ def main():
         check(f"kebijakan '{sec}' hanya ada di samewrite (nol duplikat runtime)",
               (sec in body, sec in abody), (True, False))
 
+    # 5b. SATU kosakata hash, dan badan yang benar-benar identik di setiap host.
+    # `endswith(body)` di atas memakai definisi yang dinormalkan (lstrip). Cek ini memakai byte
+    # MENTAH sesudah delimiter penutup — definisi yang dipakai setiap angka yang kita terbitkan.
+    # Tanpa ini, satu baris komentar di badan adapter lolos diam-diam dan klaim "identik di mana
+    # pun" berubah jadi klaim yang butuh catatan kaki.
+    surfaces = {name: adapters.hashes(os.path.join(ROOT, path))
+                for name, path in adapters.SURFACES}
+    bodies = {h[2] for h in surfaces.values()}
+    check("BODY_SHA256 identik di keempat host", len(bodies), 1)
+    canon = surfaces["CLAUDE (canonical)"]
+    check("BODY_SHA256 kanonik = badan mentah sesudah front matter",
+          canon[2], adapters.hashes(os.path.join(ROOT, "skills/samewrite/SKILL.md"))[2])
+    # Hermes HARUS berbeda sebagai berkas — kalau tidak, deskripsinya tidak dipendekkan sama
+    # sekali dan host memotongnya sendiri, yang justru mau dihindari.
+    check("FULL_FILE_SHA256 Hermes berbeda dari kanonik (metadata memang dibentuk ulang)",
+          surfaces["HERMES"][0] != canon[0], True)
+    r = subprocess.run([sys.executable, adapters.__file__, "--hashes"], capture_output=True, text=True)
+    check("adapters --hashes hijau", r.returncode, 0)
+    check("laporan hash menyebut CROSS_HOST_BODY_IDENTITY = PASS",
+          "CROSS_HOST_BODY_IDENTITY = PASS" in r.stdout, True)
+
     # 6. hook output opsional = kalimat PERTAMA bagian "## Output" (satu teks kanonik, nol drift)
     out_sec = body.split("## Output", 1)[1]
     first = " ".join(out_sec.split("\n", 1)[1].split("Your own completed work")[0].split())

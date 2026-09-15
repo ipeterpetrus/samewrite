@@ -15,13 +15,18 @@ pre-registered, benchmarked over 130 runs, and refused by its own gate. That is 
   ```text
   Claude Code   claude plugin marketplace add ipeterpetrus/samewrite && claude plugin install samewrite@samewrite
   Codex         codex  plugin marketplace add ipeterpetrus/samewrite && codex  plugin add     samewrite@samewrite
-  Hermes Agent  hermes skills install https://raw.githubusercontent.com/ipeterpetrus/samewrite/v1.2.1/adapters/hermes/samewrite/SKILL.md --yes
-  OpenClaw      d=$(mktemp -d) && curl -fsSL https://github.com/ipeterpetrus/samewrite/archive/refs/tags/v1.2.1.tar.gz | tar -xz -C "$d" \
-                && openclaw skills install "$d"/samewrite-*/skills/samewrite && rm -rf "$d"
+  Hermes Agent  hermes skills install https://raw.githubusercontent.com/ipeterpetrus/samewrite/v1.3.0/adapters/hermes/samewrite/SKILL.md --yes
+  OpenClaw      (d=$(mktemp -d) && trap 'rm -rf "$d"' EXIT \
+                 && curl -fsSL https://github.com/ipeterpetrus/samewrite/archive/refs/tags/v1.3.0.tar.gz | tar -xz -C "$d" \
+                 && openclaw skills install "$d"/samewrite-*/skills/samewrite)
   ```
 
-  The raw-URL routes are pinned to a release tag rather than `main`. Claude Code and Codex use
-  their own package managers.
+  The raw-URL routes are pinned to a release tag rather than `main`, and to **this** release: a
+  reader must not end up installing a version other than the one whose notes they are reading.
+  Claude Code and Codex use their own package managers. The OpenClaw command runs in a subshell
+  with an `EXIT` trap, so a failed download, a corrupt archive or a refused install all clean up
+  after themselves and none of it touches the caller's own traps
+  (`bash tests/test_oneliner_cleanup.sh`, 11 checks).
 - **A portable AgentSkills surface.** `adapters/agentskills/samewrite/SKILL.md` is generated,
   byte-identical to the canonical file, and contains only spec-valid frontmatter.
 - **The Claude-only alias stops travelling.** `disable-model-invocation` is rejected by the
@@ -36,15 +41,28 @@ pre-registered, benchmarked over 130 runs, and refused by its own gate. That is 
 
 ## Policy body, identical everywhere
 
+Two hashes, named, because one number called "the sha256" is how two documents end up quoting
+different values for the same file and looking like a contradiction:
+
+- `FULL_FILE_SHA256` — every byte of the installed file, front matter included. **Differs per host
+  by design**, because the front matter is exactly what a host shapes.
+- `BODY_SHA256` — every byte after the closing front-matter delimiter, unmodified. **Must be
+  identical on every host.** That is the whole claim.
+
 ```text
-CLAUDE              009dc957105231f0   4,311 B   description 391 chars
-CODEX / AGENTSKILLS 009dc957105231f0   4,311 B   description 391 chars
-HERMES              009dc957105231f0   4,311 B   description  49 chars
-OPENCLAW            009dc957105231f0   4,311 B   description 391 chars
+artifact                FULL_FILE_SHA256   bytes         BODY_SHA256   bytes  desc
+CLAUDE (canonical)      d7c65ee5a4496263    4816    7edec9f21e0bd505    4385   391
+CODEX / AGENTSKILLS     d7c65ee5a4496263    4816    7edec9f21e0bd505    4385   391
+HERMES                  9cce7a6c367b8b4a    4472    7edec9f21e0bd505    4385    49
+OPENCLAW                d7c65ee5a4496263    4816    7edec9f21e0bd505    4385   391
+
+CROSS_HOST_BODY_IDENTITY = PASS
 ```
 
-Hermes truncates a skill description to 60 characters in its prompt, so its adapter shortens **that
-field only**. One canonical behaviour, four packagings.
+Reproduce with `python3 tools/adapters.py --hashes`; `tests/test_adapters.py` fails the build if the
+bodies ever diverge. Hermes truncates a skill description to 60 characters in its prompt, so its
+adapter shortens **that field only** — which is why its full-file hash differs and its body hash
+does not. One canonical behaviour, four packagings.
 
 ## The truth experiment: NOT_PROMOTED
 
@@ -84,7 +102,7 @@ not a SameWrite universal saving, and it is labelled that way everywhere it appe
 | OpenClaw observer | **UNTESTED** |
 | the truth rule | **NOT_PROMOTED** — designed, tested, refused by its own gate |
 | Windows | **UNTESTED** |
-| ClawHub distribution | blocked — no CLI and no authenticated publisher identity on this machine; the pinned tarball route is used instead |
+| ClawHub distribution | **NOT_PUBLISHED** — no `clawhub` CLI and no authenticated publisher identity on this machine, and the `samewrite` slug is unregistered there. Claiming a slug in someone else's namespace, or publishing 1.3.0 before 1.3.0 is released, are both worse than not publishing; the pinned tarball route is used instead |
 
 ## Unchanged
 
