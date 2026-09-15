@@ -14,10 +14,11 @@ skill, one optional hook, and the measurement tools behind every number here.
 | the same intent as a 4.7 kB always-on block | **−0.8%** over the sentence (p = 0.86) | pre-registered A/B |
 | this skill vs the previous SameWrite on correctness and cost | non-inferior: 26 vs 25 correct of 32; cost within noise | confirmatory run, 16 fresh cases × 2 reps |
 
-> **Status:** 1.2.0 is on `main` and is what the marketplace path below installs. The skill and
+> **Status:** 1.2.1 is on `main` and is what the marketplace path below installs. The skill and
 > hooks it ships are byte-identical to 1.1.0 — everything new is the measurement layer, hardened for
 > many agents running continuously, and it adds **zero** bytes to what a model reads
-> ([release notes](docs/RELEASE_NOTES_1.2.0.md)). Its headline experiment came back
+> ([1.2.0 notes](docs/RELEASE_NOTES_1.2.0.md), [1.2.1 patch](docs/RELEASE_NOTES_1.2.1.md)).
+> Its headline experiment came back
 > **NOT_PROVEN**: overall token savings were not established, and that result is published rather
 > than buried. Upgrading from 1.0.0 or 1.1.0 is covered in [Install](#install).
 
@@ -275,7 +276,8 @@ tools/optimize.py           read those aggregates offline: where cost is concent
 experiments/                skill-ab (462 runs) · vnext (110) · presentation (64 pilot + 256 confirmatory)
                             — rigs, fixtures, self-tests, pre-registrations, every run ever scored
 experiments/scale/          how the sweep scales (1k and 10k sessions) and why there is no index
-docs/VNEXT.md               build report · docs/RELEASE_NOTES_1.1.0.md · _1.2.0.md · docs/reference-audits/
+docs/VNEXT.md               build report · docs/RELEASE_NOTES_1.1.0.md · _1.2.0.md · _1.2.1.md
+                            docs/reference-audits/ — nine projects read at pinned commits
 docs/MULTI_AGENT.md         many agents, running all the time · docs/AI_VOS_PROFILE.md (one profile)
 tests/                      416 assertions in eleven suites, mutation-tested; CI on Python 3.9 and 3.12
 ```

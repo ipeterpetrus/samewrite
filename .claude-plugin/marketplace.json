@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Token-efficient coding-agent skill for Claude Code, with the measurement tools and published experiments behind it.",
-    "version": "1.2.0"
+    "version": "1.2.1"
   },
   "plugins": [
     {
