@@ -113,6 +113,15 @@ def valid_record(o):
     """-> (ok, reason). Malformed input must not poison a trend; it must be counted and dropped."""
     if not isinstance(o, dict):
         return False, "not an object"
+    # The v1.4 boundary, stated rather than stumbled into. A current-generation record carries an
+    # envelope; this optimizer was written against the flat 1.3 record and does not know what a
+    # v1.4 certificate means. Reading one would mean guessing whether its evidence is COMPLETE —
+    # the exact "a record gains trust by defaulting" failure, in the direction nobody watches.
+    # Refuse it by NAME, and count the refusal, until the optimizer is ported.
+    if isinstance(o.get("envelope"), dict):
+        return False, ("unsupported schema_version %r: current-generation (v1.4) evidence, "
+                       "not read by this optimizer"
+                       % o["envelope"].get("schema_version"))
     if o.get("record_type") not in (None, "carry_run"):
         return False, "unknown record_type"
     sv = o.get("schema_version", 0)

@@ -1,0 +1,24 @@
+PROBE TREE=/tmp/claude-1001/main_probe (main@369e5c98a0d54c889bc85d3ead2a7b96f6f3116e)
+
+1. TYPED ACQUISITION OUTPUT
+   accumulate keys: ['carry', 'lengths', 'models', 'oversize', 'quality', 'runtimes', 'scanned', 'sessions', 'short', 'size', 'skipped_by_limit', 'turns', 'unreadable', 'usage']
+   sources/parsed/counters present: NONE
+   -> RED: acquisition produces totals only; no source identity, no content digest,
+           no per-source outcome, so no certificate can be built from it.
+
+2. CURRENT EVIDENCE SCHEMA
+   written schema_version: 2 | record_type: carry_run
+   has envelope/payload/certificate: NONE
+   -> RED: main writes generation 2, flat; the frozen contract's generation is 4.
+   frozen decoder on main's record -> envelope_missing_key (RED)
+
+3. LEGACY FAIL-CLOSED READER
+   main reads a schema-0 record as usable evidence: 1 records, 0 rejected
+   -> RED: a previous-generation record is accepted for trend/promotion with no
+           unverified state anywhere; nothing in main can say 'readable but not current'.
+
+4. BOUNDED vs DEGRADED
+   main's vocabulary: ['COMPLETE', 'EMPTY', 'INVALID', 'PARTIAL']
+   --max-files quality: COMPLETE | unreadable-loss quality: PARTIAL (same label)
+   -> RED: an intentional bound and an unexpected loss share ONE label, so no caller
+           can accept the first without also accepting the second.

@@ -50,6 +50,32 @@ def oracle(toolsdir, body):
                 for r in rows:
                     fh.write((r if isinstance(r, str) else json.dumps(r)) + chr(10))
             return path
+        import evidence_acquire, evidence_history
+        from evidence.absence import Absence
+        from evidence.container import history_integrity
+        from evidence.values import make_epoch, make_scope_id
+        import time as _t
+        def facts(i=0, sources=1, counters=None, parsed=None, bound=0, carry_map=None):
+            files = parsed if parsed is not None else {{
+                "/x/%d/%d.jsonl" % (i, k): {{"content": "%064x" % (i * 10 + k), "turns": 10}}
+                for k in range(sources)}}
+            ident = {{path: {{"dev": 1, "inode": 100 + k, "size": 10, "mtime_ns": 1}}
+                     for k, path in enumerate(sorted(files))}}
+            base = {{"discovered": sources, "skipped_by_limit": 0, "unreadable": 0, "oversize": 0,
+                    "identity_changed": 0, "empty_source": 0, "not_attempted": 0, "malformed": 0,
+                    "records_rejected": 0, "dirs_unreadable": 0}}
+            base.update(counters or {{}})
+            return {{"sessions": 40, "turns": 1000 + i, "lengths": [10] * 40,
+                    "carry": collections.Counter(carry_map or {{"Bash": 60, "Read": 40}}),
+                    "size": {{"Bash": 1, "Read": 1}}, "usage": collections.Counter(),
+                    "runtimes": {{}}, "models": {{}}, "unreadable": 0, "oversize": 0,
+                    "skipped_by_limit": 0, "scanned": sources, "short": 0, "quality": "COMPLETE",
+                    "sources": ident, "parsed": files, "sample_bound": bound,
+                    "counters": base}}
+        def state_of(f, when=None):
+            r = evidence_acquire.observation(f, "s", "", "1.4.0", 0, Absence.KNOWN_ABSENT,
+                                             when or int(_t.time()))
+            return evidence_acquire.state_of(r, when or int(_t.time()))
         D = tempfile.mkdtemp()
     """) + textwrap.dedent(body)
     p = subprocess.run([sys.executable, "-c", src], capture_output=True, text=True, timeout=300)
@@ -129,7 +155,7 @@ CASES = [
 
     ("baris raksasa: dilewati DAN membuat bukti PARTIAL",
      [("carry.py",
-       """        if len(line) > MAX_LINE:              # counted, never silently dropped
+       """        if len(raw) > MAX_LINE:               # counted, never silently dropped
             oversize += 1
             continue""",
        """        if False:
@@ -165,26 +191,181 @@ CASES = [
      """),
 
     ("append pasca-crash: record baru tak dilem ke baris yang robek",
-     [("carry.py",
-       """            fh.seek(0, os.SEEK_END)
-            if fh.tell():
-                fh.seek(fh.tell() - 1)
-                if fh.read(1) != "\\n":
-                    fh.write("\\n")""",
+     [("evidence_history.py",
+       """            handle.seek(0, os.SEEK_END)
+            if handle.tell():
+                handle.seek(handle.tell() - 1)
+                if handle.read(1) != "\\n":
+                    handle.write("\\n")
+                handle.seek(0, os.SEEK_END)""",
        "            pass")],
      """
      p = os.path.join(D, "h.jsonl")
-     with open(p, "w", encoding="utf-8") as fh:
-         fh.write(json.dumps(rec(100, {"Bash": 50.0, "Read": 50.0})) + chr(10))
-         fh.write('{"schema_version": 2, "record_ty')          # mati di tengah baris
-     a = {"sessions": 40, "turns": 1000, "lengths": [10]*40,
-          "carry": collections.Counter({"Bash": 60, "Read": 40}),
-          "size": {"Bash": 1, "Read": 1}, "usage": collections.Counter(),
-          "runtimes": {}, "models": {}, "unreadable": 0, "oversize": 0,
-          "skipped_by_limit": 0, "scanned": 40, "short": 0, "quality": "COMPLETE"}
-     carry.history(p, a, 100, scope_id="s")
-     recs, _, _ = optimize.load_history(p)
-     assert len(recs) == 2, "crash memakan DUA record: yang robek dan yang berikutnya"
+     carry.history(p, facts(1), 100, scope_id="s")
+     with open(p, "a", encoding="utf-8") as fh:
+         fh.write('{"envelope": {"schema_ver')                 # mati di tengah baris
+     carry.history(p, facts(2), 100, scope_id="s")
+     c = evidence_history.read_container(p)
+     assert len(c.records) == 2, ("crash memakan DUA record", len(c.records))
+     """),
+
+    # ---------------------------------------------------------------- v1.4 integration
+    ("BOUNDED tidak boleh terbaca sebagai INTACT",
+     [("evidence/certificate.py",
+       "    if cert.skipped_by_limit > 0:\n        return AcquisitionIntegrity.BOUNDED",
+       "    if False:\n        return AcquisitionIntegrity.BOUNDED")],
+     """
+     f = facts(1, counters={"skipped_by_limit": 3, "discovered": 4}, bound=1)
+     assert state_of(f).derived.value == "BOUNDED", state_of(f).derived.value
+     """),
+
+    ("DEGRADED tidak boleh lolos sebagai bounded yang diterima",
+     [("evidence/promotion.py",
+       "    allowed = ACCEPTABLE_WITH_FLAG if accept_bounded else ACCEPTABLE_WITHOUT_FLAG\n"
+       "    allowed = tuple(state for state in allowed if state in contract.acquisition_integrity)",
+       "    allowed = tuple(AcquisitionIntegrity)")],
+     """
+     from evidence.domains import AcquisitionIntegrity, AnalysisSufficiency, ContainerIntegrity
+     from evidence.domains import WorldState
+     from evidence.promotion import promotable
+     from evidence.registry import dependency_contract
+     c = dependency_contract("listing_cost")
+     assert promotable(c, AcquisitionIntegrity.DEGRADED, ContainerIntegrity.INTACT,
+                       AnalysisSufficiency.SUFFICIENT, True, WorldState.SINGLE_WORLD,
+                       True) is False, "kehilangan tak terduga diterima sebagai batas yang dipilih"
+     """),
+
+    ("penghitung akuisisi yang hilang tidak boleh jadi nol diam-diam",
+     [("evidence_acquire.py",
+       '    counters = {name: int(facts["counters"].get(name, 0)) for name in',
+       '    counters = {name: int(facts["counters"].get(name, 0) if name != "unreadable" else 0)\n                for name in')],
+     """
+     f = facts(1, counters={"unreadable": 2, "discovered": 3})
+     f["sources"]["/x/1/ghost.jsonl"] = {"dev": 1, "inode": 9, "size": 1, "mtime_ns": 1}
+     f["sources"]["/x/1/ghost2.jsonl"] = {"dev": 1, "inode": 8, "size": 1, "mtime_ns": 1}
+     st = state_of(f)
+     assert st.derived.value == "DEGRADED", (st.derived.value, [r.value for r in st.reasons])
+     """),
+
+    ("record generasi lama tidak boleh jadi record generasi ini",
+     [("evidence_history.py",
+       "        return \"current\", decode_record(raw)\n    except WireError:\n"
+       "        return \"legacy\", _legacy_record(raw)",
+       "        return \"current\", decode_record(raw)\n    except WireError:\n"
+       "        return \"current\", _legacy_record(raw)")],
+     """
+     p = os.path.join(D, "h.jsonl")
+     w(p, [rec(100, {"Bash": 50.0, "Read": 50.0})])            # satu record skema 2
+     c = evidence_history.read_container(p)
+     assert (len(c.records), len(c.legacy)) == (0, 1), (len(c.records), len(c.legacy))
+     st = history_integrity(c, Absence.KNOWN_ABSENT, make_scope_id("default"),
+                            make_epoch(int(_t.time())))
+     assert st.integrity.value == "UNVERIFIED", st.integrity.value
+     """),
+
+    ("baris history yang rusak tidak boleh menghilang",
+     [("evidence_history.py",
+       "            except Exception:\n"
+       "                rejections.append(make_rejection(index, (Reason.LINE_UNPARSEABLE,)))",
+       "            except Exception:\n                pass")],
+     """
+     p = os.path.join(D, "h.jsonl")
+     carry.history(p, facts(1), 100, scope_id="s")
+     with open(p, "a", encoding="utf-8") as fh:
+         fh.write("{not json" + chr(10))
+     c = evidence_history.read_container(p)
+     st = history_integrity(c, Absence.KNOWN_ABSENT, make_scope_id("s"),
+                            make_epoch(int(_t.time())))
+     assert c.lines_rejected == 1 and st.integrity.value != "INTACT", (c.lines_rejected,
+                                                                      st.integrity.value)
+     """),
+
+    ("sweep gagal ditulis sebagai TOMBSTONE, bukan diam",
+     [("evidence_acquire.py",
+       '    if facts["parsed"]:\n        return make_carry_sweep(envelope, payload_for(facts, when), certificate)',
+       '    if True:\n        return make_carry_sweep(envelope, payload_for(facts, when), certificate)')],
+     """
+     f = facts(1, parsed={}, counters={"unreadable": 1, "discovered": 1})
+     f["sources"] = {"/x/1/gone.jsonl": {"dev": 1, "inode": 9, "size": 1, "mtime_ns": 1}}
+     f["carry"] = collections.Counter()
+     f["turns"] = f["sessions"] = 0
+     r = evidence_acquire.observation(f, "s", "", "1.4.0", 0, Absence.KNOWN_ABSENT,
+                                      int(_t.time()))
+     assert type(r).__name__ == "CarrySweepFailed", type(r).__name__
+     assert evidence_acquire.state_of(r, int(_t.time())).derived.value == "FAILED"
+     """),
+
+    ('workload_class "" tetap sah',
+     [("evidence/values.py",
+       '    _require(f.is_str(text), reason, field,\n             "a string; the empty string is a valid workload class")',
+       '    _require(f.is_str(text) and text != "", reason, field,\n             "a string; the empty string is a valid workload class")')],
+     """
+     p = os.path.join(D, "h.jsonl")
+     carry.history(p, facts(1), 100, scope_id="s", workload_class="")
+     c = evidence_history.read_container(p)
+     assert len(c.records) == 1, "workload_class kosong menolak record yang sah"
+     """),
+
+    ("host_profile_id tidak boleh mengubah semantik finding yang dipertahankan",
+     [("evidence/decision.py",
+       "    worlds = {certificate_world_id(m.certificate, scope) for m in members}",
+       "    worlds = {(certificate_world_id(m.certificate, scope),\n               m.certificate.host_profile_id) for m in members}")],
+     """
+     from evidence.decision import population_for, world_state
+     p = os.path.join(D, "h.jsonl")
+     carry.history(p, facts(1), 100, scope_id="s")
+     carry.history(p, facts(2), 100, scope_id="s")
+     rows = [json.loads(l) for l in open(p, encoding="utf-8").read().splitlines() if l.strip()]
+     rows[1]["certificate"]["host_profile_id"] = "0" * 16      # a second host, same everything
+     w(p, [rows[0], rows[1]])
+     c = evidence_history.read_container(p)
+     pop = population_for(c, make_scope_id("s"), evidence_acquire.make_workload_id(""))
+     hosts = {m.certificate.host_profile_id.hex for m in pop.members}
+     assert len(hosts) == 2, hosts
+     assert world_state(pop.members, make_scope_id("s")).value == "SINGLE_WORLD", "host memecah dunia"
+     """),
+
+    ("dict mentah tidak boleh sampai ke algoritma bukti",
+     [("wire/parse.py",
+       "    if unknown:\n        raise WireError(reason, path, \"unknown member %s\" % sorted(unknown))",
+       "    if False:\n        raise WireError(reason, path, \"unknown member %s\" % sorted(unknown))")],
+     """
+     p = os.path.join(D, "h.jsonl")
+     carry.history(p, facts(1), 100, scope_id="s")
+     raw = json.loads(open(p, encoding="utf-8").read().splitlines()[0])
+     raw["envelope"]["surprise"] = 1
+     w(p, [raw])
+     c = evidence_history.read_container(p)
+     assert len(c.records) == 0 and c.lines_rejected == 1, (len(c.records), c.lines_rejected)
+     """),
+
+    ("optimizer 1.3 tidak boleh membaca skema generasi ini",
+     [("optimize.py", "    if isinstance(o.get(\"envelope\"), dict):", "    if False:"),
+      ("optimize.py", "SCHEMA_SUPPORTED = (0, 1, 2)", "SCHEMA_SUPPORTED = (0, 1, 2, 4)"),
+      ("optimize.py", '    sh = o.get("shares")',
+       '    sh = o.get("shares") or (o.get("payload") or {}).get("shares")'),
+      ("optimize.py", '    sv = o.get("schema_version", 0)',
+       '    sv = o.get("schema_version", (o.get("envelope") or {}).get("schema_version", 0))')],
+     """
+     p = os.path.join(D, "h.jsonl")
+     carry.history(p, facts(1), 100, scope_id="s")
+     recs, rej, _ = optimize.load_history(p)
+     assert (len(recs), sum(rej.values())) == (0, 1), (len(recs), dict(rej))
+     """),
+
+    ("kanari privasi tidak boleh tersalin ke history",
+     [("evidence_acquire.py",
+       '    return hashlib.sha256(os.path.abspath(path).encode("utf-8", "surrogateescape")).hexdigest()[:12]',
+       '    return path')],
+     """
+     p = os.path.join(D, "h.jsonl")
+     f = facts(1, parsed={"/home/secret-canary/AKIA1234567890/t.jsonl":
+                          {"content": "%064x" % 7, "turns": 10}})
+     f["sources"] = {"/home/secret-canary/AKIA1234567890/t.jsonl":
+                     {"dev": 1, "inode": 1, "size": 1, "mtime_ns": 1}}
+     carry.history(p, f, 100, scope_id="s")
+     raw = open(p, encoding="utf-8").read()
+     assert "secret-canary" not in raw and "AKIA1234567890" not in raw, "path bocor ke history"
      """),
 
     ("label tak dipercaya dibersihkan sebelum mencapai terminal",
@@ -242,6 +423,122 @@ CASES = [
      f = optimize.analyse(None, hist, None, None, scope="s")
      assert any(x["id"].startswith("trend-") for x in f), \\
          "kenaikan linier bersih tak terlihat: konjungsi slope AND z hanya melaporkan lonjakan"
+     """),
+    # --------------------------------------------------- review A: the six port defects it found
+    ("sweep gagal harus menulis tombstone, bukan diam",
+     [("carry.py", "    if args.history:",
+       "    if args.history and sum(a[\"carry\"].values()):")],
+     """
+     import subprocess
+     d = tempfile.mkdtemp()
+     src = os.path.join(d, "t.jsonl")
+     open(src, "w").write(chr(123) + '"type":"assistant"' + chr(125) + chr(10))
+     os.chmod(src, 0)                                  # nothing readable: the sweep FAILS
+     h = os.path.join(d, "h.jsonl")
+     subprocess.run([sys.executable, os.path.join(os.path.dirname(carry.__file__), "carry.py"),
+                     src, "--history", h], capture_output=True, text=True)
+     assert os.path.exists(h), "sweep gagal tidak menulis apa pun"
+     c = evidence_history.read_container(h)
+     assert len(c.records) == 1, len(c.records)
+     assert type(c.records[0]).__name__ == "CarrySweepFailed", type(c.records[0]).__name__
+     """),
+
+    ("record yang hilang tertangkap rantai (bukan dengan menghitung baris kosong)",
+     [("evidence/container.py",
+       "        if broken:\n            r.fault(Reason.CHAIN_BROKEN, ContainerIntegrity.DEGRADED)",
+       "        if False:\n            pass")],
+     """
+     p = os.path.join(D, "h.jsonl")
+     for i in range(3):
+         carry.history(p, facts(i + 1), 100, scope_id="s")
+     rows = open(p, encoding="utf-8").read().splitlines()
+     open(p, "w", encoding="utf-8").write(rows[0] + chr(10) + chr(10) + rows[2] + chr(10))
+     st = history_integrity(evidence_history.read_container(p), Absence.KNOWN_ABSENT,
+                            make_scope_id("s"), make_epoch(int(_t.time())))
+     assert st.integrity.value == "DEGRADED", st.integrity.value
+     assert "chain_broken" in [r.value for r in st.reasons], [r.value for r in st.reasons]
+     """),
+
+    ("path yang lenyap sebelum identitasnya dibekukan tak boleh merusak akuntansi",
+     [("carry.py",
+       '            unreadable += 1\n            vanished += 1\n            continue',
+       "            unreadable += 1\n            continue")],
+     """
+     d = tempfile.mkdtemp()
+     a = carry.accumulate([os.path.join(d, "vanished.jsonl")], 1)
+     s = state_of(a)
+     assert s.derived.value == "DEGRADED", (s.derived.value, [r.value for r in s.reasons])
+     assert [r.value for r in s.reasons] == ["discovery_incomplete"], [r.value for r in s.reasons]
+     """),
+
+    ("byte non-UTF-8 dalam record tak boleh diperbaiki diam-diam",
+     [("evidence_history.py",
+       '        handle = open(path, "rb")               # bytes: a decoding fault is evidence, not a repair',
+       '        handle = open(path, encoding="utf-8", errors="replace")')],
+     """
+     p = os.path.join(D, "h.jsonl")
+     carry.history(p, facts(1), 100, scope_id="s")
+     raw = open(p, "rb").read()
+     key = b'"writer_version": "'                      # a free string value in the record
+     i = raw.find(key) + len(key)
+     assert i > len(key) and raw[i:i + 1] != b'"', raw[:80]
+     open(p, "wb").write(raw[:i] + bytes([255]) + raw[i + 1:])
+     c = evidence_history.read_container(p)
+     st = history_integrity(c, Absence.KNOWN_ABSENT, make_scope_id("s"),
+                            make_epoch(int(_t.time())))
+     assert (len(c.records), c.lines_rejected) == (0, 1), (len(c.records), c.lines_rejected)
+     assert st.integrity.value == "DEGRADED", st.integrity.value
+     """),
+
+    ("sumber kosong bukan sumber ter-parse",
+     [("carry.py",
+       '            empty_source += 1\n            continue\n        parsed_files[p] = '
+       '{"content": meta["content"], "turns": N}',
+       '            empty_source += 1\n        parsed_files[p] = '
+       '{"content": meta["content"], "turns": N}')],
+     """
+     d = tempfile.mkdtemp()
+     open(os.path.join(d, "e.jsonl"), "w").close()     # readable, and it holds no turn at all
+     a = carry.accumulate([os.path.join(d, "e.jsonl")], 1)
+     assert a["counters"]["empty_source"] == 1, a["counters"]
+     assert len(a["parsed"]) == 0, a["parsed"]
+     s = state_of(a)
+     assert s.derived.value == "FAILED", s.derived.value
+     """),
+
+    ("tanpa lock, jangan menulis",
+     [("evidence_history.py",
+       '            return False, "history lock unavailable — not written"',
+       "            pass")],
+     """
+     import errno, fcntl
+     p = os.path.join(D, "h.jsonl")
+     real = fcntl.flock
+     fcntl.flock = lambda *a, **k: (_ for _ in ()).throw(OSError(errno.ENOLCK, "no locks"))
+     try:
+         ok, note = evidence_history.append_chained(
+             p, lambda seq, prev: evidence_acquire.encoded(
+                 evidence_acquire.observation(facts(1), "s", "", "1.4.0", seq, prev,
+                                              int(_t.time()))),
+             make_scope_id("s"))
+     finally:
+         fcntl.flock = real
+     assert ok is False, "record ditulis tanpa serialisasi"
+     assert (not os.path.exists(p)) or open(p).read() == "", open(p).read()[:120]
+     """),
+
+    ("generasi yang tak pernah ditulis repo ini tak boleh jadi pembanding",
+     [("evidence_history.py",
+       "                try:\n                    _legacy_record(raw)\n"
+       "                except WireError:\n                    continue\n",
+       "                if False:\n                    pass\n")],
+     """
+     p = os.path.join(D, "h.jsonl")
+     w(p, [{"schema_version": 99, "record_type": "carry_run", "ts": 1, "turns": 10,
+            "scope_id": "s", "shares": {"Bash": 100.0}}])
+     assert evidence_history.read_views(p) == [], evidence_history.read_views(p)
+     c = evidence_history.read_container(p)
+     assert c.lines_rejected == 1, c.lines_rejected
      """),
 ]
 
