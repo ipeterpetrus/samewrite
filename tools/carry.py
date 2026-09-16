@@ -221,9 +221,13 @@ def accumulate(paths, min_turns=50, max_files=0):
             continue
         oversize += meta.get("oversize", 0)
         malformed += meta.get("malformed", 0)
-        parsed_files[p] = {"content": meta["content"], "turns": N}
-        if N == 0:                             # read, and it held no turn at all
+        if N == 0:
+            # Read, and it held no turn at all. The contract gives that its OWN outcome, and it
+            # is not `parsed`: a source in the manifest is a source something was read FROM, so
+            # counting empties as parsed is how a sweep that acquired nothing reads INTACT.
             empty_source += 1
+            continue
+        parsed_files[p] = {"content": meta["content"], "turns": N}
         if N < min_turns:                   # stubs and aborted sessions carry nothing
             short += 1
             continue
@@ -242,18 +246,18 @@ def accumulate(paths, min_turns=50, max_files=0):
     # The accounting law of the frozen contract: every SELECTED source has exactly one outcome,
     # and selection balances against discovery. `parsed` is len(parsed_files), so the manifest
     # and the counter cannot drift apart.
+    # `oversize` and `malformed` here are LINE-level losses inside a transcript, which the
+    # certificate carries as `malformed`; its `oversize` counter is a SOURCE skipped for its size
+    # and this scan never skips one, so claiming any would be a loss that did not happen.
+    selected = total_paths - skipped_by_limit
+    accounted = len(parsed_files) + unreadable + identity_changed + empty_source
     counters = {"discovered": total_paths, "skipped_by_limit": skipped_by_limit,
                 "unreadable": unreadable, "oversize": 0, "identity_changed": identity_changed,
-                "empty_source": 0, "not_attempted": max(0, len(sources) - len(parsed_files)
-                                                        - unreadable - identity_changed),
+                "empty_source": empty_source,
+                # every selected source the loop did not classify above
+                "not_attempted": max(0, selected - accounted),
                 "malformed": malformed + oversize, "records_rejected": 0,
                 "dirs_unreadable": 0}
-    selected = total_paths - skipped_by_limit
-    outcomes = (len(parsed_files) + counters["unreadable"] + counters["oversize"]
-                + counters["identity_changed"] + counters["empty_source"]
-                + counters["not_attempted"])
-    if outcomes != selected:                   # a source this loop never classified
-        counters["not_attempted"] += selected - outcomes
     # Provenance, not decoration: an analyser that cannot tell a complete sweep from a sweep that
     # hit unreadable files or a file cap will happily call a bounded corpus the population.
     quality = "COMPLETE"
@@ -426,7 +430,8 @@ def history(path, a, C, scope_id="default", workload_class="", roots=()):
            "workload_class": str(workload_class or "")[:32],
            "ts": int(time.time()), "sessions": a["sessions"], "turns": a["turns"],
            "carry_bytes": C, "scanned": a.get("scanned", 0),
-           "shares": {k: round(100 * v / C, 4) for k, v in a["carry"].most_common()},
+           "shares": ({k: round(100 * v / C, 4) for k, v in a["carry"].most_common()}
+                      if C else {}),
            # Share berjumlah 100%: satu sumber naik MEMAKSA yang lain turun walau perilaku
            # mereka tak berubah sedikit pun. B/turn tidak terikat konstrain itu, jadi delta
            # share sendirian bisa menceritakan gerakan yang tak pernah terjadi.
@@ -554,11 +559,14 @@ def main():
     b2t = (1.0 / args.b2t) if args.b2t else None
     sys.stdout.write(render(a, args.markdown, b2t))
     if args.history:
-        C = sum(a["carry"].values())
-        if C:
-            sys.stdout.write("\n".join(history(args.history, a, C, scope_id=args.scope_id,
-                                                workload_class=args.workload_class,
-                                                roots=roots)) + "\n")
+        # Unconditional. A sweep that carried nothing is exactly the run whose evidence matters
+        # most: with no record, the previous INTACT one keeps standing as the current state, which
+        # is the stale-evidence failure the tombstone type exists to stop. Zero carry writes a
+        # measurement with no shares; zero sources read writes a tombstone.
+        sys.stdout.write("\n".join(history(args.history, a, sum(a["carry"].values()),
+                                            scope_id=args.scope_id,
+                                            workload_class=args.workload_class,
+                                            roots=roots)) + "\n")
     # exit non-zero when nothing was recognised: a zero-record run is a schema mismatch,
     # not a finding, and a pipeline must be able to tell the two apart.
     # Exit bukan-nol menandai SCHEMA MISMATCH ("tak ada record dikenali"), bukan "carry nol".

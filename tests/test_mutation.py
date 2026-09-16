@@ -265,8 +265,9 @@ CASES = [
 
     ("baris history yang rusak tidak boleh menghilang",
      [("evidence_history.py",
+       "            except Exception:\n"
        "                rejections.append(make_rejection(index, (Reason.LINE_UNPARSEABLE,)))",
-       "                continue")],
+       "            except Exception:\n                pass")],
      """
      p = os.path.join(D, "h.jsonl")
      carry.history(p, facts(1), 100, scope_id="s")
@@ -422,6 +423,110 @@ CASES = [
      f = optimize.analyse(None, hist, None, None, scope="s")
      assert any(x["id"].startswith("trend-") for x in f), \\
          "kenaikan linier bersih tak terlihat: konjungsi slope AND z hanya melaporkan lonjakan"
+     """),
+    # --------------------------------------------------- review A: the six port defects it found
+    ("sweep gagal harus menulis tombstone, bukan diam",
+     [("carry.py", "    if args.history:",
+       "    if args.history and sum(a[\"carry\"].values()):")],
+     """
+     import subprocess
+     d = tempfile.mkdtemp()
+     src = os.path.join(d, "t.jsonl")
+     open(src, "w").write(chr(123) + '"type":"assistant"' + chr(125) + chr(10))
+     os.chmod(src, 0)                                  # nothing readable: the sweep FAILS
+     h = os.path.join(d, "h.jsonl")
+     subprocess.run([sys.executable, os.path.join(os.path.dirname(carry.__file__), "carry.py"),
+                     src, "--history", h], capture_output=True, text=True)
+     assert os.path.exists(h), "sweep gagal tidak menulis apa pun"
+     c = evidence_history.read_container(h)
+     assert len(c.records) == 1, len(c.records)
+     assert type(c.records[0]).__name__ == "CarrySweepFailed", type(c.records[0]).__name__
+     """),
+
+    ("baris kosong di container adalah kerusakan, bukan hiasan",
+     [("evidence_history.py",
+       "            if not line:\n                # A line that carries nothing",
+       "            if not line:\n                continue\n                # A line that carries nothing")],
+     """
+     p = os.path.join(D, "h.jsonl")
+     carry.history(p, facts(1), 100, scope_id="s")
+     with open(p, "a", encoding="utf-8") as fh:
+         fh.write(chr(10))
+     c = evidence_history.read_container(p)
+     st = history_integrity(c, Absence.KNOWN_ABSENT, make_scope_id("s"),
+                            make_epoch(int(_t.time())))
+     assert c.lines_rejected == 1, c.lines_rejected
+     assert st.integrity.value == "DEGRADED", st.integrity.value
+     """),
+
+    ("byte non-UTF-8 dalam record tak boleh diperbaiki diam-diam",
+     [("evidence_history.py",
+       '        handle = open(path, "rb")               # bytes: a decoding fault is evidence, not a repair',
+       '        handle = open(path, encoding="utf-8", errors="replace")')],
+     """
+     p = os.path.join(D, "h.jsonl")
+     carry.history(p, facts(1), 100, scope_id="s")
+     raw = open(p, "rb").read()
+     key = b'"writer_version": "'                      # a free string value in the record
+     i = raw.find(key) + len(key)
+     assert i > len(key) and raw[i:i + 1] != b'"', raw[:80]
+     open(p, "wb").write(raw[:i] + bytes([255]) + raw[i + 1:])
+     c = evidence_history.read_container(p)
+     st = history_integrity(c, Absence.KNOWN_ABSENT, make_scope_id("s"),
+                            make_epoch(int(_t.time())))
+     assert (len(c.records), c.lines_rejected) == (0, 1), (len(c.records), c.lines_rejected)
+     assert st.integrity.value == "DEGRADED", st.integrity.value
+     """),
+
+    ("sumber kosong bukan sumber ter-parse",
+     [("carry.py",
+       '            empty_source += 1\n            continue\n        parsed_files[p] = '
+       '{"content": meta["content"], "turns": N}',
+       '            empty_source += 1\n        parsed_files[p] = '
+       '{"content": meta["content"], "turns": N}')],
+     """
+     d = tempfile.mkdtemp()
+     open(os.path.join(d, "e.jsonl"), "w").close()     # readable, and it holds no turn at all
+     a = carry.accumulate([os.path.join(d, "e.jsonl")], 1)
+     assert a["counters"]["empty_source"] == 1, a["counters"]
+     assert len(a["parsed"]) == 0, a["parsed"]
+     s = state_of(a)
+     assert s.derived.value == "FAILED", s.derived.value
+     """),
+
+    ("tanpa lock, jangan menulis",
+     [("evidence_history.py",
+       '            return False, "history lock unavailable — not written"',
+       "            pass")],
+     """
+     import errno, fcntl
+     p = os.path.join(D, "h.jsonl")
+     real = fcntl.flock
+     fcntl.flock = lambda *a, **k: (_ for _ in ()).throw(OSError(errno.ENOLCK, "no locks"))
+     try:
+         ok, note = evidence_history.append_chained(
+             p, lambda seq, prev: evidence_acquire.encoded(
+                 evidence_acquire.observation(facts(1), "s", "", "1.4.0", seq, prev,
+                                              int(_t.time()))),
+             make_scope_id("s"))
+     finally:
+         fcntl.flock = real
+     assert ok is False, "record ditulis tanpa serialisasi"
+     assert (not os.path.exists(p)) or open(p).read() == "", open(p).read()[:120]
+     """),
+
+    ("generasi yang tak pernah ditulis repo ini tak boleh jadi pembanding",
+     [("evidence_history.py",
+       "                try:\n                    _legacy_record(raw)\n"
+       "                except WireError:\n                    continue\n",
+       "                if False:\n                    pass\n")],
+     """
+     p = os.path.join(D, "h.jsonl")
+     w(p, [{"schema_version": 99, "record_type": "carry_run", "ts": 1, "turns": 10,
+            "scope_id": "s", "shares": {"Bash": 100.0}}])
+     assert evidence_history.read_views(p) == [], evidence_history.read_views(p)
+     c = evidence_history.read_container(p)
+     assert c.lines_rejected == 1, c.lines_rejected
      """),
 ]
 

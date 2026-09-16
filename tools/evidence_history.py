@@ -18,8 +18,9 @@ Two facts drive the whole module.
   the digest of the record before it. Two agents that both read the tail and then both append
   would write two records at one position, which the contract calls a duplicate position and
   which degrades the container. So the read-the-tail-and-append sequence is serialised with an
-  advisory lock. Inside the lock the write is still ONE `write()` of one line, which is the
-  property the existing append protocol rests on; the crash-fragment newline check is unchanged.
+  advisory lock, and a lock that cannot be taken stops the append instead of proceeding without
+  one. Inside the lock the write is still ONE `write()` of one line, which is the property the
+  existing append protocol rests on; the crash-fragment newline check is unchanged.
 """
 import errno
 import json
@@ -107,13 +108,22 @@ def read_container(path):
     records, legacy, rejections = [], [], []
     index = -1
     try:
-        handle = open(path, encoding="utf-8", errors="replace")
+        handle = open(path, "rb")               # bytes: a decoding fault is evidence, not a repair
     except OSError:
         return make_container((), (), ())
     with handle:
-        for index, line in enumerate(handle):
-            line = line.strip()
-            if not line:                        # blank lines are cosmetic; see carry.history
+        for index, chunk in enumerate(handle):
+            # STRICT. `errors="replace"` turns a corrupt byte into U+FFFD, the record then decodes,
+            # and a damaged container reads INTACT — the one thing a container reader may not do.
+            try:
+                line = chunk.decode("utf-8").strip()
+            except UnicodeDecodeError:
+                rejections.append(make_rejection(index, (Reason.LINE_UNPARSEABLE,)))
+                continue
+            if not line:
+                # A line that carries nothing is a line that did not decode (contract 2b): this
+                # writer never emits one, so a blank line in a container is damage, not layout.
+                rejections.append(make_rejection(index, (Reason.LINE_UNPARSEABLE,)))
                 continue
             try:
                 raw = json.loads(line)
@@ -161,12 +171,15 @@ def read_views(path):
     """
     views = []
     try:
-        handle = open(path, encoding="utf-8", errors="replace")
+        handle = open(path, "rb")
     except OSError:
         return views
     with handle:
-        for line in handle:
-            line = line.strip()
+        for chunk in handle:
+            try:
+                line = chunk.decode("utf-8").strip()
+            except UnicodeDecodeError:
+                continue
             if not line:
                 continue
             try:
@@ -178,6 +191,13 @@ def read_views(path):
             try:
                 record = decode_record(raw)
             except WireError:
+                # The SAME gate the container uses. Without it, any object carrying a `shares`
+                # map became the predecessor of the delta report — including a generation this
+                # repository never wrote, which is trust gained by defaulting.
+                try:
+                    _legacy_record(raw)
+                except WireError:
+                    continue
                 if isinstance(raw.get("shares"), dict):     # a 1.3 or earlier record
                     views.append(raw)
                 continue
@@ -233,6 +253,11 @@ def append_chained(path, build, scope):
         return False, "history unwritable (%s)" % exc.__class__.__name__
     with handle:
         locked = _lock(handle)
+        if not locked:
+            # Fail closed. Reading the tail and appending without serialisation lets two writers
+            # choose one position, and a duplicate position is container damage this module
+            # exists to prevent. A record not written is a gap; a colliding pair is a lie.
+            return False, "history lock unavailable — not written"
         try:
             container = read_container(path)
             run_seq, prev = tail_for_scope(container, scope)

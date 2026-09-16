@@ -25,6 +25,8 @@ file that carries a real key shape is itself the leak its repository guards agai
 Standalone: run this file."""
 import ast
 import collections
+import errno
+import fcntl
 import hashlib
 import json
 import os
@@ -408,6 +410,100 @@ def main():
     check("bayangan: populasi = yang benar-benar ada di file", population.size, 6)
     check("bayangan: nol artifact ditulis",
           [f for f in os.listdir(d) if f.endswith(".md")], [])
+    # the shadow REPORTER: same four states, from the file, with no side effect at all
+    import evidence_shadow
+    before = sorted(os.listdir(d))
+    rows, shadow_facts = evidence_shadow.shadow(p, "s", "", now)
+    check("pelapor bayangan: dua finding", [r["finding"] for r in rows],
+          ["listing_cost", "write_guard_retirement"])
+    check("pelapor bayangan: populasi sama dengan kernel", shadow_facts["population"],
+          population.size)
+    check("pelapor bayangan: bukti live-sweep siap",
+          [r["dependency_gate"] for r in rows if r["finding"] == "listing_cost"], [True])
+    check("pelapor bayangan: finding ledger JUJUR belum siap (nol akuisisi ledger)",
+          [r["sufficiency"] for r in rows if r["finding"] == "write_guard_retirement"],
+          ["INSUFFICIENT"])
+    check("pelapor bayangan: nol efek samping di direktori", sorted(os.listdir(d)), before)
+
+    # --------------------------------------------------------------- REVIEW A: the six port defects
+    # Every one of these was found by the bounded adversarial review of the port, reproduced here
+    # first (RED), and fixed in the ADAPTERS — never in the frozen kernel.
+    d = tempfile.mkdtemp()
+    src = os.path.join(d, "unreadable.jsonl")
+    transcript(src)
+    os.chmod(src, 0)                                       # selected, and it cannot be read
+    p = os.path.join(d, "failed.jsonl")
+    run = subprocess.run([sys.executable, os.path.join(TOOLS, "carry.py"), src, "--history", p],
+                         capture_output=True, text=True)
+    c = evidence_history.read_container(p) if os.path.exists(p) else None
+    check("sweep gagal menulis tombstone, bukan diam",
+          [type(r).__name__ for r in (c.records if c else ())], ["CarrySweepFailed"])
+    check("tombstone: tak ada carry dan tak ada manifest",
+          (c.records[0].payload.carry_bytes, len(c.records[0].payload.sample_manifest)) if c
+          else None, (0, 0))
+    check("sweep gagal: exit code tetap menandai skema tak dikenal", run.returncode, 2)
+
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, "blank.jsonl")
+    carry.history(p, facts(1), 100, scope_id="s")
+    open(p, "a", encoding="utf-8").write("\n")
+    c = evidence_history.read_container(p)
+    check("baris kosong = kerusakan container, bukan hiasan",
+          (c.lines_rejected,
+           history_integrity(c, Absence.KNOWN_ABSENT, make_scope_id("s"),
+                             make_epoch(now)).integrity.value), (1, "DEGRADED"))
+
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, "tampered.jsonl")
+    carry.history(p, facts(1), 100, scope_id="s")
+    raw = open(p, "rb").read()
+    key = b'"writer_version": "'
+    i = raw.find(key) + len(key)
+    open(p, "wb").write(raw[:i] + bytes([255]) + raw[i + 1:])
+    c = evidence_history.read_container(p)
+    check("byte non-UTF-8 dalam record tak pernah 'diperbaiki' jadi U+FFFD",
+          (len(c.records), c.lines_rejected,
+           history_integrity(c, Absence.KNOWN_ABSENT, make_scope_id("s"),
+                             make_epoch(now)).integrity.value), (0, 1, "DEGRADED"))
+
+    d = tempfile.mkdtemp()
+    open(os.path.join(d, "empty.jsonl"), "w").close()      # terbaca, nol turn
+    a = carry.accumulate([os.path.join(d, "empty.jsonl")], 1)
+    check("sumber kosong punya outcome sendiri, bukan 'parsed'",
+          (a["counters"]["empty_source"], len(a["parsed"])), (1, 0))
+    check("sweep yang tak mengakuisisi apa pun = FAILED, bukan INTACT",
+          evidence_acquire.state_of(observe(a), now).derived.value, "FAILED")
+
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, "nolock.jsonl")
+    real_flock = fcntl.flock
+    fcntl.flock = lambda *a, **k: (_ for _ in ()).throw(OSError(errno.ENOLCK, "no locks"))
+    try:
+        written, note = evidence_history.append_chained(
+            p, lambda seq, prev: evidence_acquire.encoded(observe(facts(1), seq=seq, prev=prev)),
+            make_scope_id("s"))
+    finally:
+        fcntl.flock = real_flock
+    check("tanpa lock: JANGAN menulis (posisi yang bertabrakan lebih buruk daripada gap)",
+          (written, os.path.exists(p) and open(p).read()), (False, ""))
+
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, "unsupported.jsonl")
+    open(p, "w", encoding="utf-8").write(json.dumps(
+        {"schema_version": 99, "record_type": "carry_run", "ts": 1, "turns": 10,
+         "scope_id": "s", "shares": {"Bash": 100.0}}) + "\n")
+    check("generasi di luar PRODUCTION_LEGACY_SCHEMAS tak pernah jadi pembanding delta",
+          evidence_history.read_views(p), [])
+    check("generasi di luar allowlist = baris ditolak, bukan legacy",
+          (evidence_history.read_container(p).lines_rejected,
+           len(evidence_history.read_container(p).legacy)), (1, 0))
+
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, "zero.jsonl")
+    zero = facts(1, carry_map={"Bash": 0})                 # semua isi jatuh di turn terakhir
+    zero["carry_total"] = 0
+    check("carry nol: share kosong, bukan share nol yang jadi conservation violation",
+          evidence_acquire.state_of(observe(zero), now).derived.value, "INTACT")
 
     print("\n%d PASS / %d FAIL" % (P, F))
     return 1 if F else 0

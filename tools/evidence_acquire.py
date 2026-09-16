@@ -131,7 +131,12 @@ def payload_for(facts, when):
     manifest = tuple(sorted(
         (make_manifest_entry(make_path_digest(path_digest_of(p)), make_digest(f["content"]))
          for p, f in facts["parsed"].items()), key=lambda e: e.path.hex))
-    shares = make_named_counts(tuple((str(k), int(v)) for k, v in sorted(facts["carry"].items())))
+    # `if v`: a bucket with zero carry is not a share. A session whose whole content lands in the
+    # last turn carries nothing by construction, and naming it with a zero would make a payload
+    # that holds shares while holding no bytes — which the reader reads as a conservation
+    # violation, i.e. the producer would be manufacturing UNVERIFIED evidence out of a valid run.
+    shares = make_named_counts(tuple((str(k), int(v)) for k, v in sorted(facts["carry"].items())
+                                     if v))
     turns = int(facts["turns"])
     total = int(facts.get("carry_total", sum(facts["carry"].values())))
     return make_payload(shares, (total // turns) if turns else 0, make_epoch(int(when)),
