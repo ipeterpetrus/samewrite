@@ -45,20 +45,25 @@ def check(label, got, want):
 
 
 def tree(path):
-    """Every entry under a directory, by CONTENT.
+    """Every entry under a directory, by content AND metadata.
 
     Sizes are not enough: a rewrite of the same length would look identical, and "the reporter
-    wrote nothing" is exactly the claim this release makes in public. Directories are recorded as
-    a marker, files as a digest of their bytes.
+    wrote nothing" is exactly the claim this release makes in public. A permission or mtime change
+    is not a file write, but it is still a change to the tree, so it is captured too.
     """
     out = {}
     for base, dirs, files in os.walk(path):
         for name in dirs:
-            out[os.path.relpath(os.path.join(base, name), path)] = "dir"
+            st = os.stat(os.path.join(base, name))
+            out[os.path.relpath(os.path.join(base, name), path)] = ("dir", st.st_mode)
         for name in files:
             full = os.path.join(base, name)
+            st = os.stat(full)
             with open(full, "rb") as fh:
-                out[os.path.relpath(full, path)] = hashlib.sha256(fh.read()).hexdigest()
+                digest = hashlib.sha256(fh.read()).hexdigest()
+            # Content, permissions and mtime. NOT atime: reading a file updates it on many
+            # filesystems, so an atime check would fail the reporter for doing its job.
+            out[os.path.relpath(full, path)] = (digest, st.st_mode, st.st_mtime_ns)
     return out
 
 
@@ -84,7 +89,8 @@ def main():
     writes = ("open", "makedirs", "mkdir", "replace", "rename", "link", "symlink", "write",
               "unlink", "remove", "rmdir", "mkstemp", "NamedTemporaryFile", "write_text",
               "write_bytes", "touch", "copy", "copy2", "copyfile", "copytree", "dump",
-              "writelines", "truncate", "mknod", "mkfifo")
+              "writelines", "truncate", "mknod", "mkfifo", "chmod", "fchmod", "lchmod",
+              "utime", "chown", "fchown", "lchown", "setxattr", "removexattr")
     shadow_src = open(os.path.join(tools, "evidence_shadow.py"), encoding="utf-8").read()
     found = sorted({n.func.attr for n in ast.walk(ast.parse(shadow_src))
                     if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
