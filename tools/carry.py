@@ -184,7 +184,7 @@ def accumulate(paths, min_turns=50, max_files=0):
     # v1.4 evidence: one outcome per selected source, and the identity each source had when it
     # was selected. `sources` is every source attempted; `parsed` is the subset that was read.
     sources, parsed_files = {}, {}
-    malformed = identity_changed = empty_source = 0
+    malformed = identity_changed = empty_source = vanished = 0
     # A bound has to mean "the most RECENT N", not "the first N the filesystem listed". An
     # alphabetical prefix of a long-lived archive is a sample of whatever was created first, which
     # for a 24x7 population is the least informative slice there is.
@@ -198,7 +198,12 @@ def accumulate(paths, min_turns=50, max_files=0):
         try:
             before = _identity(p)
         except OSError:
+            # Discovery named it; by the time it was looked at it had no identity to freeze, so it
+            # never entered the frozen selection. The certificate's SELECTED count IS the length of
+            # that selection, so calling this the outcome of a selected source breaks the accounting
+            # law and marks the whole record UNVERIFIED for a loss that is really a DISCOVERY loss.
             unreadable += 1
+            vanished += 1
             continue
         sources[p] = before
         try:
@@ -249,15 +254,20 @@ def accumulate(paths, min_turns=50, max_files=0):
     # `oversize` and `malformed` here are LINE-level losses inside a transcript, which the
     # certificate carries as `malformed`; its `oversize` counter is a SOURCE skipped for its size
     # and this scan never skips one, so claiming any would be a loss that did not happen.
-    selected = total_paths - skipped_by_limit
-    accounted = len(parsed_files) + unreadable + identity_changed + empty_source
-    counters = {"discovered": total_paths, "skipped_by_limit": skipped_by_limit,
-                "unreadable": unreadable, "oversize": 0, "identity_changed": identity_changed,
+    # `discovered` is what discovery handed to SELECTION: a path that lost its identity before it
+    # could be frozen is reported as an incomplete discovery (`dirs_unreadable`), which is a loss
+    # the reader sees as DEGRADED without pretending a selected source had two outcomes.
+    discovered = total_paths - vanished
+    selected = discovered - skipped_by_limit
+    accounted = len(parsed_files) + (unreadable - vanished) + identity_changed + empty_source
+    counters = {"discovered": discovered, "skipped_by_limit": skipped_by_limit,
+                "unreadable": unreadable - vanished, "oversize": 0,
+                "identity_changed": identity_changed,
                 "empty_source": empty_source,
                 # every selected source the loop did not classify above
                 "not_attempted": max(0, selected - accounted),
                 "malformed": malformed + oversize, "records_rejected": 0,
-                "dirs_unreadable": 0}
+                "dirs_unreadable": vanished}
     # Provenance, not decoration: an analyser that cannot tell a complete sweep from a sweep that
     # hit unreadable files or a file cap will happily call a bounded corpus the population.
     quality = "COMPLETE"

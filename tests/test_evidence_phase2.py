@@ -443,15 +443,44 @@ def main():
           else None, (0, 0))
     check("sweep gagal: exit code tetap menandai skema tak dikenal", run.returncode, 2)
 
+    # Owner directive 17/31: the blank line stays COSMETIC. It is kept that way on purpose, and
+    # the reason it costs nothing is below it: a record that disappears is caught by the CHAIN,
+    # with or without a newline left in its place.
     d = tempfile.mkdtemp()
     p = os.path.join(d, "blank.jsonl")
     carry.history(p, facts(1), 100, scope_id="s")
     open(p, "a", encoding="utf-8").write("\n")
     c = evidence_history.read_container(p)
-    check("baris kosong = kerusakan container, bukan hiasan",
-          (c.lines_rejected,
+    check("baris kosong tetap kosmetik (arahan Owner 17/31)",
+          (len(c.records), c.lines_rejected,
            history_integrity(c, Absence.KNOWN_ABSENT, make_scope_id("s"),
-                             make_epoch(now)).integrity.value), (1, "DEGRADED"))
+                             make_epoch(now)).integrity.value), (1, 0, "INTACT"))
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, "hole.jsonl")
+    for i in range(3):
+        carry.history(p, facts(i + 1), 100, scope_id="s")
+    rows = open(p, encoding="utf-8").read().splitlines()
+    open(p, "w", encoding="utf-8").write(rows[0] + "\n" + "\n" + rows[2] + "\n")   # record 1 dihapus
+    state = history_integrity(evidence_history.read_container(p), Absence.KNOWN_ABSENT,
+                              make_scope_id("s"), make_epoch(now))
+    check("record yang HILANG tertangkap rantai, bukan oleh menghitung baris kosong",
+          (state.integrity.value, "chain_broken" in [r.value for r in state.reasons]),
+          ("DEGRADED", True))
+
+    # REVIEW B: a path that lost its identity before it could be frozen is a DISCOVERY loss —
+    # calling it the outcome of a selected source breaks the accounting law and marks the whole
+    # record UNVERIFIED for something that is really "discovery handed us a path that was gone".
+    d = tempfile.mkdtemp()
+    a = carry.accumulate([os.path.join(d, "vanished.jsonl")], 1)
+    vanished = observe(a)
+    ev = evidence_acquire.state_of(vanished, now)
+    check("path yang lenyap sebelum identitasnya dibekukan = discovery loss",
+          (a["counters"]["discovered"], a["counters"]["unreadable"],
+           a["counters"]["dirs_unreadable"]), (0, 0, 1))
+    check("akuntansi tetap sah: DEGRADED/discovery_incomplete, bukan UNVERIFIED",
+          (ev.derived.value, [r.value for r in ev.reasons]), ("DEGRADED", ["discovery_incomplete"]))
+    check("path yang lenyap: tetap tombstone, bukan pengukuran", type(vanished).__name__,
+          "CarrySweepFailed")
 
     d = tempfile.mkdtemp()
     p = os.path.join(d, "tampered.jsonl")

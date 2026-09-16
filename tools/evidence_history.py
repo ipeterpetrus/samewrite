@@ -121,9 +121,14 @@ def read_container(path):
                 rejections.append(make_rejection(index, (Reason.LINE_UNPARSEABLE,)))
                 continue
             if not line:
-                # A line that carries nothing is a line that did not decode (contract 2b): this
-                # writer never emits one, so a blank line in a container is damage, not layout.
-                rejections.append(make_rejection(index, (Reason.LINE_UNPARSEABLE,)))
+                # Cosmetic, deliberately. A blank line carries no record and can hide none: a
+                # record removed from the middle of a scope breaks the chain (`prev` no longer
+                # matches, or its position is gone), which the kernel reports as CHAIN_BROKEN
+                # whether or not a newline was left behind. Counting it as damage would make an
+                # appended newline enough to degrade a container that lost nothing. The
+                # classification this repository already had is kept; what changed is that a line
+                # with BYTES in it is never repaired into one that decodes (see the strict decode
+                # above), which is where evidence could actually have gone missing.
                 continue
             try:
                 raw = json.loads(line)

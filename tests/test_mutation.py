@@ -443,20 +443,32 @@ CASES = [
      assert type(c.records[0]).__name__ == "CarrySweepFailed", type(c.records[0]).__name__
      """),
 
-    ("baris kosong di container adalah kerusakan, bukan hiasan",
-     [("evidence_history.py",
-       "            if not line:\n                # A line that carries nothing",
-       "            if not line:\n                continue\n                # A line that carries nothing")],
+    ("record yang hilang tertangkap rantai (bukan dengan menghitung baris kosong)",
+     [("evidence/container.py",
+       "        if broken:\n            r.fault(Reason.CHAIN_BROKEN, ContainerIntegrity.DEGRADED)",
+       "        if False:\n            pass")],
      """
      p = os.path.join(D, "h.jsonl")
-     carry.history(p, facts(1), 100, scope_id="s")
-     with open(p, "a", encoding="utf-8") as fh:
-         fh.write(chr(10))
-     c = evidence_history.read_container(p)
-     st = history_integrity(c, Absence.KNOWN_ABSENT, make_scope_id("s"),
-                            make_epoch(int(_t.time())))
-     assert c.lines_rejected == 1, c.lines_rejected
+     for i in range(3):
+         carry.history(p, facts(i + 1), 100, scope_id="s")
+     rows = open(p, encoding="utf-8").read().splitlines()
+     open(p, "w", encoding="utf-8").write(rows[0] + chr(10) + chr(10) + rows[2] + chr(10))
+     st = history_integrity(evidence_history.read_container(p), Absence.KNOWN_ABSENT,
+                            make_scope_id("s"), make_epoch(int(_t.time())))
      assert st.integrity.value == "DEGRADED", st.integrity.value
+     assert "chain_broken" in [r.value for r in st.reasons], [r.value for r in st.reasons]
+     """),
+
+    ("path yang lenyap sebelum identitasnya dibekukan tak boleh merusak akuntansi",
+     [("carry.py",
+       '            unreadable += 1\n            vanished += 1\n            continue',
+       "            unreadable += 1\n            continue")],
+     """
+     d = tempfile.mkdtemp()
+     a = carry.accumulate([os.path.join(d, "vanished.jsonl")], 1)
+     s = state_of(a)
+     assert s.derived.value == "DEGRADED", (s.derived.value, [r.value for r in s.reasons])
+     assert [r.value for r in s.reasons] == ["discovery_incomplete"], [r.value for r in s.reasons]
      """),
 
     ("byte non-UTF-8 dalam record tak boleh diperbaiki diam-diam",
