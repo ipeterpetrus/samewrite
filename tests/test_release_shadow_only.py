@@ -17,6 +17,7 @@ Three questions, asked mechanically:
 
 Standalone: run this file."""
 import ast
+import hashlib
 import json
 import os
 import subprocess
@@ -44,12 +45,20 @@ def check(label, got, want):
 
 
 def tree(path):
-    """Every entry under a directory, with its size: what a write of any shape would change."""
+    """Every entry under a directory, by CONTENT.
+
+    Sizes are not enough: a rewrite of the same length would look identical, and "the reporter
+    wrote nothing" is exactly the claim this release makes in public. Directories are recorded as
+    a marker, files as a digest of their bytes.
+    """
     out = {}
     for base, dirs, files in os.walk(path):
-        for name in list(dirs) + files:
+        for name in dirs:
+            out[os.path.relpath(os.path.join(base, name), path)] = "dir"
+        for name in files:
             full = os.path.join(base, name)
-            out[os.path.relpath(full, path)] = (os.path.isdir(full) or os.path.getsize(full))
+            with open(full, "rb") as fh:
+                out[os.path.relpath(full, path)] = hashlib.sha256(fh.read()).hexdigest()
     return out
 
 
@@ -73,7 +82,9 @@ def main():
     check("only the shadow reporter consumes the promotion rule", callers, ["evidence_shadow.py"])
 
     writes = ("open", "makedirs", "mkdir", "replace", "rename", "link", "symlink", "write",
-              "unlink", "remove", "rmdir", "mkstemp", "NamedTemporaryFile")
+              "unlink", "remove", "rmdir", "mkstemp", "NamedTemporaryFile", "write_text",
+              "write_bytes", "touch", "copy", "copy2", "copyfile", "copytree", "dump",
+              "writelines", "truncate", "mknod", "mkfifo")
     shadow_src = open(os.path.join(tools, "evidence_shadow.py"), encoding="utf-8").read()
     found = sorted({n.func.attr for n in ast.walk(ast.parse(shadow_src))
                     if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)

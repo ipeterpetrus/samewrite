@@ -389,9 +389,12 @@ Generic contract: [docs/MULTI_AGENT.md](docs/MULTI_AGENT.md). One worked profile
 
 Running more than one agent, or running them continuously? Records carry a `--scope-id`, and
 populations from different scopes are counted and named but never averaged; evidence that came from
-an incomplete sweep cannot produce a candidate; candidate ids are deterministic so a scheduler that
-calls this hourly writes no duplicate proposals. Contract, exit codes and the measured resource
-budget: [docs/MULTI_AGENT.md](docs/MULTI_AGENT.md).
+an incomplete sweep cannot produce a candidate; and when a human passes `--emit-candidate`,
+candidate ids are deterministic, so a scheduler that calls this hourly writes no duplicate
+proposals. Without that flag nothing is written at all — a scheduled run reports and stops — and
+v1.4's own promotion path, the one that would write a candidate from typed evidence, is not active
+in this release at all. Contract, exit codes and the measured resource budget:
+[docs/MULTI_AGENT.md](docs/MULTI_AGENT.md).
 
 Run the suites: `python3 -m pip install -r requirements-test.txt` (pytest is the only test-time
 dependency; the runtime is standard library) then `for t in tests/test_*.py; do python3 $t; done`.
