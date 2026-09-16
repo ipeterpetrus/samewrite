@@ -143,7 +143,14 @@ def main():
             if os.path.exists(frozen) and here == open(frozen, "rb").read():
                 identical += 1
     check("35 berkas kernel di-port", ported, 35)
-    check("setiap berkas kernel byte-identik dengan yang beku", identical, 35)
+    if os.path.isdir(FROZEN):
+        check("setiap berkas kernel byte-identik dengan yang beku", identical, 35)
+    else:
+        # The Phase-1 design tree lives on the machine the freeze happened on, not on a CI
+        # runner. Asserting byte-identity against a directory that is not there would be a green
+        # test that proved nothing; the hash below is the check that actually binds, and it needs
+        # no second copy of the kernel to be true.
+        print("  SKIP  pohon beku Phase 1 tak ada di mesin ini — hash kernel yang mengikat")
     check("hash kernel = hash beku Phase 1", digest.hexdigest(), FROZEN_KERNEL_SHA256)
     check("skema history generasi ini dibaca dari kontrak", RECORD_SCHEMA_VERSION, 4)
     check("carry menulis skema itu, bukan salinannya", carry.CURRENT_HISTORY_SCHEMA,
