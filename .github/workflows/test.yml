@@ -44,6 +44,10 @@ jobs:
         run: python3 tests/test_evidence_phase2.py
       - name: offline optimizer (privacy canary, corruption, zero policy mutation)
         run: python3 tests/test_optimize.py
+      - name: the 1.4.0 release ships shadow evaluation and nothing that writes
+        # Sebuah rilis paling mudah "menyalakan" sesuatu tanpa sengaja saat versinya dinaikkan.
+        # Suite ini yang membuat kalimat "promotion/persistence tidak aktif" bisa diperiksa.
+        run: python3 tests/test_release_shadow_only.py
       - name: multi-agent suite (scope isolation, 64 concurrent writers, crash, reentrancy, clock skew)
         run: python3 tests/test_multiagent.py
       - name: mutation suite (every AI-VOS invariant must go RED when its implementation is broken)

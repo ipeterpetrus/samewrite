@@ -13,8 +13,8 @@ noise, editing and retry work, without trading away correctness.
 |---|---|---|
 | **Claude Code** | `claude plugin marketplace add ipeterpetrus/samewrite && claude plugin install samewrite@samewrite` | `/samewrite` |
 | **Codex** | `codex plugin marketplace add ipeterpetrus/samewrite && codex plugin add samewrite@samewrite` | `$samewrite`, or let it route on the description |
-| **Hermes Agent** | `hermes skills install https://raw.githubusercontent.com/ipeterpetrus/samewrite/v1.3.0/adapters/hermes/samewrite/SKILL.md --yes` | `/samewrite` |
-| **OpenClaw** | `(d=$(mktemp -d) && trap 'rm -rf "$d"' EXIT && curl -fsSL https://github.com/ipeterpetrus/samewrite/archive/refs/tags/v1.3.0.tar.gz \| tar -xz -C "$d" && openclaw skills install "$d"/samewrite-*/skills/samewrite)` | `$samewrite` or `/skill samewrite` |
+| **Hermes Agent** | `hermes skills install https://raw.githubusercontent.com/ipeterpetrus/samewrite/v1.4.0/adapters/hermes/samewrite/SKILL.md --yes` | `/samewrite` |
+| **OpenClaw** | `(d=$(mktemp -d) && trap 'rm -rf "$d"' EXIT && curl -fsSL https://github.com/ipeterpetrus/samewrite/archive/refs/tags/v1.4.0.tar.gz \| tar -xz -C "$d" && openclaw skills install "$d"/samewrite-*/skills/samewrite)` | `$samewrite` or `/skill samewrite` |
 
 Every command above was executed against the real host in an isolated home or state directory, and
 is reported only because it worked there. The OpenClaw line additionally runs its download, extract
@@ -24,8 +24,8 @@ refused install all clean up after themselves, and your own shell traps are unto
 routes are **pinned to a release tag**, not to `main`, so what you install today is what you
 inspected. Claude Code and Codex use their own package managers, with their own update semantics.
 
-The pinned URLs name **the same version as this README**: read this file at tag `v1.3.0` and the
-commands install `v1.3.0`. That is the whole point of pinning — nobody should end up installing a
+The pinned URLs name **the same version as this README**: read this file at tag `v1.4.0` and the
+commands install `v1.4.0`. That is the whole point of pinning — nobody should end up installing a
 version other than the one whose text they just read. `python3 tests/test_install_paths.py` checks
 that pairing offline, which is also how a release branch catches a stale pin before anyone
 publishes it.
@@ -65,9 +65,47 @@ intercepting a prompt the host does not expose. Native support is verified indep
 | Claude compact output sentence | **off** | `bash hooks/install.sh --human-output` | `bash hooks/uninstall.sh` | ~170 B once per session. **NOT_PROVEN** to improve anything |
 | observer / history | manual | `python3 tools/carry.py --history ~/logs/carry_history.jsonl` | stop invoking it | **0** |
 | optimizer | manual | `python3 tools/optimize.py` | stop invoking it | **0**, and zero model calls |
+| v1.4 shadow evaluation | manual | `python3 tools/evidence_shadow.py <history>` | stop invoking it | **0**, and it writes nothing at all |
 
 There are no modes. Nothing runs in the background, nothing is scheduled, and no daemon is
 installed. "Off" means you do not run it.
+
+## v1.4 — typed evidence, and what it deliberately does not do
+
+1.4 replaces the optimizer's untyped aggregates with a typed evidence kernel. None of it runs on
+its own, and none of it changes what a model sees.
+
+**Added**
+
+| | |
+|---|---|
+| typed evidence acquisition | a sweep produces a certificate of what it actually read, not a total |
+| history schema 4 | the current write format: chained records carrying position and the digest of the record before them |
+| legacy read, fail-closed | schema 0/1/2/3 are read, counted and attributed; facts their schema never carried stay ABSENT, and a container holding one is `UNVERIFIED` — legacy evidence cannot gain current trust by defaulting |
+| global container integrity | one container, one integrity answer, independent of which records a finding happens to look at |
+| acquisition integrity as its own axis | `INTACT` · `BOUNDED` (a bound someone chose) · `DEGRADED` (a loss nobody chose) · `FAILED` · `UNVERIFIED` |
+| analysis sufficiency as a separate axis | "the evidence is intact" and "there is enough of it" are different questions, answered separately |
+| tombstones for failed acquisition | a sweep that read nothing writes a tombstone, not a measurement with no shares |
+| privacy-safe provenance | sizes, shares and digests; no paths, prompts or content |
+| shadow evaluation | `listing_cost` and `write_guard_retirement`, evaluated read-only and reported |
+
+**Intentionally not active in 1.4.0**
+
+automatic promotion · automatic candidate persistence · automatic policy mutation · windowing ·
+host-shift gating · `carry_share_concentration` · `carry_bytes_trend`
+
+v1.4 measures and evaluates evidence in shadow mode; automatic v1.4 candidate promotion and
+persistence remain intentionally disabled while the transaction and API boundary around them is
+still being researched. "Ready" in the output below is a statement about the evidence — never a
+statement that anything was written.
+
+```bash
+python3 tools/evidence_shadow.py ~/logs/carry_history.jsonl --scope default
+```
+
+One row per retained finding — container state, acquisition integrity, sufficiency, whether it
+would promote and why not — then exit 0 whatever it found. It writes no candidate, no artifact and
+no file: a shadow that failed the run would already be a decision.
 
 ## The strongest measured facts
 
@@ -308,13 +346,17 @@ tools/carry.py · skills.py · prefix.py · bashcost.py · b2t_validate.py · ex
 tools/optimize.py           read those aggregates offline: where cost is concentrated, what moved,
                             and whether anything justifies an experiment — or NO_ACTION
                             (--scope-id keeps several agents' populations apart; see docs/MULTI_AGENT.md)
+tools/evidence/ · wire/     the frozen v1.4 evidence kernel, ported byte for byte (35 files)
+tools/evidence_acquire.py · evidence_history.py   typed acquisition; schema 4 written, 0-3 read
+tools/evidence_shadow.py    what each retained finding WOULD see — printed, never persisted
 experiments/                skill-ab (462 runs) · vnext (110) · presentation (64 pilot + 256 confirmatory)
                             — rigs, fixtures, self-tests, pre-registrations, every run ever scored
 experiments/scale/          how the sweep scales (1k and 10k sessions) and why there is no index
-docs/VNEXT.md               build report · docs/RELEASE_NOTES_1.1.0.md · _1.2.0.md · _1.2.1.md · _1.3.0.md
+docs/VNEXT.md               build report · docs/RELEASE_NOTES_1.1.0.md · _1.2.0.md · _1.2.1.md · _1.3.0.md · _1.4.0.md
                             docs/reference-audits/ — nine projects read at pinned commits
 docs/MULTI_AGENT.md         many agents, running all the time · docs/AI_VOS_PROFILE.md (one profile)
-tests/                      1027 assertions in fourteen suites, mutation-tested; CI on Python 3.9 and 3.12
+docs/EVIDENCE_CONTRACT_V1_4.md   the frozen contract the kernel implements
+tests/                      1037 assertions in fifteen suites, mutation-tested; CI on Python 3.9 and 3.12
                             plus two shell suites: the OpenClaw one-liner's cleanup, the OpenClaw host
 ```
 
