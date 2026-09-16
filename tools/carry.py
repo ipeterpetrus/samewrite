@@ -17,9 +17,12 @@ With no path at all it discovers every Claude Code profile on the machine and sa
 stderr which ones it read — a number from one profile reported as "your sessions" is
 the quiet error this replaces.
 """
-import argparse, collections, json, os, re, sys, time, uuid
+import argparse, collections, hashlib, json, os, re, sys, time, uuid
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import profiles  # multi-profile discovery; see tools/profiles.py
+import evidence_acquire                        # typed v1.4 producer (frozen constructors)
+import evidence_history                        # the history file, read/written through the kernel
+from evidence.records import RECORD_SCHEMA_VERSION
 
 # NOT a universal constant, and this repo no longer applies it silently. Measured with
 # tools/b2t_validate.py on the author's own corpus: 3.31 B/token for English text, 1.98 for
@@ -31,9 +34,12 @@ B2T = 1 / 3.14          # chars -> tokens, measured on o200k over this corpus. S
                         # ASCII, and the constant was calibrated on the same len().
 
 
-HISTORY_SCHEMA = 2            # bump when a field's MEANING changes, never for an addition.
+HISTORY_SCHEMA = 2            # the generation 1.3 wrote. Kept as the name older callers import.
                               # 0 = pre-1.2 records with no schema field · 1 = + population identity
                               # 2 = + run_id / scope_id / evidence quality (multi-agent safety)
+# What this build WRITES. Read from the frozen kernel rather than typed here: the contract owns
+# the number, and a second copy of it is how a producer and a reader start disagreeing.
+CURRENT_HISTORY_SCHEMA = RECORD_SCHEMA_VERSION
 MAX_LINE = 8 * 1024 * 1024    # a single transcript line larger than this is skipped and COUNTED:
                               # one pathological tool result must not become unbounded memory, and
                               # must not silently shrink the corpus either (evidence goes PARTIAL)
@@ -65,21 +71,30 @@ def scan_full(path):
     """-> (turns, items, usage, meta). `meta` holds the population identity a later
     comparison needs — which CLI wrote the transcript and which models answered — and
     nothing else: no path, no prompt, no content. Same single pass over the file, so
-    the metadata costs one dict lookup per line rather than a second read."""
+    the metadata costs one dict lookup per line rather than a second read.
+
+    The pass also produces `content` — a digest over the bytes this run actually read. The v1.4
+    sample manifest answers "did we read the same bytes?", and a digest computed in a second
+    pass would answer it about a different read. Reading bytes and decoding per line keeps the
+    single pass and makes the digest the true one.
+    """
     turn, id2name, items = 0, {}, []
     usage = collections.Counter()
     runtimes, models = collections.Counter(), collections.Counter()
-    oversize = 0
-    for line in open(path, errors="replace"):
-        if len(line) > MAX_LINE:              # counted, never silently dropped
+    oversize = malformed = 0
+    digest = hashlib.sha256()
+    for raw in open(path, "rb"):
+        digest.update(raw)
+        if len(raw) > MAX_LINE:               # counted, never silently dropped
             oversize += 1
             continue
-        line = line.strip()
+        line = raw.decode("utf-8", "replace").strip()
         if not line:
             continue
         try:
             o = json.loads(line)
         except Exception:
+            malformed += 1                    # a line this parser could not use, and says so
             continue
 
         v = o.get("version")
@@ -129,7 +144,8 @@ def scan_full(path):
                     items.append((turn, n, "result:" + str(id2name.get(c.get("tool_use_id")))))
                 elif c.get("type") == "text":
                     items.append((turn, len(c.get("text", "")), "human"))
-    return turn, items, usage, {"runtimes": runtimes, "models": models, "oversize": oversize}
+    return turn, items, usage, {"runtimes": runtimes, "models": models, "oversize": oversize,
+                                "malformed": malformed, "content": digest.hexdigest()}
 
 
 def bucket(src):
@@ -150,6 +166,13 @@ def bucket(src):
     return "other tools"
 
 
+def _identity(path):
+    """The filesystem identity of one source, as the frozen contract identifies it."""
+    st = os.stat(path)
+    return {"dev": st.st_dev, "inode": st.st_ino, "size": st.st_size,
+            "mtime_ns": getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))}
+
+
 def accumulate(paths, min_turns=50, max_files=0):
     carry, size, usage = collections.Counter(), collections.Counter(), collections.Counter()
     runtimes, models = collections.Counter(), collections.Counter()
@@ -158,6 +181,10 @@ def accumulate(paths, min_turns=50, max_files=0):
     skipped_by_limit = 0
     total_paths = len(paths)
     lengths = []
+    # v1.4 evidence: one outcome per selected source, and the identity each source had when it
+    # was selected. `sources` is every source attempted; `parsed` is the subset that was read.
+    sources, parsed_files = {}, {}
+    malformed = identity_changed = empty_source = 0
     # A bound has to mean "the most RECENT N", not "the first N the filesystem listed". An
     # alphabetical prefix of a long-lived archive is a sample of whatever was created first, which
     # for a 24x7 population is the least informative slice there is.
@@ -169,6 +196,12 @@ def accumulate(paths, min_turns=50, max_files=0):
     for p in paths:
         scanned += 1
         try:
+            before = _identity(p)
+        except OSError:
+            unreadable += 1
+            continue
+        sources[p] = before
+        try:
             N, items, u, meta = scan_full(p)
         except OSError:
             unreadable += 1
@@ -176,7 +209,21 @@ def accumulate(paths, min_turns=50, max_files=0):
         except Exception:                      # a transcript that cannot be parsed at all
             unreadable += 1
             continue
+        try:
+            after = _identity(p)
+        except OSError:
+            unreadable += 1
+            continue
+        if after != before:
+            # The file moved under the read. What was measured is not what was selected, and
+            # saying so is the whole point of carrying a source identity.
+            identity_changed += 1
+            continue
         oversize += meta.get("oversize", 0)
+        malformed += meta.get("malformed", 0)
+        parsed_files[p] = {"content": meta["content"], "turns": N}
+        if N == 0:                             # read, and it held no turn at all
+            empty_source += 1
         if N < min_turns:                   # stubs and aborted sessions carry nothing
             short += 1
             continue
@@ -192,6 +239,21 @@ def accumulate(paths, min_turns=50, max_files=0):
             size[b] += n
     if max_files and scanned >= max_files:
         skipped_by_limit = max(total_paths - max_files, 0)
+    # The accounting law of the frozen contract: every SELECTED source has exactly one outcome,
+    # and selection balances against discovery. `parsed` is len(parsed_files), so the manifest
+    # and the counter cannot drift apart.
+    counters = {"discovered": total_paths, "skipped_by_limit": skipped_by_limit,
+                "unreadable": unreadable, "oversize": 0, "identity_changed": identity_changed,
+                "empty_source": 0, "not_attempted": max(0, len(sources) - len(parsed_files)
+                                                        - unreadable - identity_changed),
+                "malformed": malformed + oversize, "records_rejected": 0,
+                "dirs_unreadable": 0}
+    selected = total_paths - skipped_by_limit
+    outcomes = (len(parsed_files) + counters["unreadable"] + counters["oversize"]
+                + counters["identity_changed"] + counters["empty_source"]
+                + counters["not_attempted"])
+    if outcomes != selected:                   # a source this loop never classified
+        counters["not_attempted"] += selected - outcomes
     # Provenance, not decoration: an analyser that cannot tell a complete sweep from a sweep that
     # hit unreadable files or a file cap will happily call a bounded corpus the population.
     quality = "COMPLETE"
@@ -202,7 +264,12 @@ def accumulate(paths, min_turns=50, max_files=0):
     return dict(sessions=sessions, turns=turns, lengths=sorted(lengths),
                 carry=carry, size=size, usage=usage, runtimes=runtimes, models=models,
                 unreadable=unreadable, short=short, scanned=scanned, oversize=oversize,
-                skipped_by_limit=skipped_by_limit, quality=quality)
+                skipped_by_limit=skipped_by_limit, quality=quality,
+                # v1.4 acquisition facts. `quality` above stays for the 1.3 reader; it is NOT
+                # what the new record carries, and no record asserts it.
+                sources=sources, parsed=parsed_files, counters=counters,
+                sample_bound=max_files or 0, malformed=malformed,
+                identity_changed=identity_changed, empty_source=empty_source)
 
 
 # Relative price of one token in each bucket, base input = 1.0. A bucket's share of the
@@ -326,55 +393,46 @@ def new_run_id():
     """Opaque, collision-resistant, carries nothing about the machine or the user.
 
     Two agents can legitimately produce the same timestamp, turn count and shares; identity by
-    metrics would merge two independent observations into one and undercount the population."""
-    return uuid.uuid4().hex
+    metrics would merge two independent observations into one and undercount the population.
+
+    The spelling is a lowercase version-4 UUID because that is the form the frozen constructor
+    `evidence.values.make_run_id` accepts. One spelling, written and validated by the same rule:
+    a producer and a decoder that disagree about what an id looks like disagree about what a
+    record is.
+    """
+    return evidence_acquire.new_run_id()
 
 
-def history(path, a, C, scope_id="default", workload_class=""):
-    """Append this run's shares and compare against the previous one.
+def history(path, a, C, scope_id="default", workload_class="", roots=()):
+    """Append this run as a TYPED v1.4 observation and compare against the previous one.
 
-    An observer that keeps no record can only ever say what today looks like. With a
-    history it says what CHANGED, which is the thing a person can act on — and it gets
-    sharper every time it runs, because the baseline is real rather than remembered.
-    Stores shares and byte counts only: no paths, no filenames, no content.
+    What changed in v1.4, and why. The record written here is no longer a flat dict this
+    function assembles: it is built through the frozen constructors (`tools/evidence_acquire`),
+    positioned and chained under a lock (`tools/evidence_history`), and encoded canonically. A
+    producer that hand-assembles current-schema JSON is exactly the failure this generation
+    exists to remove — the reader would then be checking a shape the writer never had to satisfy.
+
+    What did NOT change: the report. An observer that keeps no record can only ever say what
+    today looks like; with a history it says what CHANGED, and both wire generations are read so
+    that a machine with 1.3 records still gets its delta. Shares and counts only: no paths, no
+    filenames, no content.
     """
     T = a["turns"] or 1
-    now = {"schema_version": HISTORY_SCHEMA, "samewrite_version": samewrite_version(),
-           "record_type": "carry_run", "run_id": new_run_id(),
+    now = {"schema_version": CURRENT_HISTORY_SCHEMA, "samewrite_version": samewrite_version(),
+           "record_type": "carry_sweep", "run_id": evidence_acquire.new_run_id(),
            # scope = the population this record belongs to. Merging a builder agent's sessions
            # with a reviewer agent's produces a trend neither of them had.
            "scope_id": str(scope_id or "default")[:64],
            "workload_class": str(workload_class or "")[:32],
-           "evidence_quality": a.get("quality", "COMPLETE"),
-           "unreadable": a.get("unreadable", 0), "oversize": a.get("oversize", 0),
-           "skipped_by_limit": a.get("skipped_by_limit", 0),
            "ts": int(time.time()), "sessions": a["sessions"], "turns": a["turns"],
            "carry_bytes": C, "scanned": a.get("scanned", 0),
-           # population identity, for comparisons that must not merge different worlds:
-           # which CLI wrote the transcripts, which models answered. Counts only.
-           "runtimes": dict(a.get("runtimes", {})), "models": dict(a.get("models", {})),
            "shares": {k: round(100 * v / C, 4) for k, v in a["carry"].most_common()},
            # Share berjumlah 100%: satu sumber naik MEMAKSA yang lain turun walau perilaku
            # mereka tak berubah sedikit pun. B/turn tidak terikat konstrain itu, jadi delta
            # share sendirian bisa menceritakan gerakan yang tak pernah terjadi.
            "bpt": {k: round(a["size"][k] / T, 2) for k, _ in a["carry"].most_common()}}
-    prev = None
-    records = []
-    try:
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:                   # last valid record wins
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    o = json.loads(line)
-                except Exception:
-                    continue
-                if isinstance(o, dict) and isinstance(o.get("shares"), dict):
-                    prev = o
-                    records.append(o)
-    except OSError:
-        pass
+    records = evidence_history.read_views(path)
+    prev = records[-1] if records else None
     # Two observers can run at once — the scheduled timer and someone running it by hand.
     # The question is whether their records can interleave mid-line. Measured with strace,
     # not reasoned about: one record of 25,331 bytes leaves as exactly ONE write() of
@@ -382,42 +440,14 @@ def history(path, a, C, scope_id="default", workload_class=""):
     # than it, so the size of the record never turns into extra syscalls, and Linux
     # serialises appends to a regular file. An os.write() version was written, measured
     # against this one, and dropped: identical syscall count, so it fixed nothing.
-    line = json.dumps(now, ensure_ascii=False) + "\n"
-    if len(line.encode("utf-8")) > MAX_RECORD:      # never append what a concurrent writer could tear
-        return ["", "  history: record too large to append safely — not written."]
-    try:
-        with open(path, "a+", encoding="utf-8") as fh:
-            # A machine that died mid-append leaves a line with no newline. Appending straight
-            # after it would GLUE this record to the fragment and destroy a good record as well
-            # as the torn one: two losses from one crash. Cost of the check is one seek.
-            #
-            # Known, measured, and deliberately left alone: under heavy concurrency this check
-            # sometimes inserts a newline that was not needed, leaving one blank line in the file.
-            # The kernel extends a file page by page, so another process's in-flight append is
-            # briefly visible as a tail with no newline — indistinguishable from a crash fragment
-            # at this level. Measured at 64 concurrent writers, 40 rounds each: ~10 rounds show one
-            # blank line with this check, ~11 with a binary last-byte version that was written and
-            # then discarded for being no better, and 0 with no check at all. So the check is the
-            # source, and the effect is cosmetic: every record still lands intact (64 lines, 64
-            # parsed, 64 distinct run_ids in every round) and every reader here skips blank lines.
-            # Removing the check to remove the blank line would trade a cosmetic artifact for the
-            # two-records-lost bug it exists to prevent — tests/test_mutation.py goes RED without
-            # it. A version that distinguishes an in-flight append from a dead one needs a second
-            # probe, which is real concurrency work and has not been done.
-            fh.seek(0, os.SEEK_END)
-            if fh.tell():
-                fh.seek(fh.tell() - 1)
-                if fh.read(1) != "\n":
-                    fh.write("\n")
-            fh.write(line)
-    except OSError:
-        pass                                   # observing must not break measuring
-    except UnicodeDecodeError:                 # a non-UTF-8 tail: start a fresh line, lose nothing
-        try:
-            with open(path, "a", encoding="utf-8") as fh:
-                fh.write("\n" + line)
-        except OSError:
-            pass
+    written, note = evidence_history.append_chained(
+        path, lambda run_seq, prev_digest: evidence_acquire.encoded(
+            evidence_acquire.observation(a, now["scope_id"], now["workload_class"],
+                                         now["samewrite_version"], run_seq, prev_digest,
+                                         now["ts"], run_id=now["run_id"], roots=roots)),
+        evidence_acquire.make_scope_id(now["scope_id"]))
+    if not written:
+        return ["", "  history: %s." % note]
     if not prev:
         return ["", f"  history: first record written to {os.path.basename(path)} — "
                     "run again later and this section will show what moved."]
@@ -527,7 +557,8 @@ def main():
         C = sum(a["carry"].values())
         if C:
             sys.stdout.write("\n".join(history(args.history, a, C, scope_id=args.scope_id,
-                                                workload_class=args.workload_class)) + "\n")
+                                                workload_class=args.workload_class,
+                                                roots=roots)) + "\n")
     # exit non-zero when nothing was recognised: a zero-record run is a schema mismatch,
     # not a finding, and a pipeline must be able to tell the two apart.
     # Exit bukan-nol menandai SCHEMA MISMATCH ("tak ada record dikenali"), bukan "carry nol".

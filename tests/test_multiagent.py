@@ -12,6 +12,10 @@ import collections, json, multiprocessing as mp, os, socket, subprocess, sys, te
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import carry, optimize  # noqa: E402
+import evidence_history  # noqa: E402  (the history file, read through the frozen kernel)
+from evidence.absence import Absence  # noqa: E402
+from evidence.container import history_integrity  # noqa: E402
+from evidence.values import make_epoch, make_scope_id  # noqa: E402
 
 OPT = os.path.join(ROOT, "tools", "optimize.py")
 P = F = 0
@@ -60,13 +64,35 @@ EMPTY_HIST = {"comparable": [], "total": 0, "in_scope": 0, "rejected": {}, "drop
 
 
 # ---------------------------------------------------------------- workers (module level: fork pools)
+def _facts(i, sources=2):
+    """Acquisition facts the way accumulate() now returns them.
+
+    OLD_SEMANTIC: the writer handed carry.history() a dict of totals; the record was assembled
+    from it by hand.
+    NEW_FROZEN_SEMANTIC: a record is built through the frozen constructors, so the facts must
+    include what the certificate is made of — one outcome per SELECTED source, the identity each
+    source had, and the digest of the bytes read from each source that parsed.
+    WHY: a producer that can skip a field the reader validates is the divergence this whole
+    generation exists to remove. The fixture carries the same obligation as production.
+    """
+    parsed = {("/x/%d/%d.jsonl" % (i, k)): {"content": "%064x" % (i * 100 + k), "turns": 10}
+              for k in range(sources)}
+    identities = {path: {"dev": 1, "inode": 1000 + k, "size": 10, "mtime_ns": 1}
+                  for k, path in enumerate(sorted(parsed))}
+    return {"sessions": 40, "turns": 1000 + i, "lengths": [10] * 40, "quality": "COMPLETE",
+            "carry": collections.Counter({"Bash": 60, "Read": 40}), "size": {"Bash": 1, "Read": 1},
+            "usage": collections.Counter(), "runtimes": {"2.1.270": 1}, "models": {"m1": 1},
+            "unreadable": 0, "oversize": 0, "skipped_by_limit": 0, "scanned": sources, "short": 0,
+            "sources": identities, "parsed": parsed, "sample_bound": 0,
+            "counters": {"discovered": sources, "skipped_by_limit": 0, "unreadable": 0,
+                         "oversize": 0, "identity_changed": 0, "empty_source": 0,
+                         "not_attempted": 0, "malformed": 0, "records_rejected": 0,
+                         "dirs_unreadable": 0}}
+
+
 def _writer(args):
     path, scope, i = args
-    a = {"sessions": 40, "turns": 1000 + i, "lengths": [10] * 40, "quality": "COMPLETE",
-         "carry": collections.Counter({"Bash": 60, "Read": 40}), "size": {"Bash": 1, "Read": 1},
-         "usage": collections.Counter(), "runtimes": {"2.1.270": 1}, "models": {"m1": 1},
-         "unreadable": 0, "oversize": 0, "skipped_by_limit": 0, "scanned": 40, "short": 0}
-    carry.history(path, a, 100, scope_id=scope)   # C = jumlah carry, agar share berjumlah 100
+    carry.history(path, _facts(i), 100, scope_id=scope)  # C = jumlah carry, share berjumlah 100
     return True
 
 
@@ -136,8 +162,14 @@ def main():
     # ------------------------------------------------------------ 3. identitas run
     ids32 = {carry.new_run_id() for _ in range(5000)}
     check("5000 run_id unik", len(ids32), 5000)
-    check("run_id panjang tetap, hanya heksadesimal",
-          all(len(x) == 32 and all(c in "0123456789abcdef" for c in x) for x in ids32), True)
+    # OLD_SEMANTIC: 32 hex characters (uuid4().hex).
+    # NEW_FROZEN_SEMANTIC: a lowercase version-4 UUID, 36 characters with dashes — the exact form
+    # `evidence.values.make_run_id` accepts.
+    # WHY: the identity a record is WRITTEN with must be the identity the reader VALIDATES. Two
+    # spellings of the same id is how a producer and a decoder start disagreeing about what is
+    # even a record.
+    check("run_id berbentuk UUID4 huruf kecil",
+          all(len(x) == 36 and x.count("-") == 4 and x[14] == "4" for x in ids32), True)
 
     # ------------------------------------------------------------ 4. penulis paralel 32 & 64
     for n in (32, 64):
@@ -154,10 +186,30 @@ def main():
             except Exception:
                 parsed.append(None)
         check(f"{n} penulis paralel: setiap baris JSON utuh", parsed.count(None), 0)
+        # OLD_SEMANTIC: run_id sat at the top level of a flat record.
+        # NEW_FROZEN_SEMANTIC: it is in the envelope, with the record's position beside it.
+        # WHY: the envelope is the record's own header; a reader that has to guess which level a
+        # field lives at is a reader with two schemas.
         check(f"{n} penulis paralel: run_id semua berbeda",
-              len({o["run_id"] for o in parsed}), n)
+              len({o["envelope"]["run_id"] for o in parsed}), n)
+        # The chain the contract requires: n records, positions 0..n-1, each linked to the one
+        # before it. This is what the lock in evidence_history buys — without it every writer
+        # would claim the same position and the container would be permanently degraded.
+        check(f"{n} penulis paralel: posisi 0..{n - 1} tanpa tabrakan",
+              sorted(o["envelope"]["run_seq"] for o in parsed), list(range(n)))
+        container = evidence_history.read_container(hp)
+        state = history_integrity(container, Absence.KNOWN_ABSENT,
+                                  make_scope_id("conc"), make_epoch(int(time.time())))
+        check(f"{n} penulis paralel: container INTACT", state.integrity.value, "INTACT")
+        # OLD_SEMANTIC: the 1.3 optimizer read every record this writer produced.
+        # NEW_FROZEN_SEMANTIC: it reads NONE of them, by refusing the schema it was never
+        # written against.
+        # WHY: phase 2 ports acquisition, not promotion. An optimizer that guessed at a
+        # current-generation record would be reading fields whose meaning it does not know —
+        # the exact "legacy gains current trust" failure, in the other direction.
         recs, rej, _ = optimize.load_history(hp)
-        check(f"{n} penulis paralel: pembaca menerima semuanya", (len(recs), sum(rej.values())), (n, 0))
+        check(f"{n} penulis paralel: optimizer 1.3 menolak skema baru, fail closed",
+              (len(recs), sum(rej.values())), (0, n))
 
     # ------------------------------------------------------------ 5. konsistensi pasca-crash
     # Blank lines are filtered out of the SETUP, not out of an assertion. Under 64 concurrent
@@ -176,17 +228,22 @@ def main():
     with open(torn, "w", encoding="utf-8") as fh:
         fh.write("\n".join(good[:10]) + "\n")
         fh.write(good[10][:len(good[10]) // 2])            # mati di tengah baris
-    recs, rej, _ = optimize.load_history(torn)
-    check("baris terpotong ditolak, sisanya selamat", len(recs), 10)
-    check("baris terpotong dihitung sebagai tolakan", rej["unparseable line"], 1)
-    a = {"sessions": 40, "turns": 1000, "lengths": [10] * 40,
-         "carry": collections.Counter({"Bash": 60, "Read": 40}),
-         "size": {"Bash": 1, "Read": 1}, "usage": collections.Counter(), "runtimes": {}, "models": {},
-         "unreadable": 0, "oversize": 0, "skipped_by_limit": 0, "scanned": 40, "short": 0,
-         "quality": "COMPLETE"}
-    carry.history(torn, a, 100, scope_id="conc")       # penulis berikutnya sesudah crash
-    recs2, rej2, _ = optimize.load_history(torn)
-    check("penulisan sesudah crash tetap terbaca", len(recs2), 11)
+    # OLD_SEMANTIC: the torn file was read by the 1.3 optimizer, which counted the good records.
+    # NEW_FROZEN_SEMANTIC: the records are current-generation, so the reader that can see them is
+    # the frozen container reader; the torn line is a REJECTION and the container says so.
+    # WHY: container damage must remain observable, and the 1.3 optimizer no longer reads this
+    # generation at all (see section 4).
+    before = evidence_history.read_container(torn)
+    check("baris terpotong ditolak, sisanya selamat", len(before.records), 10)
+    check("baris terpotong dihitung sebagai tolakan", before.lines_rejected, 1)
+    torn_state = history_integrity(before, Absence.KNOWN_ABSENT, make_scope_id("conc"),
+                                   make_epoch(int(time.time())))
+    check("container dengan baris robek TIDAK pernah INTACT",
+          torn_state.integrity.value in ("DEGRADED", "UNVERIFIED"), True)
+    carry.history(torn, _facts(99), 100, scope_id="conc")   # penulis berikutnya sesudah crash
+    after = evidence_history.read_container(torn)
+    check("penulisan sesudah crash tetap terbaca", len(after.records), 11)
+    check("record baru tak dilem ke baris yang robek", after.lines_rejected, 1)
 
     # ------------------------------------------------------------ 6. reentrancy: dua penjadwal
     hist = write(os.path.join(d, "hist.jsonl"), [rec(100, {"Bash": 50.0, "Read": 50.0})])

@@ -38,6 +38,10 @@ jobs:
         run: bash tests/test_oneliner_cleanup.sh
       - name: coexistence matrix (Ponytail / i-have-adhd / Caveman surfaces)
         run: python3 tests/test_coexist.py
+      - name: v1.4 evidence boundary — frozen vectors replayed against the production decoders
+        run: python3 tests/test_evidence_boundary.py
+      - name: v1.4 phase 2 — typed acquisition, legacy fail-closed, privacy, optimizer isolation
+        run: python3 tests/test_evidence_phase2.py
       - name: offline optimizer (privacy canary, corruption, zero policy mutation)
         run: python3 tests/test_optimize.py
       - name: multi-agent suite (scope isolation, 64 concurrent writers, crash, reentrancy, clock skew)
