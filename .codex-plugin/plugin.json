@@ -1,6 +1,6 @@
 {
   "name": "samewrite",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Token-efficient coding-agent skill for Claude Code: reduce context, tool noise, unnecessary edits and retries while preserving correctness and evidence. One canonical skill (samewrite) with a hidden edit-discipline compatibility alias, an optional no-op-write guard hook, and the measurement tools behind every number in the README.",
   "skills": "./adapters/agentskills"
 }
