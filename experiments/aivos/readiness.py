@@ -130,6 +130,11 @@ def main():
                 "schema_version": 2, "record_type": "carry_run", "run_id": carry.new_run_id(),
                 "ts": 1_750_000_000 + i * 604800, "sessions": 60, "turns": 3000,
                 "carry_bytes": 10 ** 8, "scope_id": "governed", "workload_class": "audit",
+                # Since 1.3.1 a COMPLETE claim is checked against the record's own acquisition
+                # counters, so a fixture meaning "a clean sweep" writes them — which is exactly what
+                # carry.history() produces. This is the POSITIVE control: if the fail-closed rule
+                # ever blocked clean evidence too, this candidate would stop appearing.
+                "scanned": 60, "unreadable": 0, "oversize": 0, "skipped_by_limit": 0,
                 "evidence_quality": "COMPLETE", "runtimes": {"2.1.271": 60}, "models": {"m": 60},
                 "shares": {"Bash": 40.0 + i * 9, "Read": 60.0 - i * 9},
                 "bpt": {"Bash": 1.0, "Read": 1.0}}) + "\n")
