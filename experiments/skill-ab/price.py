@@ -40,12 +40,12 @@ def toks(work, fixture, extra_roots=()):
             seen.add(b)
             ledger = msgid.Ledger()   # per transcript: one message, however many records
             for line in open(f, errors="replace"):
-                # No `'"usage"' not in line` prefilter. A record of a message that carries
-                # no usage of its own still carries the id and the guard fields, and
-                # skipping it hides a collision the ledger would have refused. Same defect
-                # tools/prefix.py had, found by a cross-family review.
-                if '"assistant"' not in line:
-                    continue
+                # No substring prefilter at all. A record of a message that carries no
+                # usage of its own still carries the id and the guard fields, so filtering
+                # on `"usage"` hid a collision (the defect tools/prefix.py had). Filtering
+                # on `"assistant"` instead only moved the hole: `"type":"\u0061ssistant"`
+                # is valid JSON that the substring test does not see. tools/carry.py parses
+                # every line of the same corpus, so the cost is already known to be payable.
                 try:
                     o = json.loads(line)
                 except Exception:

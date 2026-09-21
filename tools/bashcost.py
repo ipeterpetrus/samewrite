@@ -46,8 +46,8 @@ def scan(path):
             # carry no tool block — which silently undercounted N, and N is what --min-turns
             # gates on and what `remaining = N - i` weights every carry number by. Parse
             # every assistant/user line; the filter is only worth it below, per block.
-            if '"assistant"' not in line and '"user"' not in line:
-                continue
+            # No substring prefilter: `"type":"\u0061ssistant"` is valid JSON that one does
+            # not see, and a record it hides never reaches the identity or usage guard.
             try:
                 o = json.loads(line)
             except Exception:

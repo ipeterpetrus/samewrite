@@ -53,14 +53,21 @@ def sample(path):
     # detector: it raises `msgid.Ambiguous` on a usage conflict or an identity collision
     # before any B/token constant is derived from them. It is used for nothing else here,
     # so its turn numbering does not matter. What DOES matter is that it sees every
-    # assistant record: the old `'"output_tokens"' not in line` prefilter here skipped a
-    # usage-less record of a message, which is exactly where a collision hides (cross-family
-    # review of the first cut of this fix).
+    # assistant record. The old `'"output_tokens"' not in line` prefilter skipped a
+    # usage-less record of a message, which is exactly where a collision hides; replacing it
+    # with an `"assistant"` test only moved the hole, since `"type":"\u0061ssistant"` is
+    # valid JSON no substring test sees. Both found by cross-family review. Every line is
+    # parsed now, as tools/carry.py already does over the same corpus.
+    #
+    # Widening this loop also changed what a SAMPLE is, deliberately: a usage-less record of
+    # a message now contributes its text to that message's numerator and its block types to
+    # the tool_use/thinking control, which is what this function's docstring always claimed
+    # ("whichever record carried it") and what the prefilter quietly prevented. Measured on
+    # 300 transcripts of the author's corpus: n=844, median 2.00 B/tok, slope 1.94 — byte
+    # for byte the same as before, because every record there carries usage.
     detector = msgid.Ledger(strict=True)
     with fh:
         for line in fh:                       # not .splitlines(): U+2028 is legal here
-            if '"assistant"' not in line:
-                continue
             try:
                 o = json.loads(line)
             except Exception:

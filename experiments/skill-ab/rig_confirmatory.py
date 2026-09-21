@@ -76,9 +76,8 @@ def usage_rows(work, task, run_id, arm, rep):
             seen.add(b)
             t=0; led=msgid.Ledger()   # one message, however many records carry it
             for line in open(f,errors="replace"):
-                # No usage prefilter: a usage-less record of a message still carries the id
-                # and the guard fields, and skipping it hides a collision (cross-family review).
-                if '"assistant"' not in line: continue
+                # No substring prefilter: a usage-less record still carries the id and the
+                # guard fields, and no substring test survives `"type":"\u0061ssistant"`.
                 try: o=json.loads(line)
                 except: continue
                 if not isinstance(o,dict) or o.get("type")!="assistant": continue

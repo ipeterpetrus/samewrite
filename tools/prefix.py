@@ -70,9 +70,9 @@ def turns_with_usage(path):
         for line in fh:
             # No cheap substring filter. A turn opens on a message's FIRST record, and that
             # record need not carry usage — skipping it here would count a different number
-            # of turns than carry.py does, and this function exists to match carry.py.
-            if '"assistant"' not in line:
-                continue
+            # of turns than carry.py does, and this function exists to match carry.py. The
+            # `'"assistant"' not in line` test that replaced the usage one is no filter
+            # either: `"type":"\u0061ssistant"` is valid JSON it does not see.
             try:
                 o = json.loads(line)
             except Exception:

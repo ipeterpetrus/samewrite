@@ -474,9 +474,10 @@ def main():
         check("T15 an agreeing pair still yields its sample",
               len(b2t_pair(0, 0)), 1)
 
-        # T16 an assistant record too large to parse never reached the guard, so "no
-        # conflict found" was really "not looked at". MAX_LINE is patched rather than
-        # writing an 8 MiB fixture.
+        # T16 an assistant record over MAX_LINE used to be skipped before it was parsed, so
+        # it reached NEITHER guard: "no conflict found" was really "not looked at". It is
+        # weighed by the ledger now and only dropped from the item table, which is what the
+        # limit was for. MAX_LINE is patched rather than writing an 8 MiB fixture.
         small = rec("t16", [text("a")], usage(1, 1, 1, 1), requestId="req_A")
         big = rec("t16", [text("b" * 4000)], usage(2, 2, 2, 2), requestId="req_B")
         t16 = write(d, "T16.jsonl", [small, big])
@@ -484,12 +485,25 @@ def main():
         carry.MAX_LINE = len(small) + 1      # exactly one record is over the limit
         try:
             k16, m16 = conflicts(t16)
-            check("T16 an unparsed assistant record makes the scan not exact", k16, "unchecked")
-            check("T16 it is counted rather than assumed clean", m16["unchecked_records"], 1)
-            check("T16 no usage survives it", sum(carry.scan_full(t16, strict=False)[2].values()), 0)
+            check("T16 a collision inside an oversize record is still caught", k16, "identity")
+            check("T16 the oversize line is still counted as a line-level loss",
+                  m16["oversize"], 1)
+            check("T16 nothing was left unchecked — it was parsed, just not itemised",
+                  m16["unchecked_records"], 0)
+            check("T16 no usage survives the collision",
+                  sum(carry.scan_full(t16, strict=False)[2].values()), 0)
             a16 = carry.accumulate([t16], min_turns=1)
             check("T16 accumulate excludes the source", a16["sessions"], 0)
             check("T16 and the source never enters the evidence manifest", a16["parsed"], {})
+            # ...and an oversize line that is not JSON at all reached no guard and says so.
+            t16b = write(d, "T16b.jsonl", [small, "{" + "x" * 4000])
+            k16b, m16b = conflicts(t16b)
+            check("T16b an unparseable oversize line makes the scan not exact",
+                  k16b, "unchecked")
+            check("T16b it is counted rather than assumed clean",
+                  m16b["unchecked_records"], 1)
+            check("T16b and no usage survives it",
+                  sum(carry.scan_full(t16b, strict=False)[2].values()), 0)
         finally:
             carry.MAX_LINE = real_max
 
@@ -500,11 +514,49 @@ def main():
         check("T17 a conflicted source is not in the evidence manifest", a17["parsed"], {})
         check("T17 it is reported as a record-level loss, so the sweep reads DEGRADED",
               a17["counters"]["records_rejected"] > 0, True)
-        check("T17 the frozen accounting law still balances",
-              a17["counters"]["not_attempted"], 0)
         check("T17 quality is no longer COMPLETE", a17["quality"] != "COMPLETE", True)
         a17b = carry.accumulate([canonical(d), t6], min_turns=1)
         check("T17 the clean neighbour IS in the manifest", len(a17b["parsed"]), 1)
+
+        # ...and the READER must agree. Claiming an outcome the frozen contract cannot name
+        # turns a correctly-refused source into a certificate ACCOUNTING VIOLATION, which
+        # reads UNVERIFIED — the producer accusing itself of being broken instead of
+        # reporting a loss. That is what the first repair did, and this is what caught it.
+        import evidence_acquire                                    # noqa: E402
+        from evidence.domains import AcquisitionIntegrity          # noqa: E402
+
+        NOW_EPOCH = 1789000000        # above evidence.certificate.MIN_PLAUSIBLE_EPOCH
+
+        def integrity(facts):
+            obs = evidence_acquire.observation(facts, "t", "", "1.4.1", 1,
+                                               evidence_acquire.Absence.KNOWN_ABSENT,
+                                               NOW_EPOCH)
+            return evidence_acquire.state_of(obs, NOW_EPOCH), obs
+
+        ev, obs = integrity(a17b)
+        check("T17 a sweep that refused one source reads DEGRADED, not UNVERIFIED",
+              ev.derived, AcquisitionIntegrity.DEGRADED)
+        ev_only, obs_only = integrity(a17)
+        check("T17 a sweep whose ONLY source was refused emits the failure record",
+              type(obs_only).__name__, "CarrySweepFailed")
+        check("T17 and it is not UNVERIFIED either",
+              ev_only.derived is not AcquisitionIntegrity.UNVERIFIED, True)
+        ev_clean, _ = integrity(carry.accumulate([canonical(d)], min_turns=1))
+        check("T17 a clean sweep still reads INTACT",
+              ev_clean.derived, AcquisitionIntegrity.INTACT)
+
+        # T18 no substring test on unparsed bytes decides whether a record is examined:
+        # `"type":"\u0061ssistant"` is valid JSON that `'"assistant"' in line` does not see.
+        esc = ('{"type":"\\u0061ssistant","requestId":"req_A","message":'
+               '{"id":"t18","model":"claude-opus-5","content":[{"type":"text","text":"b"}],'
+               '"usage":{"input_tokens":9,"output_tokens":9,'
+               '"cache_read_input_tokens":9,"cache_creation_input_tokens":9}}}')
+        t18 = write(d, "T18.jsonl", [
+            rec("t18", [text("a")], usage(1, 1, 1, 1), requestId="req_A"), esc])
+        check("T18 an escaped `assistant` type is still parsed as an assistant record",
+              json.loads(esc)["type"], "assistant")
+        check("T18 a conflict hidden behind an escaped type is still refused",
+              conflicts(t18)[0], "usage")
 
         # --- 7e. PROPAGATION: no consumer may turn a refused bill into a number ---
         # Section 10 of the closure brief, made mechanical. Every module that reads
@@ -527,7 +579,8 @@ def main():
             check(f"{label} refuses an ambiguous transcript", "returned a number", "Ambiguous")
 
         EXP = os.path.abspath(os.path.join(HERE, "..", "experiments"))
-        for fixture, why in ((t6, "usage conflict"), (t4, "identity conflict")):
+        for fixture, why in ((t6, "usage conflict"), (t4, "identity conflict"),
+                             (t18, "conflict behind an escaped `assistant` type")):
             refuses(f"carry.scan ({why})", carry.scan, fixture)
             refuses(f"carry.scan_full ({why})", carry.scan_full, fixture)
             refuses(f"extract.scan ({why})", extract.scan, fixture)

@@ -91,14 +91,26 @@ def scan_full(path, strict=True):
     for raw in open(path, "rb"):
         digest.update(raw)
         if len(raw) > MAX_LINE:               # counted, never silently dropped
+            # MAX_LINE exists so that one enormous line cannot dominate the ITEM table.
+            # It never meant "do not look at it": skipping the line outright meant an
+            # oversize assistant record reached neither the identity guard nor the usage
+            # guard, so "no conflict found" was really "not looked at" (cross-family review
+            # of the first cut). The bytes are already in memory -- `raw` had to be read to
+            # measure it -- so parsing costs CPU and nothing else. The record is therefore
+            # weighed by the ledger and then dropped from the item table, which is what the
+            # limit was for. Deciding this from a substring test on the unparsed bytes was
+            # the first repair and it was wrong: `"type":"\u0061ssistant"` is valid JSON
+            # that no such test sees.
             oversize += 1
-            if b'"assistant"' in raw:
-                # It was never parsed, so it never reached the identity or usage guard.
-                # "Not checked" is not "checked and clean": a collision or a differing
-                # usage copy could be sitting in exactly this record. Found by a
-                # cross-family review of the first cut of this fix. Measured frequency on
-                # the author's corpus: 0 oversize lines in 400 transcripts.
-                unchecked += 1
+            try:
+                o = json.loads(raw.decode("utf-8", "replace"))
+            except Exception:
+                malformed += 1
+                unchecked += 1     # genuinely unreadable: it reached no guard, and says so
+                continue
+            if (isinstance(o, dict) and o.get("type") == "assistant"
+                    and isinstance(o.get("message"), dict)):
+                turn = max(turn, ledger.observe(o["message"], o)[0])
             continue
         line = raw.decode("utf-8", "replace").strip()
         if not line:
@@ -167,7 +179,7 @@ def scan_full(path, strict=True):
                 elif c.get("type") == "text":
                     items.append((turn, len(c.get("text", "")), "human"))
     if unchecked and strict:
-        raise msgid.Ambiguous("unchecked", "assistant record larger than MAX_LINE")
+        raise msgid.Ambiguous("unchecked", "an oversize line could not be parsed at all")
     exact_identity = ledger.identity_exact and not unchecked
     exact_usage = ledger.usage_exact and not unchecked
     if not exact_usage:
@@ -336,8 +348,16 @@ def accumulate(paths, min_turns=50, max_files=0):
     # the reader sees as DEGRADED without pretending a selected source had two outcomes.
     discovered = total_paths - vanished
     selected = discovered - skipped_by_limit
-    accounted = (len(parsed_files) + (unreadable - vanished) + identity_changed
-                 + empty_source + conflicted_sources)
+    # NOT `+ conflicted_sources`. The frozen contract has no outcome for "read, and then
+    # refused", and the READER's balance (evidence/certificate.accounting_ok) counts
+    # parsed + unreadable + oversize + identity_changed + empty_source + not_attempted.
+    # Claiming an outcome the reader cannot name turns a correctly-refused source into a
+    # certificate ACCOUNTING VIOLATION, which reads UNVERIFIED — the producer accusing
+    # itself of being broken instead of reporting a loss. Letting `not_attempted` absorb it
+    # keeps the balance and still marks the sweep DEGRADED, because `not_attempted` is a
+    # loss counter. `records_rejected` below carries the detail. Found by a cross-family
+    # confirmation round on the first repair.
+    accounted = len(parsed_files) + (unreadable - vanished) + identity_changed + empty_source
     counters = {"discovered": discovered, "skipped_by_limit": skipped_by_limit,
                 "unreadable": unreadable - vanished, "oversize": 0,
                 "identity_changed": identity_changed,

@@ -352,7 +352,18 @@ Two more escapes of the same family were found by the review and closed. `price.
 `rig_confirmatory.py` still carried the `'"usage"' not in line` prefilter that §2 had already
 removed from `prefix.py`, so a usage-less record — exactly where a collision hides — never
 reached a guard; `b2t_validate.py` carried an `'"output_tokens"' not in line` one with the
-same effect. And `b2t_validate` reads a FIFTH usage field, `output_tokens_details.thinking_tokens`,
+same effect. Replacing them with an `'"assistant"' not in line` test was the *first* repair
+and it was wrong: a confirmation round defeated it with `"type":"\u0061ssistant"`, which is
+valid JSON that no substring test sees, and which also silently changed which records were
+billed. **No substring prefilter survives that, so there is none left** — these readers parse
+every line, as `carry.py` already did over the same corpus. Widening `b2t_validate`'s loop
+also changed what a calibration SAMPLE is, deliberately: a usage-less record of a message now
+contributes its text to that message's numerator and its block types to the tool_use/thinking
+control, which is what the function's docstring always claimed ("whichever record carried it")
+and what the prefilter quietly prevented. Measured over 300 transcripts, before and after:
+n=844, median 2.00 B/tok, slope 1.94 — identical, because every record there carries usage.
+
+And `b2t_validate` reads a FIFTH usage field, `output_tokens_details.thinking_tokens`,
 which the four-counter conflict tuple does not cover: two records agreeing on the four and
 disagreeing on that one made its thinking-token control depend on which record the file wrote
 first. It now drops the calibration sample instead, in either order.
@@ -369,15 +380,25 @@ A conflict is also never filed as `unreadable` — that counter means bytes coul
 and burying a conflict there would be the silent discard this section exists to prevent. Nor
 is a conflicted source listed in the evidence manifest: `parsed` is the set of sources the
 payload's numbers came FROM, and an entry for a source that contributed nothing is what lets
-a reader call a sweep INTACT when it measured around a conflict. It is reported as a
-record-level loss instead, which makes the acquisition read DEGRADED, and a sweep whose only
-source was conflicted emits the failure record rather than a measurement of zero.
+a reader call a sweep INTACT when it measured around a conflict. The frozen contract has no
+outcome named "read, and then refused", so the source is left to `not_attempted` — a loss
+counter — with the detail in `records_rejected`. That is checked against the READER's own
+function, not asserted: `evidence.certificate` derives **DEGRADED** for a sweep that refused
+one source of two, **INTACT** for a clean one, and a sweep whose only source was conflicted
+emits `CarrySweepFailed` rather than a measurement of zero. Claiming an outcome the reader
+cannot name was the first repair, and it turned a correctly-refused source into a certificate
+ACCOUNTING VIOLATION — the producer accusing itself of being broken instead of reporting a
+loss. The confirmation round caught that.
 
-One more path was checked and closed: a record larger than `MAX_LINE` is skipped before it is
-parsed, so it never reached either guard. "Not looked at" is not "looked at and clean", so an
-oversize *assistant* record now makes the whole source inexact — refused in strict mode,
-excluded and counted otherwise. Measured frequency on this corpus: 0 in 400 transcripts, so
-the cost is zero and the hole is closed anyway.
+One more path was checked and closed: a record larger than `MAX_LINE` used to be skipped
+*before* it was parsed, so an oversize assistant record reached neither guard and "no conflict
+found" was really "not looked at". `MAX_LINE` exists so one enormous line cannot dominate the
+item table, not to avoid reading it — and the bytes are already in memory, since the line had
+to be read to be measured. So it is parsed and weighed by the ledger now, then dropped from
+the item table, which is what the limit was for; `oversize` still counts it and the sweep
+still reads PARTIAL. Only a line that is oversize **and** unparseable reached no guard, and
+that one does make the source inexact. Deciding this from a substring test on the unparsed
+bytes was the first repair, and `"type":"\u0061ssistant"` defeated it.
 
 ### 8.4 H1 — detectable collisions fail closed
 
@@ -420,8 +441,14 @@ worse one.
 
 That assumption is *used*, not proven. What changed is that it is now bounded on both sides:
 every violation the format can expose is detected and fails closed, and the part that remains
-is named, measured at 0 occurrences on this corpus, and written down here instead of living
-in a docstring as a caveat.
+is named and written down here instead of living in a docstring as a caveat.
+
+Two things must not be confused, and an earlier draft of this section did confuse them. What
+is **measured at 0** on this corpus is the DETECTABLE conflicts: 0 usage conflicts and 0
+identity collisions across 42,793 multi-record identities. The indistinguishable class above
+is, by construction, **not observable** — if it could be counted it would not be
+indistinguishable — so no occurrence count can be claimed for it, in either direction. The
+honest statement is that it has an unknown size and no known instance.
 
 ### 8.6 Numerical effect
 
