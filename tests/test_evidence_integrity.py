@@ -313,6 +313,10 @@ def main():
          "PARTIAL_EVIDENCE", 40, 0, extra=["--accept-partial"])
     envelope_line = json.dumps({"envelope": {"schema_version": 4, "run_id": "x"},
                                 "payload": {}, "certificate": {}})
+    foreign = json.dumps({"note": "another tool's line in a shared file"})
+    case("R142_11 control: a foreign line that parses is counted, not called damage",
+         [json.dumps(r) for r in good_rows] + [foreign], "CANDIDATE", 10, 1,
+         history_quality="COMPLETE")
     case("R142_11 control: a refusal by design is not damage",
          [json.dumps(r) for r in good_rows] + [envelope_line], "CANDIDATE", 10, 1,
          history_quality="COMPLETE")

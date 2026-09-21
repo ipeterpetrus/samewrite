@@ -197,12 +197,17 @@ def sweep_quality(live):
     return worst_quality([claimed, derived])
 
 
-# Reasons load_history() counts that mean a record EXISTED and could not be read as one. A
-# refusal by design (current-generation evidence this optimizer does not read) and a deduplicated
-# retry are not damage: the first is a contract, the second is bookkeeping.
-CONTAINER_DAMAGE = ("unparseable line", "record above the size cap", "history unreadable",
-                    "not an object", "no shares", "non-numeric share", "share out of range",
-                    "implausible", "unknown evidence_quality", "unknown record_type")
+# Reasons load_history() counts that mean a record EXISTED and could not be read as one: a torn
+# line, a line past the size cap, a file that could not be opened. Deliberately NOT here:
+#   * a refusal by design — current-generation evidence this optimizer does not read — which is a
+#     contract, not a loss, and would otherwise block every history in the middle of a migration;
+#   * a deduplicated retry, which is bookkeeping;
+#   * a well-formed line that is not a carry record at all ("no shares", "not an object"). That
+#     line may never have been one — another tool's entry in a shared file — and treating a
+#     foreign line as lost evidence would let one stray append block a real population forever.
+#     The limit is deliberate: a CORRUPTED carry record that still parses as JSON is counted and
+#     reported, and does not degrade. Say so rather than claim a coverage this does not have.
+CONTAINER_DAMAGE = ("unparseable line", "record above the size cap", "history unreadable")
 
 
 def container_quality(rejected):

@@ -369,7 +369,7 @@ docs/VNEXT.md               build report · docs/RELEASE_NOTES_1.1.0.md · _1.2.
                             docs/reference-audits/ — nine projects read at pinned commits
 docs/MULTI_AGENT.md         many agents, running all the time · docs/AI_VOS_PROFILE.md (one profile)
 docs/EVIDENCE_CONTRACT_V1_4.md   the frozen contract the kernel implements
-tests/                      1360 assertions in seventeen suites, mutation-tested; CI on Python 3.9 and 3.12
+tests/                      1364 assertions in seventeen suites, mutation-tested; CI on Python 3.9 and 3.12
                             plus two shell suites: the OpenClaw one-liner's cleanup, the OpenClaw host
 ```
 
