@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""The 1.4.0 release ships evidence acquisition and shadow evaluation — and nothing that writes.
+"""The 1.4.x releases ship evidence acquisition and shadow evaluation — and nothing that writes.
 
 A version bump is the cheapest possible place to activate something by accident: a flag defaults
 differently, a module gets imported for its side effect, a shadow reporter grows one convenience
-write. The README, the release notes and the manifests all now say 1.4.0 and all say promotion and
-candidate persistence are NOT active. This file is what makes that sentence checkable instead of
-promised.
+write. The README, the release notes and the manifests all say the CURRENT version and all say
+promotion and candidate persistence are NOT active. This file is what makes that sentence
+checkable instead of promised — and it reads the version from the manifest rather than naming
+one, so a patch release cannot make this docstring quietly false.
 
 Three questions, asked mechanically:
 
