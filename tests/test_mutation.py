@@ -157,9 +157,10 @@ CASES = [
      [("carry.py",
        """        if len(raw) > MAX_LINE:               # counted, never silently dropped
             oversize += 1
-            continue""",
+            if b'"assistant"' in raw:""",
        """        if False:
-            pass""")],
+            oversize += 1
+            if True:""")],
      """
      p = os.path.join(D, "s.jsonl")
      rows = []

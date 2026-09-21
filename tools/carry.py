@@ -86,12 +86,19 @@ def scan_full(path, strict=True):
     ledger = msgid.Ledger(strict=strict)   # Claude Code writes one record per content block
     usage = collections.Counter()
     runtimes, models = collections.Counter(), collections.Counter()
-    oversize = malformed = 0
+    oversize = malformed = unchecked = 0
     digest = hashlib.sha256()
     for raw in open(path, "rb"):
         digest.update(raw)
         if len(raw) > MAX_LINE:               # counted, never silently dropped
             oversize += 1
+            if b'"assistant"' in raw:
+                # It was never parsed, so it never reached the identity or usage guard.
+                # "Not checked" is not "checked and clean": a collision or a differing
+                # usage copy could be sitting in exactly this record. Found by a
+                # cross-family review of the first cut of this fix. Measured frequency on
+                # the author's corpus: 0 oversize lines in 400 transcripts.
+                unchecked += 1
             continue
         line = raw.decode("utf-8", "replace").strip()
         if not line:
@@ -159,7 +166,11 @@ def scan_full(path, strict=True):
                     items.append((turn, n, "result:" + str(id2name.get(c.get("tool_use_id")))))
                 elif c.get("type") == "text":
                     items.append((turn, len(c.get("text", "")), "human"))
-    if not ledger.usage_exact:
+    if unchecked and strict:
+        raise msgid.Ambiguous("unchecked", "assistant record larger than MAX_LINE")
+    exact_identity = ledger.identity_exact and not unchecked
+    exact_usage = ledger.usage_exact and not unchecked
+    if not exact_usage:
         # AMBIGUOUS_INPUT MUST_NOT_BECOME EXACT_OUTPUT. A strict ledger has already raised;
         # this is the strict=False path, and handing back a Counter built from a bill the
         # transcript does not determine is exactly how the ambiguity becomes a published
@@ -173,7 +184,8 @@ def scan_full(path, strict=True):
         "identity_conflicts": ledger.identity_conflicts,
         "usage_conflicted_messages": ledger.usage_conflicted_messages,
         "identity_conflicted_messages": ledger.identity_conflicted_messages,
-        "usage_exact": ledger.usage_exact, "identity_exact": ledger.identity_exact}
+        "unchecked_records": unchecked,
+        "usage_exact": exact_usage, "identity_exact": exact_identity}
 
 
 def bucket(src):
@@ -221,6 +233,7 @@ def accumulate(paths, min_turns=50, max_files=0):
     # exclusion nobody reports is a silent discard, which is the other half of the defect.
     usage_conflicted_transcripts = identity_conflicted_transcripts = 0
     usage_exact_measurement_excluded = identity_exact_measurement_excluded = 0
+    conflicted_sources = records_rejected = 0
     # A bound has to mean "the most RECENT N", not "the first N the filesystem listed". An
     # alphabetical prefix of a long-lived archive is a sample of whatever was created first, which
     # for a 24x7 population is the least informative slice there is.
@@ -277,6 +290,19 @@ def accumulate(paths, min_turns=50, max_files=0):
             usage_conflicted_transcripts += 1
         if meta.get("identity_conflicts"):
             identity_conflicted_transcripts += 1
+        if not meta.get("identity_exact", True) or not meta.get("usage_exact", True):
+            # NOT `parsed`. `parsed` becomes the evidence manifest, and a manifest entry is a
+            # source the payload's numbers came FROM; listing one that contributed nothing
+            # lets a reader read a sweep that measured around a conflict as INTACT. Counted
+            # as a record-level loss instead, which is what the frozen certificate has a
+            # counter for and what makes the sweep read DEGRADED. Found by a cross-family
+            # review of the first cut of this fix.
+            if meta.get("identity_conflicts"):
+                identity_exact_measurement_excluded += 1
+            usage_exact_measurement_excluded += 1
+            conflicted_sources += 1
+            records_rejected += meta.get("records", 0)
+            continue
         if N == 0:
             # Read, and it held no turn at all. The contract gives that its OWN outcome, and it
             # is not `parsed`: a source in the manifest is a source something was read FROM, so
@@ -284,18 +310,6 @@ def accumulate(paths, min_turns=50, max_files=0):
             empty_source += 1
             continue
         parsed_files[p] = {"content": meta["content"], "turns": N}
-        # It was READ -- so it is `parsed`, and the frozen acquisition accounting is
-        # untouched -- but nothing derived from it enters an aggregate. An identity
-        # collision makes the turn count ambiguous, and every carry figure is indexed by
-        # turn, so the source leaves the carry table too; a usage conflict alone leaves the
-        # bill undetermined, and turns-per-token would recombine the hole into a number.
-        if not meta.get("identity_exact", True):
-            identity_exact_measurement_excluded += 1
-            usage_exact_measurement_excluded += 1
-            continue
-        if not meta.get("usage_exact", True):
-            usage_exact_measurement_excluded += 1
-            continue
         if N < min_turns:                   # stubs and aborted sessions carry nothing
             short += 1
             continue
@@ -322,19 +336,20 @@ def accumulate(paths, min_turns=50, max_files=0):
     # the reader sees as DEGRADED without pretending a selected source had two outcomes.
     discovered = total_paths - vanished
     selected = discovered - skipped_by_limit
-    accounted = len(parsed_files) + (unreadable - vanished) + identity_changed + empty_source
+    accounted = (len(parsed_files) + (unreadable - vanished) + identity_changed
+                 + empty_source + conflicted_sources)
     counters = {"discovered": discovered, "skipped_by_limit": skipped_by_limit,
                 "unreadable": unreadable - vanished, "oversize": 0,
                 "identity_changed": identity_changed,
                 "empty_source": empty_source,
                 # every selected source the loop did not classify above
                 "not_attempted": max(0, selected - accounted),
-                "malformed": malformed + oversize, "records_rejected": 0,
+                "malformed": malformed + oversize, "records_rejected": records_rejected,
                 "dirs_unreadable": vanished}
     # Provenance, not decoration: an analyser that cannot tell a complete sweep from a sweep that
     # hit unreadable files or a file cap will happily call a bounded corpus the population.
     quality = "COMPLETE"
-    if unreadable or oversize or skipped_by_limit:
+    if unreadable or oversize or skipped_by_limit or conflicted_sources:
         quality = "PARTIAL"
     if sessions == 0:
         quality = "INVALID" if scanned else "EMPTY"
@@ -351,6 +366,7 @@ def accumulate(paths, min_turns=50, max_files=0):
                 identity_conflicts=identity_conflicts,
                 usage_conflicted_transcripts=usage_conflicted_transcripts,
                 identity_conflicted_transcripts=identity_conflicted_transcripts,
+                conflicted_sources=conflicted_sources,
                 usage_exact_measurement_excluded=usage_exact_measurement_excluded,
                 identity_exact_measurement_excluded=identity_exact_measurement_excluded)
 

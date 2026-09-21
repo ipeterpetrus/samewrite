@@ -348,6 +348,15 @@ only caller that opts out is `tools/carry.accumulate`, whose contract is to excl
 source and say so rather than abort a sweep of a thousand files. Missing usage on one record
 is *not* a conflict — the copy that exists is the bill, in either ordering.
 
+Two more escapes of the same family were found by the review and closed. `price.py` and
+`rig_confirmatory.py` still carried the `'"usage"' not in line` prefilter that §2 had already
+removed from `prefix.py`, so a usage-less record — exactly where a collision hides — never
+reached a guard; `b2t_validate.py` carried an `'"output_tokens"' not in line` one with the
+same effect. And `b2t_validate` reads a FIFTH usage field, `output_tokens_details.thinking_tokens`,
+which the four-counter conflict tuple does not cover: two records agreeing on the four and
+disagreeing on that one made its thinking-token control depend on which record the file wrote
+first. It now drops the calibration sample instead, in either order.
+
 Fail-closed propagation is mechanical, not documentary. `scan_full` empties the usage counter
 when the ledger is not exact, so no caller can receive an ambiguous total; the aggregate
 excludes the source from every figure and reports it as
@@ -357,7 +366,18 @@ conflicting fixture and asserts each one refuses. The two rigs that glob their o
 directories and cannot be driven from a test are covered by the property that makes the rest
 true, asserted repo-wide: no module outside `carry.accumulate` constructs a non-strict Ledger.
 A conflict is also never filed as `unreadable` — that counter means bytes could not be read,
-and burying a conflict there would be the silent discard this section exists to prevent.
+and burying a conflict there would be the silent discard this section exists to prevent. Nor
+is a conflicted source listed in the evidence manifest: `parsed` is the set of sources the
+payload's numbers came FROM, and an entry for a source that contributed nothing is what lets
+a reader call a sweep INTACT when it measured around a conflict. It is reported as a
+record-level loss instead, which makes the acquisition read DEGRADED, and a sweep whose only
+source was conflicted emits the failure record rather than a measurement of zero.
+
+One more path was checked and closed: a record larger than `MAX_LINE` is skipped before it is
+parsed, so it never reached either guard. "Not looked at" is not "looked at and clean", so an
+oversize *assistant* record now makes the whole source inexact — refused in strict mode,
+excluded and counted otherwise. Measured frequency on this corpus: 0 in 400 transcripts, so
+the cost is zero and the hole is closed anyway.
 
 ### 8.4 H1 — detectable collisions fail closed
 
@@ -375,16 +395,28 @@ collision turns the suite RED against the fixture modelled on §8.2.
     CAN_TWO_DISTINCT_LOGICAL_MESSAGES_REMAIN_STRUCTURALLY_INDISTINGUISHABLE
     FROM_ONE_MULTIBLOCK_MESSAGE = YES
 
-The indistinguishable class is exact: two assistant messages that share one `message.id`
-**and** agree on `role`, `model`, `type`, `stop_reason`, `stop_sequence` **and** `requestId`
-(or on which `requestId` is absent, as it is on 4,208 records here), and whose usage objects
-are also identical — because differing usage is already caught by H2. Nothing in a transcript
-separates that from one message written as several content-block records. It is not a defect
-in this code: the information is not in the file.
+The indistinguishable class is **not** "two messages that agree on all six guards". It is
+wider than that, and stating it narrowly would understate the limitation. The guard compares
+only values that are *stated*: a field that is absent, or explicitly null, states nothing.
+So the residual is:
+
+> two assistant messages sharing one `message.id` on which **no guard field states two
+> different values** — including the case where one message states a field and the other
+> omits it entirely (`requestId` is absent on 4,208 records here, so this is a real shape,
+> not a hypothetical) — and whose four billed usage counters are also identical, because
+> differing usage is already caught by H2.
+
+Nothing in a transcript separates that from one message written as several content-block
+records. That is not a defect in this code: the information is not in the file. Treating an
+absent field as a disagreement would not recover it either — it would reject the legitimate
+multi-block messages the corpus is actually made of, which is the opposite error and the
+worse one.
 
     SOURCE_FORMAT_LIMITATION = YES
-    UPSTREAM_ASSUMPTION      = within one transcript, one `message.id` accompanied by one
-                               `requestId` identifies one logical assistant message
+    UPSTREAM_ASSUMPTION      = within one transcript, a non-empty `message.id` identifies
+                               exactly one logical assistant message — including when
+                               `requestId` or any other guard field is absent from some or
+                               all of its records
 
 That assumption is *used*, not proven. What changed is that it is now bounded on both sides:
 every violation the format can expose is detected and fails closed, and the part that remains

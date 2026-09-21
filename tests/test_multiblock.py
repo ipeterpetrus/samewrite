@@ -439,6 +439,73 @@ def main():
         check("and the conflicted neighbour is still reported",
               aggmix["usage_exact_measurement_excluded"], 1)
 
+        # --- T14..T17: the shapes a cross-family review found the first cut missed ----
+        # T14 the second record of the collision carries NO usage. Consumers that used to
+        # prefilter on `"usage"` never saw it, so the collision reached no guard at all.
+        t14 = write(d, "T14.jsonl", [
+            rec("t14", [text("a")], usage(1, 1000000, 1, 1), requestId="req_A"),
+            rec("t14", [text("second logical message")], None, requestId="req_B"),
+        ])
+        k14, m14 = conflicts(t14)
+        check("T14 a collision carried by a usage-LESS record is still detected",
+              k14, "identity")
+        check("T14 it is counted", m14["identity_conflicts"], 1)
+
+        # T15 the four billed counters agree and a NESTED usage field does not. The ledger's
+        # conflict tuple is the four counters by contract; the consumer that reads a fifth
+        # field has to refuse the sample itself, in EITHER record order.
+        import importlib as _il                                   # noqa: E402
+        _b2t = _il.import_module("b2t_validate")
+
+        def b2t_pair(first_thinking, second_thinking):
+            u1 = dict(usage(1, 100, 1, 1),
+                      output_tokens_details={"thinking_tokens": first_thinking})
+            u2 = dict(usage(1, 100, 1, 1),
+                      output_tokens_details={"thinking_tokens": second_thinking})
+            q = write(d, f"T15_{first_thinking}_{second_thinking}.jsonl", [
+                rec("t15", [text("w" * 200)], u1, requestId=REQ),
+                rec("t15", [text("w" * 200)], u2, requestId=REQ),
+            ])
+            return list(_b2t.sample(q))
+        check("T15 a nested-usage disagreement drops the calibration sample",
+              b2t_pair(0, 10), [])
+        check("T15 and drops it in the other record order too (not FIRST_WINS)",
+              b2t_pair(10, 0), [])
+        check("T15 an agreeing pair still yields its sample",
+              len(b2t_pair(0, 0)), 1)
+
+        # T16 an assistant record too large to parse never reached the guard, so "no
+        # conflict found" was really "not looked at". MAX_LINE is patched rather than
+        # writing an 8 MiB fixture.
+        small = rec("t16", [text("a")], usage(1, 1, 1, 1), requestId="req_A")
+        big = rec("t16", [text("b" * 4000)], usage(2, 2, 2, 2), requestId="req_B")
+        t16 = write(d, "T16.jsonl", [small, big])
+        real_max = carry.MAX_LINE
+        carry.MAX_LINE = len(small) + 1      # exactly one record is over the limit
+        try:
+            k16, m16 = conflicts(t16)
+            check("T16 an unparsed assistant record makes the scan not exact", k16, "unchecked")
+            check("T16 it is counted rather than assumed clean", m16["unchecked_records"], 1)
+            check("T16 no usage survives it", sum(carry.scan_full(t16, strict=False)[2].values()), 0)
+            a16 = carry.accumulate([t16], min_turns=1)
+            check("T16 accumulate excludes the source", a16["sessions"], 0)
+            check("T16 and the source never enters the evidence manifest", a16["parsed"], {})
+        finally:
+            carry.MAX_LINE = real_max
+
+        # T17 a conflicted source must not be listed as a source the numbers came FROM:
+        # `parsed` becomes the evidence manifest, and a manifest entry for a source that
+        # contributed nothing lets a reader read the sweep as INTACT.
+        a17 = carry.accumulate([t6], min_turns=1)
+        check("T17 a conflicted source is not in the evidence manifest", a17["parsed"], {})
+        check("T17 it is reported as a record-level loss, so the sweep reads DEGRADED",
+              a17["counters"]["records_rejected"] > 0, True)
+        check("T17 the frozen accounting law still balances",
+              a17["counters"]["not_attempted"], 0)
+        check("T17 quality is no longer COMPLETE", a17["quality"] != "COMPLETE", True)
+        a17b = carry.accumulate([canonical(d), t6], min_turns=1)
+        check("T17 the clean neighbour IS in the manifest", len(a17b["parsed"]), 1)
+
         # --- 7e. PROPAGATION: no consumer may turn a refused bill into a number ---
         # Section 10 of the closure brief, made mechanical. Every module that reads
         # `message.usage` is driven with the SAME conflicting fixtures and must refuse.

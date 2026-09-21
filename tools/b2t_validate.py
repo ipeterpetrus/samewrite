@@ -52,11 +52,14 @@ def sample(path):
     # the silent first-wins the ledger refuses. A strict Ledger fed the same records is the
     # detector: it raises `msgid.Ambiguous` on a usage conflict or an identity collision
     # before any B/token constant is derived from them. It is used for nothing else here,
-    # so its turn numbering (this loop skips lines without `output_tokens`) does not matter.
+    # so its turn numbering does not matter. What DOES matter is that it sees every
+    # assistant record: the old `'"output_tokens"' not in line` prefilter here skipped a
+    # usage-less record of a message, which is exactly where a collision hides (cross-family
+    # review of the first cut of this fix).
     detector = msgid.Ledger(strict=True)
     with fh:
         for line in fh:                       # not .splitlines(): U+2028 is legal here
-            if '"output_tokens"' not in line:
+            if '"assistant"' not in line:
                 continue
             try:
                 o = json.loads(line)
@@ -75,8 +78,20 @@ def sample(path):
                 msgs[key] = {"u": m.get("usage") or {}, "text": [], "drop": False}
                 order.append(key)
             r = msgs[key]
+            u_here = m.get("usage") or {}
             if not r["u"]:
-                r["u"] = m.get("usage") or {}
+                r["u"] = u_here
+            elif u_here and (u_here.get("output_tokens_details")
+                             != r["u"].get("output_tokens_details")):
+                # The ledger's conflict tuple is the four billed counters, which is the
+                # definition this repository accounts on. This function reads a FIFTH field
+                # -- `output_tokens_details.thinking_tokens`, its control for a denominator
+                # that counts text it cannot see -- so agreement on the four does not make
+                # this sample determined. Taking the first copy would make the control
+                # ORDER-DEPENDENT: the same message would be kept or dropped depending on
+                # which of its records the file happened to write first. Drop it instead;
+                # a calibration sample is cheap and a wrong B/token constant is not.
+                r["drop"] = True
             c = m.get("content")
             if not isinstance(c, list):
                 continue

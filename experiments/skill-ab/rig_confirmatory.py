@@ -76,9 +76,12 @@ def usage_rows(work, task, run_id, arm, rep):
             seen.add(b)
             t=0; led=msgid.Ledger()   # one message, however many records carry it
             for line in open(f,errors="replace"):
-                if '"usage"' not in line: continue
+                # No usage prefilter: a usage-less record of a message still carries the id
+                # and the guard fields, and skipping it hides a collision (cross-family review).
+                if '"assistant"' not in line: continue
                 try: o=json.loads(line)
                 except: continue
+                if not isinstance(o,dict) or o.get("type")!="assistant": continue
                 m=o.get("message") or {}
                 if not led.bill(m, o): continue   # `o`: requestId collision guard
                 u=m.get("usage") or {}

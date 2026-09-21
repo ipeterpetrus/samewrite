@@ -40,11 +40,17 @@ def toks(work, fixture, extra_roots=()):
             seen.add(b)
             ledger = msgid.Ledger()   # per transcript: one message, however many records
             for line in open(f, errors="replace"):
-                if '"usage"' not in line:
+                # No `'"usage"' not in line` prefilter. A record of a message that carries
+                # no usage of its own still carries the id and the guard fields, and
+                # skipping it hides a collision the ledger would have refused. Same defect
+                # tools/prefix.py had, found by a cross-family review.
+                if '"assistant"' not in line:
                     continue
                 try:
                     o = json.loads(line)
                 except Exception:
+                    continue
+                if not isinstance(o, dict) or o.get("type") != "assistant":
                     continue
                 m = o.get("message") or {}
                 if not ledger.bill(m, o):   # `o`: the requestId collision guard
