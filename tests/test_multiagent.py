@@ -454,7 +454,9 @@ def main():
     os.utime(new_one, (2 * 10 ** 9, 2 * 10 ** 9))
     picked = []
     real_scan = carry.scan_full
-    carry.scan_full = lambda q: (picked.append(q), real_scan(q))[1]
+    # scan_full carries a `strict` flag now (accumulate passes strict=False so it can
+    # report an ambiguous source instead of aborting the sweep); the spy must pass it on.
+    carry.scan_full = lambda q, **kw: (picked.append(q), real_scan(q, **kw))[1]
     try:
         carry.accumulate([old_one] + [os.path.join(more, f"s{k}.jsonl") for k in (1, 2, 3)],
                          min_turns=1, max_files=1)

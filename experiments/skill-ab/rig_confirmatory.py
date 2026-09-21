@@ -3,6 +3,8 @@
 Menulis ledger per-request supaya hasilnya bisa diaudit orang lain."""
 import argparse, json, os, re, subprocess, sys, tempfile, textwrap, time, glob, collections
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tools"))
+import msgid  # noqa: E402  one assistant message, however many records carry it
 from rig_modes import CFG, ONELINER
 HERE=os.path.dirname(os.path.abspath(__file__)); CLAUDE=os.path.expanduser("~/.local/bin/claude")
 def D(s): return textwrap.dedent(s).lstrip()
@@ -72,13 +74,16 @@ def usage_rows(work, task, run_id, arm, rep):
             b=os.path.basename(f)
             if b in seen: continue
             seen.add(b)
-            t=0
+            t=0; led=msgid.Ledger()   # one message, however many records carry it
             for line in open(f,errors="replace"):
-                if '"usage"' not in line: continue
+                # No substring prefilter: a usage-less record still carries the id and the
+                # guard fields, and no substring test survives `"type":"\u0061ssistant"`.
                 try: o=json.loads(line)
                 except: continue
-                u=(o.get("message") or {}).get("usage") or {}
-                if not u: continue
+                if not isinstance(o,dict) or o.get("type")!="assistant": continue
+                m=o.get("message") or {}
+                if not led.bill(m, o): continue   # `o`: requestId collision guard
+                u=m.get("usage") or {}
                 t+=1
                 rows.append(dict(run_id=run_id, arm=arm, task=task, rep=rep, turn=t,
                     input_tokens=u.get("input_tokens") or 0,

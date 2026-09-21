@@ -15,6 +15,7 @@ pakai: python3 tools/extract.py OUT.pkl transcript.jsonl [...] [--keep-content]
 import hashlib, json, os, pickle, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import profiles  # directories and profile discovery; see tools/profiles.py
+import msgid     # one assistant message, however many records carry it
 
 try:
     import tiktoken
@@ -36,6 +37,7 @@ def redact(text):
 
 def scan(path, keep=False):
     prev, turn, items, rew = {}, 0, [], []
+    ledger = msgid.Ledger()   # one record per content block; see tools/msgid.py
     for line in open(path, errors="replace"):
         line = line.strip()
         if not line or ('"usage"' not in line and '"tool_use"' not in line
@@ -47,8 +49,9 @@ def scan(path, keep=False):
             continue
         m, t = o.get("message") or {}, o.get("type")
         if t == "assistant" and isinstance(m, dict):
-            if m.get("usage"):
-                turn += 1
+            # Blocks of one message arrive on separate records; they share ITS turn, which
+            # is not always the newest one — a record of an older message can reappear.
+            turn, _billed = ledger.observe(m, o)   # `o`: the requestId collision guard
             for c in (m.get("content") or []):
                 if not isinstance(c, dict):
                     continue
@@ -69,7 +72,7 @@ def scan(path, keep=False):
                     ct = c.get("content")
                     items.append((turn, len(ct if isinstance(ct, str)
                                             else json.dumps(ct, ensure_ascii=False))))
-    N = turn
+    N = ledger.turns
     return dict(id=os.path.basename(path)[:8], N=N, redacted=not keep,
                 ctx_in=sum(s for _, s in items),
                 carry=sum(s * (N - i) for i, s in items),

@@ -24,6 +24,11 @@ jobs:
         run: python3 tests/test_plugin_manifest.py
       - name: carry suite
         run: python3 tests/test_carry.py
+      - name: multi-block transcript accounting (one message, however many records carry it)
+        # Public issue #1: one JSONL record per content block, each repeating message.id and
+        # message.usage. Every fixture that existed before this suite emitted one record per
+        # message with no id — the one shape the defect cannot touch.
+        run: python3 tests/test_multiblock.py
       - name: skills suite
         run: python3 tests/test_skills.py
       - name: health suite

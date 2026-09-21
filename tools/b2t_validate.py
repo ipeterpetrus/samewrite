@@ -20,22 +20,54 @@ structure the vendor tokenises differently — gave 8.14).
 
     python3 tools/b2t_validate.py ~/.claude/projects/*/*.jsonl
 """
-import argparse, glob, json, re, statistics, sys
+import argparse, glob, json, os, re, statistics, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import msgid     # one assistant message, however many records carry it
 
 # Rough language split. Not linguistics — just enough to show the constant is not universal.
 ID_MARKERS = re.compile(r"\b(yang|dan|tidak|sudah|dengan|untuk|kalau|bukan)\b")
 
 
 def sample(path):
-    """Yield (bytes_per_token, is_indonesian) for usable assistant turns."""
+    """Yield (bytes_per_token, is_indonesian, output_tokens, nbytes) per usable assistant
+    MESSAGE.
+
+    Reassembly first, filtering second. Claude Code writes one record per content block,
+    and every record of a message repeats that message's `output_tokens`. A message that
+    wrote prose AND called a tool therefore has a record that LOOKS text-only while its
+    denominator bills the tool JSON too — the exact sample the tool_use control was
+    written to drop. Grouping by `message.id` restores the control: a message holding any
+    tool_use or thinking block anywhere is dropped, whichever record carried it.
+
+    A record with no usable id is its own message, which keeps synthetic and legacy
+    transcripts reading exactly as they did.
+    """
     try:
         fh = open(path, encoding="utf-8")
     except OSError:
         return
+    msgs, order = {}, []
+    # This function does its OWN grouping (it needs the text blocks, which the Ledger does
+    # not carry), so it also does its own first-copy usage pick below -- and that is exactly
+    # the silent first-wins the ledger refuses. A strict Ledger fed the same records is the
+    # detector: it raises `msgid.Ambiguous` on a usage conflict or an identity collision
+    # before any B/token constant is derived from them. It is used for nothing else here,
+    # so its turn numbering does not matter. What DOES matter is that it sees every
+    # assistant record. The old `'"output_tokens"' not in line` prefilter skipped a
+    # usage-less record of a message, which is exactly where a collision hides; replacing it
+    # with an `"assistant"` test only moved the hole, since `"type":"\u0061ssistant"` is
+    # valid JSON no substring test sees. Both found by cross-family review. Every line is
+    # parsed now, as tools/carry.py already does over the same corpus.
+    #
+    # Widening this loop also changed what a SAMPLE is, deliberately: a usage-less record of
+    # a message now contributes its text to that message's numerator and its block types to
+    # the tool_use/thinking control, which is what this function's docstring always claimed
+    # ("whichever record carried it") and what the prefilter quietly prevented. Measured on
+    # 300 transcripts of the author's corpus: n=844, median 2.00 B/tok, slope 1.94 — byte
+    # for byte the same as before, because every record there carries usage.
+    detector = msgid.Ledger(strict=True)
     with fh:
         for line in fh:                       # not .splitlines(): U+2028 is legal here
-            if '"output_tokens"' not in line:
-                continue
             try:
                 o = json.loads(line)
             except Exception:
@@ -45,24 +77,54 @@ def sample(path):
             m = o.get("message")
             if not isinstance(m, dict):
                 continue
-            u = m.get("usage") or {}
-            ot = u.get("output_tokens") or 0
-            det = u.get("output_tokens_details") or {}
-            if det.get("thinking_tokens"):
-                continue                      # denominator would count what we cannot see
+            detector.observe(m, o)
+            key = msgid.identity(m)
+            if key is None:
+                key = ("\x00anon", len(order))   # legacy: one record, one message
+            if key not in msgs:
+                msgs[key] = {"u": m.get("usage") or {}, "text": [], "drop": False}
+                order.append(key)
+            r = msgs[key]
+            u_here = m.get("usage") or {}
+            if not r["u"]:
+                r["u"] = u_here
+            elif u_here and (u_here.get("output_tokens_details")
+                             != r["u"].get("output_tokens_details")):
+                # The ledger's conflict tuple is the four billed counters, which is the
+                # definition this repository accounts on. This function reads a FIFTH field
+                # -- `output_tokens_details.thinking_tokens`, its control for a denominator
+                # that counts text it cannot see -- so agreement on the four does not make
+                # this sample determined. Taking the first copy would make the control
+                # ORDER-DEPENDENT: the same message would be kept or dropped depending on
+                # which of its records the file happened to write first. Drop it instead;
+                # a calibration sample is cheap and a wrong B/token constant is not.
+                r["drop"] = True
             c = m.get("content")
             if not isinstance(c, list):
                 continue
-            if any(isinstance(b, dict) and b.get("type") in ("tool_use", "thinking") for b in c):
-                continue
-            if ot < 50:
-                continue                      # short turns: BPE boundary noise dominates
-            txt = "".join(b.get("text", "") for b in c
-                          if isinstance(b, dict) and b.get("type") == "text")
-            nb = len(txt.encode("utf-8"))
-            if nb < 200:
-                continue
-            yield (nb / ot, bool(ID_MARKERS.search(txt)), ot, nb)
+            for b in c:
+                if not isinstance(b, dict):
+                    continue
+                if b.get("type") in ("tool_use", "thinking"):
+                    r["drop"] = True           # same control as before, message-wide now
+                elif b.get("type") == "text":
+                    r["text"].append(b.get("text", ""))
+    for key in order:
+        r = msgs[key]
+        if r["drop"]:
+            continue
+        u = r["u"]
+        ot = u.get("output_tokens") or 0
+        det = u.get("output_tokens_details") or {}
+        if det.get("thinking_tokens"):
+            continue                          # denominator would count what we cannot see
+        if ot < 50:
+            continue                          # short turns: BPE boundary noise dominates
+        txt = "".join(r["text"])
+        nb = len(txt.encode("utf-8"))
+        if nb < 200:
+            continue
+        yield (nb / ot, bool(ID_MARKERS.search(txt)), ot, nb)
 
 
 def fit(points):

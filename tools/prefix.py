@@ -17,6 +17,8 @@ Cross-check the sizes here against how often you actually used each tool
 (tools/skills.py does the same job for skills) before concluding anything.
 """
 import argparse, collections, json, os, statistics, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import msgid     # one assistant message, however many records carry it
 
 B2T = 1 / 3.14
 
@@ -59,23 +61,25 @@ def turns_with_usage(path):
     """Jumlah turn dengan definisi yang SAMA seperti carry.py: record assistant ber-`usage`.
     Tanpa ini, kohort prefix.py (semua sesi ber-snapshot) tak sebanding dengan kohort
     carry.py (default >= 50 turn) — dan angkanya diperbandingkan orang."""
-    n = 0
+    ledger = msgid.Ledger()
     try:
         fh = open(path, encoding="utf-8")
     except OSError:
         return 0
     with fh:
         for line in fh:
-            if '"usage"' not in line:
-                continue
+            # No cheap substring filter. A turn opens on a message's FIRST record, and that
+            # record need not carry usage — skipping it here would count a different number
+            # of turns than carry.py does, and this function exists to match carry.py. The
+            # `'"assistant"' not in line` test that replaced the usage one is no filter
+            # either: `"type":"\u0061ssistant"` is valid JSON it does not see.
             try:
                 o = json.loads(line)
             except Exception:
                 continue
-            if isinstance(o, dict) and o.get("type") == "assistant" \
-                    and isinstance((o.get("message") or {}).get("usage"), dict):
-                n += 1
-    return n
+            if isinstance(o, dict) and o.get("type") == "assistant":
+                ledger.observe(o.get("message"), o)   # `o`: the requestId collision guard
+    return ledger.turns
 
 
 def accumulate(paths, min_turns=0):

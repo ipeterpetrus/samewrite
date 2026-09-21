@@ -20,6 +20,7 @@ the quiet error this replaces.
 import argparse, collections, hashlib, json, os, re, sys, time, uuid
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import profiles  # multi-profile discovery; see tools/profiles.py
+import msgid     # one assistant message, however many records carry it
 import evidence_acquire                        # typed v1.4 producer (frozen constructors)
 import evidence_history                        # the history file, read/written through the kernel
 from evidence.records import RECORD_SCHEMA_VERSION
@@ -67,7 +68,7 @@ def scan(path):
     return turns, items, usage
 
 
-def scan_full(path):
+def scan_full(path, strict=True):
     """-> (turns, items, usage, meta). `meta` holds the population identity a later
     comparison needs — which CLI wrote the transcript and which models answered — and
     nothing else: no path, no prompt, no content. Same single pass over the file, so
@@ -78,23 +79,46 @@ def scan_full(path):
     pass would answer it about a different read. Reading bytes and decoding per line keeps the
     single pass and makes the digest the true one.
     """
-    turn, id2name, items = 0, {}, []
+    turn, id2name, items = 0, {}, []   # `turn` = the latest turn opened, for non-assistant items
+    # strict: a usage conflict or an identity collision raises rather than being averaged
+    # into a number. accumulate() passes strict=False because its job is to EXCLUDE the
+    # source and say so; every other caller of scan()/scan_full() gets the raise.
+    ledger = msgid.Ledger(strict=strict)   # Claude Code writes one record per content block
     usage = collections.Counter()
     runtimes, models = collections.Counter(), collections.Counter()
     oversize = malformed = 0
     digest = hashlib.sha256()
     for raw in open(path, "rb"):
         digest.update(raw)
-        if len(raw) > MAX_LINE:               # counted, never silently dropped
+        # MAX_LINE bounds the ITEM table, so that one enormous line cannot dominate it. It
+        # never meant "do not look at this line": skipping it outright meant an oversize
+        # assistant record reached neither the identity guard nor the usage guard, so "no
+        # conflict found" was really "not looked at". Two cross-family rounds were needed to
+        # get this right -- the first repair decided it from a substring test on the
+        # unparsed bytes, which `"type":"\u0061ssistant"` defeats, and the second parsed the
+        # record but then dropped its BILL along with its blocks, understating the tokens.
+        # The bytes are already in memory (`raw` had to be read to be measured), so an
+        # oversize record is parsed, weighed and BILLED like any other, and only its content
+        # blocks are kept out of the item table. Measured: 0 oversize lines in 1,390
+        # transcripts.
+        oversize_line = len(raw) > MAX_LINE
+        if oversize_line:                     # counted, never silently dropped
             oversize += 1
-            continue
         line = raw.decode("utf-8", "replace").strip()
         if not line:
             continue
         try:
             o = json.loads(line)
         except Exception:
-            malformed += 1                    # a line this parser could not use, and says so
+            # A line this parser could not use, and says so. It is NOT folded into the
+            # exactness flags, and the distinction is deliberate: a conflict is two
+            # incompatible statements, a malformed line is an ABSENT one. The frozen
+            # certificate already carries `malformed` as a loss counter, so a sweep holding
+            # one cannot read INTACT and its reader is already told the transcript was not
+            # fully read. Refusing the source instead would replace a precise report with a
+            # blunt one and would exclude every live session whose last line is half
+            # written. Measured: 0 malformed lines in 1,390 transcripts.
+            malformed += 1
             continue
 
         v = o.get("version")
@@ -103,6 +127,8 @@ def scan_full(path):
 
         att = o.get("attachment")
         if isinstance(att, dict):           # hook output, skill listing, reminders
+            if oversize_line:
+                continue                    # weighed nowhere, and not itemised
             c = att.get("content")
             if not isinstance(c, str):
                 c = json.dumps(c, ensure_ascii=False) if c is not None else ""
@@ -111,15 +137,30 @@ def scan_full(path):
 
         kind, msg = o.get("type"), o.get("message")
         if kind == "assistant" and isinstance(msg, dict):
-            m = msg.get("model")
-            if isinstance(m, str) and m:
-                models[m] += 1
-            u = msg.get("usage") or {}
-            if u:
-                turn += 1
-                for k in ("input_tokens", "output_tokens",
-                          "cache_read_input_tokens", "cache_creation_input_tokens"):
+            # A message split across records repeats its id and its usage on every one of
+            # them: one turn, one bill. `observe` opens that turn on the message's FIRST
+            # record, with or without usage, so a block never lands on the turn before it.
+            #
+            # Items are then indexed by `turn`, the NEWEST turn open — not by the message's
+            # own turn. carry is a REPLAY cost: an item is billed on every turn after the
+            # one it entered the context on, so its index has to be where it entered the
+            # FILE. For the 3-in-197,127 records that belong to a message a newer one has
+            # already overtaken, indexing by the message's turn would move the item earlier
+            # than it was ever sent and overstate its carry. `out_of_order` counts them.
+            t, billed = ledger.observe(msg, o)   # `o`: the requestId collision guard
+            turn = max(turn, t)
+            if billed:
+                m = msg.get("model")
+                if isinstance(m, str) and m:
+                    models[m] += 1
+                u = msg.get("usage") or {}
+                for k in msgid.USAGE_KEYS:
                     usage[k] += u.get(k) or 0
+            if oversize_line:
+                # Guarded and BILLED above; only its blocks are kept out of the item table,
+                # which is the whole of what MAX_LINE was ever for. Dropping the bill here
+                # published a token total that was too LOW -- found by the second round.
+                continue
             for c in (msg.get("content") or []):
                 if not isinstance(c, dict):
                     continue
@@ -131,6 +172,8 @@ def scan_full(path):
                     items.append((turn, len(json.dumps(c.get("input") or {},
                                                        ensure_ascii=False)), "call:" + name))
         elif kind == "user" and isinstance(msg, dict):
+            if oversize_line:
+                continue                    # not itemised; a user record carries no bill
             content = msg.get("content")
             if isinstance(content, str):
                 items.append((turn, len(content), "human"))
@@ -144,8 +187,23 @@ def scan_full(path):
                     items.append((turn, n, "result:" + str(id2name.get(c.get("tool_use_id")))))
                 elif c.get("type") == "text":
                     items.append((turn, len(c.get("text", "")), "human"))
-    return turn, items, usage, {"runtimes": runtimes, "models": models, "oversize": oversize,
-                                "malformed": malformed, "content": digest.hexdigest()}
+    exact_identity = ledger.identity_exact
+    exact_usage = ledger.usage_exact
+    if not exact_usage:
+        # AMBIGUOUS_INPUT MUST_NOT_BECOME EXACT_OUTPUT. A strict ledger has already raised;
+        # this is the strict=False path, and handing back a Counter built from a bill the
+        # transcript does not determine is exactly how the ambiguity becomes a published
+        # figure one caller down. The counters below say what was withheld and why.
+        usage = collections.Counter()
+    return ledger.turns, items, usage, {
+        "runtimes": runtimes, "models": models, "oversize": oversize,
+        "malformed": malformed, "content": digest.hexdigest(),
+        "records": ledger.records, "usage_conflicts": ledger.usage_conflicts,
+        "out_of_order": ledger.out_of_order,
+        "identity_conflicts": ledger.identity_conflicts,
+        "usage_conflicted_messages": ledger.usage_conflicted_messages,
+        "identity_conflicted_messages": ledger.identity_conflicted_messages,
+        "usage_exact": exact_usage, "identity_exact": exact_identity}
 
 
 def bucket(src):
@@ -185,6 +243,15 @@ def accumulate(paths, min_turns=50, max_files=0):
     # was selected. `sources` is every source attempted; `parsed` is the subset that was read.
     sources, parsed_files = {}, {}
     malformed = identity_changed = empty_source = vanished = 0
+    # Two assumptions of the message-identity law, counted rather than believed:
+    # a message whose records disagree on usage, and one whose records are not adjacent.
+    usage_conflicts = out_of_order = identity_conflicts = 0
+    # ...and what that costs: a source whose bill or whose turn identity the transcript does
+    # not determine contributes to NO aggregate here. Counted, named, and printed -- an
+    # exclusion nobody reports is a silent discard, which is the other half of the defect.
+    usage_conflicted_transcripts = identity_conflicted_transcripts = 0
+    usage_exact_measurement_excluded = identity_exact_measurement_excluded = 0
+    conflicted_sources = records_rejected = 0
     # A bound has to mean "the most RECENT N", not "the first N the filesystem listed". An
     # alphabetical prefix of a long-lived archive is a sample of whatever was created first, which
     # for a 24x7 population is the least informative slice there is.
@@ -207,10 +274,18 @@ def accumulate(paths, min_turns=50, max_files=0):
             continue
         sources[p] = before
         try:
-            N, items, u, meta = scan_full(p)
+            # strict=False: this function reports and excludes rather than aborting a
+            # sweep of thousands of files on one ambiguous transcript.
+            N, items, u, meta = scan_full(p, strict=False)
         except OSError:
             unreadable += 1
             continue
+        except msgid.Ambiguous:
+            # Must never be filed as "unreadable". It is not a parse failure: the file was
+            # read perfectly and says two incompatible things. The strict=False call above
+            # does not raise it today; this stands so that a future edit which drops that
+            # argument fails loudly instead of burying a conflicted source in a loss counter.
+            raise
         except Exception:                      # a transcript that cannot be parsed at all
             unreadable += 1
             continue
@@ -226,6 +301,26 @@ def accumulate(paths, min_turns=50, max_files=0):
             continue
         oversize += meta.get("oversize", 0)
         malformed += meta.get("malformed", 0)
+        usage_conflicts += meta.get("usage_conflicts", 0)
+        out_of_order += meta.get("out_of_order", 0)
+        identity_conflicts += meta.get("identity_conflicts", 0)
+        if meta.get("usage_conflicts"):
+            usage_conflicted_transcripts += 1
+        if meta.get("identity_conflicts"):
+            identity_conflicted_transcripts += 1
+        if not meta.get("identity_exact", True) or not meta.get("usage_exact", True):
+            # NOT `parsed`. `parsed` becomes the evidence manifest, and a manifest entry is a
+            # source the payload's numbers came FROM; listing one that contributed nothing
+            # lets a reader read a sweep that measured around a conflict as INTACT. Counted
+            # as a record-level loss instead, which is what the frozen certificate has a
+            # counter for and what makes the sweep read DEGRADED. Found by a cross-family
+            # review of the first cut of this fix.
+            if meta.get("identity_conflicts"):
+                identity_exact_measurement_excluded += 1
+            usage_exact_measurement_excluded += 1
+            conflicted_sources += 1
+            records_rejected += meta.get("records", 0)
+            continue
         if N == 0:
             # Read, and it held no turn at all. The contract gives that its OWN outcome, and it
             # is not `parsed`: a source in the manifest is a source something was read FROM, so
@@ -259,6 +354,15 @@ def accumulate(paths, min_turns=50, max_files=0):
     # the reader sees as DEGRADED without pretending a selected source had two outcomes.
     discovered = total_paths - vanished
     selected = discovered - skipped_by_limit
+    # NOT `+ conflicted_sources`. The frozen contract has no outcome for "read, and then
+    # refused", and the READER's balance (evidence/certificate.accounting_ok) counts
+    # parsed + unreadable + oversize + identity_changed + empty_source + not_attempted.
+    # Claiming an outcome the reader cannot name turns a correctly-refused source into a
+    # certificate ACCOUNTING VIOLATION, which reads UNVERIFIED — the producer accusing
+    # itself of being broken instead of reporting a loss. Letting `not_attempted` absorb it
+    # keeps the balance and still marks the sweep DEGRADED, because `not_attempted` is a
+    # loss counter. `records_rejected` below carries the detail. Found by a cross-family
+    # confirmation round on the first repair.
     accounted = len(parsed_files) + (unreadable - vanished) + identity_changed + empty_source
     counters = {"discovered": discovered, "skipped_by_limit": skipped_by_limit,
                 "unreadable": unreadable - vanished, "oversize": 0,
@@ -266,12 +370,12 @@ def accumulate(paths, min_turns=50, max_files=0):
                 "empty_source": empty_source,
                 # every selected source the loop did not classify above
                 "not_attempted": max(0, selected - accounted),
-                "malformed": malformed + oversize, "records_rejected": 0,
+                "malformed": malformed + oversize, "records_rejected": records_rejected,
                 "dirs_unreadable": vanished}
     # Provenance, not decoration: an analyser that cannot tell a complete sweep from a sweep that
     # hit unreadable files or a file cap will happily call a bounded corpus the population.
     quality = "COMPLETE"
-    if unreadable or oversize or skipped_by_limit:
+    if unreadable or oversize or skipped_by_limit or conflicted_sources:
         quality = "PARTIAL"
     if sessions == 0:
         quality = "INVALID" if scanned else "EMPTY"
@@ -283,7 +387,14 @@ def accumulate(paths, min_turns=50, max_files=0):
                 # what the new record carries, and no record asserts it.
                 sources=sources, parsed=parsed_files, counters=counters,
                 sample_bound=max_files or 0, malformed=malformed,
-                identity_changed=identity_changed, empty_source=empty_source)
+                identity_changed=identity_changed, empty_source=empty_source,
+                usage_conflicts=usage_conflicts, out_of_order=out_of_order,
+                identity_conflicts=identity_conflicts,
+                usage_conflicted_transcripts=usage_conflicted_transcripts,
+                identity_conflicted_transcripts=identity_conflicted_transcripts,
+                conflicted_sources=conflicted_sources,
+                usage_exact_measurement_excluded=usage_exact_measurement_excluded,
+                identity_exact_measurement_excluded=identity_exact_measurement_excluded)
 
 
 # Relative price of one token in each bucket, base input = 1.0. A bucket's share of the
@@ -292,6 +403,42 @@ def accumulate(paths, min_turns=50, max_files=0):
 # sends you optimising the wrong line.
 PRICE = {"cache_read_input_tokens": 0.1, "cache_creation_input_tokens": 1.25,
          "output_tokens": 5.0, "input_tokens": 1.0}
+
+
+def _identity_notes(a):
+    """The assumptions of the message-identity law, printed when they are violated.
+
+    A counter nobody prints is a counter nobody checks; the docstring in tools/msgid.py
+    promises these are surfaced, so this is what makes that sentence true. What is printed
+    here is not a warning attached to a number -- it is the reason a number is MISSING."""
+    out = []
+    if a.get("identity_conflicts"):
+        out.append(f"\n**MESSAGE_IDENTITY_CONFLICT: {a['identity_conflicts']:,} record(s) "
+                   f"shared a `message.id` with a record stating DIFFERENT proven-invariant "
+                   f"metadata** (see GUARD_MESSAGE / GUARD_RECORD in tools/msgid.py), across "
+                   f"{a.get('identity_conflicted_transcripts', 0):,} transcript(s). Two logical "
+                   "messages under one id. "
+                   f"{a.get('identity_exact_measurement_excluded', 0):,} source(s) were EXCLUDED "
+                   "from every figure above: turn identity is not determined, and every carry "
+                   "number is indexed by turn. They were not merged and they were not silently "
+                   "dropped — they are counted here.")
+    if a.get("usage_conflicts"):
+        out.append(f"\n**USAGE_CONFLICT: {a['usage_conflicts']:,} record(s) carried usage "
+                   "DIFFERING from another record of the same `message.id`.** This build does "
+                   "NOT resolve it — not first-wins, not last-wins, not max, not sum: no "
+                   "upstream invariant authorises any of those. "
+                   f"{a.get('usage_exact_measurement_excluded', 0):,} source(s) were EXCLUDED "
+                   f"from the token totals above ({a.get('usage_conflicted_transcripts', 0):,} "
+                   "transcript(s) held a conflict). "
+                   "Every copy was identical in the corpus this rule was measured on, so a "
+                   "non-zero count here means the transcript format changed and the token "
+                   "totals need re-deriving, not reading.")
+    if a.get("out_of_order"):
+        out.append(f"\n{a['out_of_order']:,} record(s) belonged to a message that had "
+                   "already been overtaken by a newer one. Their blocks were attributed to "
+                   "their own message's turn, not the newest; the count is here because "
+                   "that attribution is a choice and not an observation.")
+    return out
 
 
 def per_turn(a):
@@ -315,7 +462,12 @@ def render(a, markdown=False, b2t=None):
         return (f"no carry to report: {a['sessions']} session(s) read "
                 f"({a.get('short', 0)} below --min-turns, "
                 f"{a.get('unreadable', 0)} unreadable). "
-                "A session whose every item lands on its final turn carries nothing.\n")
+                "A session whose every item lands on its final turn carries nothing.\n"
+                # A transcript that broke the identity law still broke it when the carry
+                # total happened to be zero, and this is the path a tiny corpus takes.
+                + "".join(_identity_notes(a)) + ("\n" if a.get("usage_conflicts")
+                                                 or a.get("identity_conflicts")
+                                                 or a.get("out_of_order") else ""))
     T, out = a["turns"], []
     med = a["lengths"][len(a["lengths"]) // 2]
     U = sum(a["usage"].values()) or 1
@@ -369,6 +521,7 @@ def render(a, markdown=False, b2t=None):
             out.append("  carry in BYTES. Shares above are immune to the bytes-per-token "
                        "constant; token figures are not.")
             out.append("  Measure yours: tools/b2t_validate.py — then pass --b2t <bytes-per-token>.")
+    out += _identity_notes(a)   # both branches: a private counter is an unchecked one
     return "\n".join(out) + "\n"
 
 

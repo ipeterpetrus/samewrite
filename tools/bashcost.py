@@ -13,6 +13,8 @@ whatever you have ever pasted into a shell.
     python3 tools/bashcost.py ~/.claude/projects/*/*.jsonl
 """
 import argparse, collections, hashlib, json, os, statistics, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import msgid     # one assistant message, however many records carry it
 
 B2T = 1 / 3.14
 
@@ -37,14 +39,15 @@ def nbytes(x):
 def scan(path):
     """Return (turns, [(turn_index, command_len, result_len, command_sha)])."""
     pend, rows, N = {}, [], 0
+    ledger = msgid.Ledger()   # same definition as carry.py: one message, one turn
     with open(path, encoding="utf-8") as f:
         for line in f:                        # not .splitlines(): U+2028 is legal here
             # The cheap substring filter used to sit here. It skipped assistant turns that
             # carry no tool block — which silently undercounted N, and N is what --min-turns
             # gates on and what `remaining = N - i` weights every carry number by. Parse
             # every assistant/user line; the filter is only worth it below, per block.
-            if '"assistant"' not in line and '"user"' not in line:
-                continue
+            # No substring prefilter: `"type":"\u0061ssistant"` is valid JSON that one does
+            # not see, and a record it hides never reaches the identity or usage guard.
             try:
                 o = json.loads(line)
             except Exception:
@@ -61,8 +64,7 @@ def scan(path):
                 # Hitung turn dengan definisi yang SAMA seperti carry.py: hanya record
                 # assistant yang membawa `usage`. Dua alat di repo yang sama memberi N
                 # berbeda = dua tabel yang tak bisa dibandingkan (review ronde-2).
-                if isinstance(m.get("usage"), dict):
-                    N += 1
+                N, _billed = ledger.observe(m, o)   # `o`: the requestId collision guard
                 for b in content:
                     if isinstance(b, dict) and b.get("type") == "tool_use" \
                             and b.get("name") == "Bash":
@@ -84,7 +86,7 @@ def scan(path):
     # membuat dua alat melaporkan populasi berbeda atas transkrip yang sama.
     for i, cmd in pend.values():
         rows.append((i, nbytes(cmd), 0, cmd))
-    return N, rows
+    return ledger.turns, rows
 
 
 def accumulate(paths, min_turns=50):

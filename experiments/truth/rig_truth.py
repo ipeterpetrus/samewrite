@@ -27,6 +27,8 @@ import argparse, concurrent.futures, glob, hashlib, json, os, random, re, shutil
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "tools"))
+import msgid  # noqa: E402  one assistant message, however many records carry it
 from fixtures_truth import FIXTURES  # noqa: E402
 
 CLAUDE = os.environ.get("SAMEWRITE_CLAUDE_BIN", os.path.expanduser("~/.local/bin/claude"))
@@ -160,6 +162,7 @@ def transcript_for(cfg, work):
 
 def usage_of(tp):
     inp = cc = cr = outt = turns = 0
+    ledger = msgid.Ledger()   # one message, however many records carry it
     listing = ""
     for line in open(tp, errors="replace"):
         try:
@@ -171,8 +174,9 @@ def usage_of(tp):
             if a.get("type") == "skill_listing":
                 listing += a.get("content") or ""
         if o.get("type") == "assistant":
-            u = ((o.get("message") or {}).get("usage") or {})
-            if u:
+            m = o.get("message") or {}
+            u = m.get("usage") or {}
+            if ledger.bill(m, o):   # `o`: the requestId collision guard
                 turns += 1
                 inp += u.get("input_tokens", 0)
                 cc += u.get("cache_creation_input_tokens", 0)
