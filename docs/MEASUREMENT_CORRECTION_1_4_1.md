@@ -472,26 +472,35 @@ honest statement is that it has an unknown size and no known instance.
 
 ### 8.6 Numerical effect
 
-Compared against the repaired HEAD, not against broken `main`, over a pinned file list (1,395
-transcripts; the 4 transcripts written by the live session were excluded from **both** runs so
-the corpus could not drift between them, and each file's size and mtime were re-checked before
-the run):
+Compared against the repaired HEAD, not against broken `main`. The corpus is a **pinned file
+list of 1,390 transcripts**: the 9 files a live session was still appending to were excluded
+from **both** runs, each file's size and mtime were recorded when the list was pinned, and
+re-checked before each run and again after the last one — 0 drifted. Without that pinning the
+comparison is worthless: a first attempt showed "turns 63,461 → 63,475" that was entirely the
+observing session writing its own transcript between the two runs.
 
 | | before H1/H2 | after H1/H2 |
 |---|---|---|
-| sessions | 153 | 153 |
-| turns | 60,105 | 60,105 |
-| input tokens | 20,742,135 | 20,742,135 |
-| output tokens | 66,875,148 | 66,875,148 |
-| cache-read tokens | 24,555,452,904 | 24,555,452,904 |
-| cache-creation tokens | 391,698,532 | 391,698,532 |
-| carry bytes | 91,302,928,883 | 91,302,928,883 |
-| Bash + Read share of carry | 68.4325% | 68.4325% |
+| sessions | 150 | 150 |
+| turns | 57,528 | 57,528 |
+| input tokens | 20,736,520 | 20,736,520 |
+| output tokens | 64,298,630 | 64,298,630 |
+| cache-read tokens | 23,337,024,713 | 23,337,024,713 |
+| cache-creation tokens | 382,159,149 | 382,159,149 |
+| carry bytes | 87,805,884,563 | 87,805,884,563 |
+| Bash + Read share of carry | 68.0726% | 68.0726% |
 | every per-source share | — | identical |
 
-Unchanged, and for a stated reason rather than by construction: `usage_conflicts = 0` and
-`identity_conflicts = 0` on this corpus, so nothing was excluded. A corpus that did contain
-one would report a different, smaller population — which is the point.
+Measured by the shipped ledger over that same pinned list: 115,558 assistant records, 59,869
+distinct ids, 39,289 multi-record identities, **0 usage conflicts, 0 identity collisions**, 1
+reappearance, 0 malformed lines and 0 oversize lines. (The wider table in §8.1 was measured
+over all 1,399 discovered transcripts, live files included, which is why its counts are
+larger; the before/after comparison uses the pinned subset because only that one cannot move
+between runs.)
+
+Unchanged, and for a stated reason rather than by construction: nothing was excluded, because
+there was nothing to exclude. A corpus that did contain a conflict would report a different,
+smaller population — which is the point.
 
 `TOTAL_SAVINGS` remains **NOT_PROVEN**. No p-value, arm ranking, savings percentage or
 promotion conclusion is recomputed here; that needs owner authorisation after the accounting
