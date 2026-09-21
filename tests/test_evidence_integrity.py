@@ -143,7 +143,16 @@ def main():
     check("the claim cannot be better than the counters",
           optimize.record_quality(rec(0, 40.0, quality="COMPLETE", oversize=1)), "DEGRADED")
     check("the counters cannot be better than the claim",
-          optimize.record_quality(rec(0, 40.0, quality="PARTIAL")), "PARTIAL")
+          optimize.record_quality(rec(0, 40.0, quality="PARTIAL", skipped=5)), "PARTIAL")
+    check("...but a PARTIAL claim no counter can explain is not a bound to adopt",
+          optimize.record_quality(rec(0, 40.0, quality="PARTIAL")), "UNKNOWN")
+    check("and the flag does not adopt it either",
+          optimize.may_promote(optimize.record_quality(rec(0, 40.0, quality="PARTIAL")), True),
+          False)
+    for counter in ("malformed", "malformed_lines", "identity_changed", "conflicted_sources",
+                    "records_rejected"):
+        check(f"a record carrying {counter} is not COMPLETE",
+              optimize.record_quality(dict(rec(0, 40.0), **{counter: 1})), "DEGRADED")
     check("looked and found nothing usable: INVALID",
           optimize.record_quality(rec(0, 40.0, sessions=0, scanned=100)), "INVALID")
     check("had nothing to look at: EMPTY",
@@ -366,6 +375,30 @@ def main():
     j2 = case("R142_14 (an eligible population is never stranded by it)", prod + only_bad,
               "CANDIDATE", 10, 1, comparable=6)
     check("and the eligible population chooses the scope", j2["scope"]["analysed"], "prod")
+
+    print("\nR142_15 - a rejected line is damage unless it is one of the named exceptions")
+    for line, label, status, quality in (
+            ('{"schema_version":3,"record_type":"carry_run","shares":{"Bash":60.0,"Read":40.0}}',
+             "a record from a schema this reader does not know", "PARTIAL_EVIDENCE", "DEGRADED"),
+            ('{"schema_version":2,"record_type":"carry_run","shares":{"Bash":10.0}}',
+             "a carry record whose shares do not sum to a population", "PARTIAL_EVIDENCE",
+             "DEGRADED"),
+            ('{"note": "another tool\'s line in a shared file"}',
+             "a line that was never a carry record", "CANDIDATE", "COMPLETE")):
+        case(f"R142_15: {label}", [json.dumps(r) for r in good_rows] + [line],
+             status, 40 if status == "PARTIAL_EVIDENCE" else 10,
+             0 if status == "PARTIAL_EVIDENCE" else 1, history_quality=quality)
+
+    print("\nR142_16 - a ledger line that is neither a write nor a denial is a line lost")
+    led_dir = tempfile.mkdtemp(dir=d)
+    unknown_event = os.path.join(led_dir, "unknown.jsonl")
+    with open(unknown_event, "w", encoding="utf-8") as fh:
+        fh.write("\n".join('{"event": "checked"}' for _ in range(100)) + "\n")
+        fh.write('{"event": "garbage"}\n')
+    led = optimize.load_ledger(unknown_event)
+    check("the unaccountable line is counted", (led["writes"], led["rejected"]), (100, 1))
+    check("and the guard only observes",
+          [f["state"] for f in optimize.analyse(None, dict(EMPTY_HIST), led, None)], ["OBSERVED"])
 
     # ---------------------------------------------------------------- positive controls
     print("\npositive controls - a gate that refuses everything is not a gate")

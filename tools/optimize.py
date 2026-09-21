@@ -74,12 +74,19 @@ STATES = ("OBSERVED", "HYPOTHESIS", "CANDIDATE", "EXPERIMENTAL", "PROVEN", "REJE
 # of the evidence was never swept, and nine neighbours cannot launder it.
 QUALITY_RANK = {"COMPLETE": 0, "PARTIAL": 1, "DEGRADED": 2, "EMPTY": 3, "UNKNOWN": 4, "INVALID": 5}
 SCHEMA_WITH_QUALITY = 2          # the first history schema that records how a sweep was taken
-# The counters every schema-2 record's writer wrote, split by what they mean. Nothing here is
-# invented for an older schema: a record that never carried these cannot be asked to show them,
-# and is UNKNOWN rather than trusted.
-RECORD_LOSS_COUNTERS = ("unreadable", "oversize")
+# Two different questions, and conflating them cost a HIGH in review:
+#   REQUIRED — what the schema-2 writer ALWAYS wrote, so a record that lacks them cannot attest
+#              completeness. Nothing is invented for an older schema; a record that never carried
+#              these is UNKNOWN rather than trusted.
+#   LOSS     — every counter that, WHEN PRESENT, means evidence was selected and then lost. A
+#              reader must honour a loss it can see even if that counter came from a later writer
+#              (`malformed_lines` is the 1.3.1-era name, `malformed` the current one).
+RECORD_REQUIRED_COUNTERS = ("unreadable", "oversize", "skipped_by_limit")
+RECORD_LOSS_COUNTERS = ("unreadable", "oversize", "malformed", "malformed_lines",
+                        "identity_changed", "conflicted_sources", "records_rejected")
 RECORD_BOUND_COUNTERS = ("skipped_by_limit",)
-RECORD_COUNTERS = RECORD_LOSS_COUNTERS + RECORD_BOUND_COUNTERS
+RECORD_COUNTERS = tuple(dict.fromkeys(RECORD_REQUIRED_COUNTERS + RECORD_LOSS_COUNTERS
+                                      + RECORD_BOUND_COUNTERS))
 # Set by load_history() when a duplicate run_id shows a worse sweep than the record that survives.
 # A private, in-memory annotation; nothing writes it back to a file.
 QUALITY_FLOOR = "_evidence_quality_floor"
@@ -139,7 +146,7 @@ def _derived_record_quality(rec, schema):
         # reading its zeroed counters as completeness would trust a measurement nobody took.
         # (cross-family review, round 1)
         return "UNKNOWN"
-    if schema >= SCHEMA_WITH_QUALITY and not all(k in nums for k in RECORD_COUNTERS):
+    if schema >= SCHEMA_WITH_QUALITY and not all(k in nums for k in RECORD_REQUIRED_COUNTERS):
         return "UNKNOWN"              # claims a completeness it cannot show
     return "COMPLETE"
 
@@ -167,7 +174,14 @@ def record_quality(rec):
         claimed = "UNKNOWN"
     if schema < SCHEMA_WITH_QUALITY:
         claimed = "UNKNOWN"
-    qualities = [claimed, _derived_record_quality(rec, schema)]
+    derived = _derived_record_quality(rec, schema)
+    if claimed == "PARTIAL" and derived == "COMPLETE":
+        # A bound the caller asked for shows up in `skipped_by_limit`; a loss shows up in a loss
+        # counter. A record that says PARTIAL while every counter it carries says nothing happened
+        # cannot say WHY it was partial — and `--accept-partial` adopts a bound, not a word.
+        # (cross-family review, confirmation round)
+        claimed = "UNKNOWN"
+    qualities = [claimed, derived]
     floor = rec.get(QUALITY_FLOOR)
     if floor:                         # absent is not UNKNOWN: most records carry no floor at all
         qualities.append(floor)
@@ -197,17 +211,19 @@ def sweep_quality(live):
     return worst_quality([claimed, derived])
 
 
-# Reasons load_history() counts that mean a record EXISTED and could not be read as one: a torn
-# line, a line past the size cap, a file that could not be opened. Deliberately NOT here:
+# A rejected line is DAMAGE by default: the history held something that could not be read as a
+# record, and a trend built from the survivors is built over a gap. The exceptions are named, and
+# they are the only two things a rejection can be that are not a loss, plus the one shape that was
+# never our record to begin with:
 #   * a refusal by design — current-generation evidence this optimizer does not read — which is a
 #     contract, not a loss, and would otherwise block every history in the middle of a migration;
-#   * a deduplicated retry, which is bookkeeping;
-#   * a well-formed line that is not a carry record at all ("no shares", "not an object"). That
-#     line may never have been one — another tool's entry in a shared file — and treating a
-#     foreign line as lost evidence would let one stray append block a real population forever.
-#     The limit is deliberate: a CORRUPTED carry record that still parses as JSON is counted and
-#     reported, and does not degrade. Say so rather than claim a coverage this does not have.
-CONTAINER_DAMAGE = ("unparseable line", "record above the size cap", "history unreadable")
+#   * a deduplicated retry, which is bookkeeping (its quality already travels via QUALITY_FLOOR);
+#   * a well-formed JSON line that is not a carry record at all. In a shared file that is another
+#     tool's entry, and treating it as lost evidence would let one stray append block a real
+#     population forever.
+# Listed this way round on purpose: a reason added to valid_record() later defaults to DAMAGE
+# rather than slipping through an allowlist nobody updated. (cross-family review, confirmation round)
+NOT_CONTAINER_DAMAGE = ("current-generation", "duplicate run_id", "not an object", "no shares")
 
 
 def container_quality(rejected):
@@ -219,7 +235,7 @@ def container_quality(rejected):
     (cross-family review, round 1)
     """
     for reason, count in (rejected or {}).items():
-        if count and any(str(reason).startswith(d) for d in CONTAINER_DAMAGE):
+        if count and not any(x in str(reason) for x in NOT_CONTAINER_DAMAGE):
             return "DEGRADED"
     return "COMPLETE"
 
@@ -503,6 +519,11 @@ def load_ledger(path):
                 checked += 1
             elif ev == "denied":
                 denied += 1
+            else:
+                # Neither a write nor a prevented write: a line this reader cannot account for.
+                # Counting it as nothing at all let a ledger full of unknown events look like a
+                # clean sample. (cross-family review, confirmation round)
+                rejected += 1
     total = checked + denied
     return {"writes": total, "prevented": denied, "rejected": rejected,
             "rate": (100.0 * denied / total) if total else 0.0}

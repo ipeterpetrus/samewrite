@@ -704,7 +704,8 @@ CASES = [
      """),
 
     ("M_CONTAINER_DAMAGE_IGNORED: baris robek di berkas history menurunkan kualitas evidence",
-     [("optimize.py", '        if count and any(str(reason).startswith(d) for d in CONTAINER_DAMAGE):',
+     [("optimize.py",
+       '        if count and not any(x in str(reason) for x in NOT_CONTAINER_DAMAGE):',
        "        if False:")],
      """
      rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="c")
@@ -763,6 +764,66 @@ CASES = [
      j = json.loads(r.stdout)
      assert j["status"] == "INTERNAL_ERROR", (j["status"], j["candidates_failed"])
      assert r.returncode == 50, r.returncode
+     """),
+
+
+    ("M_BARE_PARTIAL_CLAIM: klaim PARTIAL tanpa counter yang menjelaskannya bukan bound",
+     [("optimize.py", """    if claimed == "PARTIAL" and derived == "COMPLETE":""", "    if False:")],
+     """
+     r = rec(100, {"Bash": 60.0, "Read": 40.0})
+     r["evidence_quality"] = "PARTIAL"
+     q = optimize.record_quality(r)
+     assert q == "UNKNOWN", q
+     assert optimize.may_promote(q, True) is False, q
+     """),
+
+    ("M_RECORD_LOSS_IGNORED: counter kehilangan pada record ikut menentukan kualitas",
+     [("optimize.py",
+       'RECORD_LOSS_COUNTERS = ("unreadable", "oversize", "malformed", "malformed_lines",\n                        "identity_changed", "conflicted_sources", "records_rejected")',
+       'RECORD_LOSS_COUNTERS = ("unreadable", "oversize")')],
+     """
+     for counter in ("malformed", "identity_changed", "conflicted_sources"):
+         r = rec(100, {"Bash": 60.0, "Read": 40.0})
+         r[counter] = 1
+         q = optimize.record_quality(r)
+         assert q == "DEGRADED", (counter, q)
+     """),
+
+    ("M_STRUCTURAL_REJECT_NOT_DAMAGE: penolakan struktural menutup emitter, bukan sekadar dicatat",
+     [("optimize.py",
+       'NOT_CONTAINER_DAMAGE = ("current-generation", "duplicate run_id", "not an object", "no shares")',
+       'NOT_CONTAINER_DAMAGE = ("current-generation", "duplicate run_id", "not an object", "no shares", "unsupported schema_version", "shares sum to")')],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="g")
+             for i in range(6)]
+     bad = chr(123) + '"schema_version":3,"record_type":"carry_run","shares":' \
+           + chr(123) + '"Bash":60.0,"Read":40.0' + chr(125) + chr(125)
+     p = w(os.path.join(D, "struct.jsonl"), [json.dumps(r) for r in rows] + [bad])
+     recs, rej, _ = optimize.load_history(p)
+     keep, dropped = optimize.comparable(recs)
+     h = {"comparable": keep, "total": len(recs), "in_scope": len(recs), "rejected": rej,
+          "dropped": dropped, "time_order": "ok"}
+     f = optimize.analyse(None, h, None, None, scope="g")
+     assert [x["state"] for x in f] == ["OBSERVED"], [x["state"] for x in f]
+     """),
+
+    ("M_LEDGER_UNKNOWN_EVENT: baris ledger yang tak terhitung adalah baris yang hilang",
+     [("optimize.py", """            else:
+                # Neither a write nor a prevented write: a line this reader cannot account for.
+                # Counting it as nothing at all let a ledger full of unknown events look like a
+                # clean sample. (cross-family review, confirmation round)
+                rejected += 1""", "            else:\n                pass")],
+     """
+     p = os.path.join(D, "unknown_led.jsonl")
+     with open(p, "w") as fh:
+         fh.write(chr(10).join('{"event": "checked"}' for _ in range(100)) + chr(10))
+         fh.write('{"event": "garbage"}' + chr(10))
+     led = optimize.load_ledger(p)
+     assert led["rejected"] == 1, led
+     EMPTY = {"comparable": [], "total": 0, "in_scope": 0, "rejected": {}, "dropped": [],
+              "time_order": "ok"}
+     f = optimize.analyse(None, EMPTY, led, None)
+     assert [x["state"] for x in f] == ["OBSERVED"], [x["state"] for x in f]
      """),
 
 ]
