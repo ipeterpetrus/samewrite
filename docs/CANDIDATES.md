@@ -68,7 +68,7 @@ survive, **except** secret material, which is redacted at capture and never reta
    noise. No experiment at this scale could confirm or refute the end-to-end benefit, so promoting
    it would mean shipping on a number that cannot be defended.
 2. **The cold entries are not SameWrite's.** They belong to other plugins the user installed.
-   SameWrite's own always-on cost is **415 bytes**. A tool that removed other people's skills to
+   SameWrite's own always-on cost is **405 characters** of listing entry. A tool that removed other people's skills to
    improve its own metric would be doing something nobody asked for.
 3. **A cold entry in one role can be essential to another.** The cold-share number is an upper
    bound on waste in the scope that was measured, not a list of things to delete.
