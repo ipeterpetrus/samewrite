@@ -80,7 +80,7 @@ def usage_rows(work, task, run_id, arm, rep):
                 try: o=json.loads(line)
                 except: continue
                 m=o.get("message") or {}
-                if not led.bill(m): continue
+                if not led.bill(m, o): continue   # `o`: requestId collision guard
                 u=m.get("usage") or {}
                 t+=1
                 rows.append(dict(run_id=run_id, arm=arm, task=task, rep=rep, turn=t,

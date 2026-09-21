@@ -51,7 +51,7 @@ def scan(path, keep=False):
         if t == "assistant" and isinstance(m, dict):
             # Blocks of one message arrive on separate records; they share ITS turn, which
             # is not always the newest one — a record of an older message can reappear.
-            turn, _billed = ledger.observe(m)
+            turn, _billed = ledger.observe(m, o)   # `o`: the requestId collision guard
             for c in (m.get("content") or []):
                 if not isinstance(c, dict):
                     continue

@@ -78,7 +78,7 @@ def turns_with_usage(path):
             except Exception:
                 continue
             if isinstance(o, dict) and o.get("type") == "assistant":
-                ledger.observe(o.get("message"))
+                ledger.observe(o.get("message"), o)   # `o`: the requestId collision guard
     return ledger.turns
 
 

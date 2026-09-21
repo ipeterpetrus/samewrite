@@ -176,7 +176,7 @@ def usage_of(tp):
         if o.get("type") == "assistant":
             m = o.get("message") or {}
             u = m.get("usage") or {}
-            if ledger.bill(m):
+            if ledger.bill(m, o):   # `o`: the requestId collision guard
                 turns += 1
                 inp += u.get("input_tokens", 0)
                 cc += u.get("cache_creation_input_tokens", 0)

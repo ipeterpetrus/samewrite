@@ -47,7 +47,7 @@ def toks(work, fixture, extra_roots=()):
                 except Exception:
                     continue
                 m = o.get("message") or {}
-                if not ledger.bill(m):
+                if not ledger.bill(m, o):   # `o`: the requestId collision guard
                     continue
                 u = m.get("usage") or {}
                 for k in msgid.USAGE_KEYS:

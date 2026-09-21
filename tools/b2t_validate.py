@@ -47,6 +47,13 @@ def sample(path):
     except OSError:
         return
     msgs, order = {}, []
+    # This function does its OWN grouping (it needs the text blocks, which the Ledger does
+    # not carry), so it also does its own first-copy usage pick below -- and that is exactly
+    # the silent first-wins the ledger refuses. A strict Ledger fed the same records is the
+    # detector: it raises `msgid.Ambiguous` on a usage conflict or an identity collision
+    # before any B/token constant is derived from them. It is used for nothing else here,
+    # so its turn numbering (this loop skips lines without `output_tokens`) does not matter.
+    detector = msgid.Ledger(strict=True)
     with fh:
         for line in fh:                       # not .splitlines(): U+2028 is legal here
             if '"output_tokens"' not in line:
@@ -60,6 +67,7 @@ def sample(path):
             m = o.get("message")
             if not isinstance(m, dict):
                 continue
+            detector.observe(m, o)
             key = msgid.identity(m)
             if key is None:
                 key = ("\x00anon", len(order))   # legacy: one record, one message

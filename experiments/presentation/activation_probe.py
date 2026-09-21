@@ -46,7 +46,7 @@ def main():
                             continue
                         if o.get("type") == "assistant":
                             u = (o.get("message") or {}).get("usage") or {} \
-                                if led.bill(o.get("message")) else {}
+                                if led.bill(o.get("message"), o) else {}
                             for k, v in u.items():
                                 if isinstance(v, (int, float)):        # usage juga memuat objek bersarang
                                     usage[k] = usage.get(k, 0) + v

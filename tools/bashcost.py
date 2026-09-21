@@ -64,7 +64,7 @@ def scan(path):
                 # Hitung turn dengan definisi yang SAMA seperti carry.py: hanya record
                 # assistant yang membawa `usage`. Dua alat di repo yang sama memberi N
                 # berbeda = dua tabel yang tak bisa dibandingkan (review ronde-2).
-                N, _billed = ledger.observe(m)
+                N, _billed = ledger.observe(m, o)   # `o`: the requestId collision guard
                 for b in content:
                     if isinstance(b, dict) and b.get("type") == "tool_use" \
                             and b.get("name") == "Bash":

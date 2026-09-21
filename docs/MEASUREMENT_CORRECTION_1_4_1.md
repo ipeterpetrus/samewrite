@@ -99,7 +99,10 @@ so the default CLI output never showed them; and `tools/prefix.py` kept a
 opens a turn — so its turn count no longer matched `carry.py`, which is the one thing that
 function exists to do.
 
-Two findings are NOT code-fixed, and are stated here rather than closed quietly:
+Two findings were NOT code-fixed in the first pass, and were stated here rather than closed
+quietly. **Both are now closed in §8** — H2 in code, H1 in code as far as the format permits,
+with the remainder named as a source-format limitation. The paragraphs below are kept as the
+record of what was open, and of what the fix owed:
 
 - **Two genuinely different messages sharing one `message.id` merge into one.** No transcript
   can distinguish that from one message written twice. The law assumes vendor ids identify a
@@ -111,8 +114,10 @@ Two findings are NOT code-fixed, and are stated here rather than closed quietly:
   switching to last-wins on zero evidence would be a guess. What the fix owes is visibility,
   and that is now real: `usage_conflicts` is aggregated and printed in both output modes.
 
-Both are residual HIGHs by the reviewer's rating. They are open, on purpose, with an
-observable each.
+Both were residual HIGHs by the reviewer's rating, open on purpose with an observable each.
+§8 closes them: differing usage is now refused rather than billed first-wins, and a collision
+detectable from the transcript now fails closed instead of merging. What §8 does not do is
+claim the undetectable case away.
 
 The same review is why the equivalence claim in §4 is stated with its scope: forcing
 `identity` to `None` reproduces the pre-fix arithmetic **on transcripts where every assistant
@@ -261,3 +266,154 @@ its result is an owner decision, not a bug fix.
 - The canonical SameWrite skill body: `7edec9f21e0bd50583e388e0bdc177f92ba8f0db6ce2bb61acd52b39d81e7767`,
   byte-identical, as is its description. No promotion, no candidate persistence, no hook
   behaviour changed.
+
+## 8. H1 / H2 closure — ambiguous input must not become an exact output
+
+The two findings §2 left open as residual HIGHs are closed here, and the closure is
+deliberately asymmetric: H2 was an implementation defect and is fixed in code; H1 is
+partly an implementation defect (a detectable collision was not detected) and partly a
+property of the source format (an undetectable one cannot be). Both halves are stated.
+
+### 8.1 What the format can actually prove
+
+Re-measured on this machine, structure only — record `type`, `message.id`, `message.usage`,
+block types and the candidate metadata fields; no prompt, no tool input, no tool output, no
+path, no content. Discovery is now de-duplicated by real path, and three config directories
+symlink `projects/` to one archive, so the 1.4.1 figures in §1 counted that archive three
+times. The ratios are unchanged; the absolute counts were not:
+
+| | 1.4.1 (tripled) | 2026-09-21 (de-duplicated) |
+|---|---|---|
+| transcripts | 4,143 | **1,399** |
+| assistant records | 377,648 | **126,258** |
+| distinct `message.id` | 196,759 | **65,815** |
+| multi-record identities | 127,934 | **42,793** |
+| of those, usage identical | 127,934 | **42,793 (100%)**, 0 differing |
+| records with no usable id | 3 | **1** |
+| reappearance events | 3 | **1**, in 1 transcript |
+
+For every record sharing one non-empty `message.id`, each candidate metadata field was
+measured for agreement. `POPULATION` counts identities where at least one record states the
+field; `MISSING` counts records that do not:
+
+| field | population | same | different | missing | invariant |
+|---|---|---|---|---|---|
+| `message.role` | 42,793 | 42,793 | 0 | 0 | YES |
+| `message.model` | 42,793 | 42,793 | 0 | 0 | YES |
+| `message.type` | 42,793 | 42,793 | 0 | 0 | YES |
+| `message.stop_reason` | 42,793 | 42,793 | 0 | 0 | YES |
+| `message.stop_sequence` | 42,793 | 42,793 | 0 | 0 | YES |
+| `requestId` | 41,525 | 41,525 | 0 | 4,208 | YES |
+| `sessionId`, `cwd`, `version`, `gitBranch`, `entrypoint`, `isSidechain`, `userType`, `effort` | 42,229–42,793 | all | 0 | 0–1,296 | YES, but useless |
+| `uuid` | 42,793 | 0 | **42,793** | 0 | NO |
+| `parentUuid` | 42,793 | 0 | **42,793** | 0 | NO |
+| `timestamp` | 42,793 | 0 | **42,793** | 0 | NO |
+| `apiBlockIndex` | 20,637 | 0 | **20,637** | 53,675 | NO |
+
+Six fields become guards: the five message-level ones and `requestId`. The session-level
+constants are invariant and are *not* used — they never differ between two messages of one
+transcript either, so they discriminate nothing; adding them would look like six more guards
+and be worth zero. The four per-record fields are excluded for the opposite reason: guarding
+on one would reject every legitimate multi-block message in the corpus.
+
+### 8.2 The one reappearance, inspected
+
+`out_of_order = 1`, one transcript, three records of one identity at file ordinals 121, 123
+and 124 with an unrelated record at 122. Structure only:
+
+```
+ordinal 121  blocks [thinking]   usage (2, 675, 185525, 614)  requestId R  ts 2026-08-28T18:19:06Z
+ordinal 122  blocks [text]       — a DIFFERENT identity       requestId S  ts 2026-08-30T08:20:48Z
+ordinal 123  blocks [tool_use]   usage (2, 675, 185525, 614)  requestId R  ts 2026-08-28T18:19:08Z
+ordinal 124  blocks [tool_use]   usage (2, 675, 185525, 614)  requestId R  ts 2026-08-28T18:19:09Z
+```
+
+All three records of the identity agree on every guard field, carry identical usage, hold
+three *different* block types, and form an unbroken `uuid → parentUuid` chain
+(121 → 123 → 124). The interrupting record is two days newer and belongs to another request.
+
+    LEGITIMATE_REAPPEARANCE_PROVEN = YES
+    DISTINCT_MESSAGES_PROVEN       = NO
+    FORMAT_CANNOT_DISTINGUISH      = NO   (for this case)
+
+"Proven" here means: proven under the documented upstream assumption in §8.5, plus a
+contiguous parent chain that a two-message interpretation would have to break.
+
+### 8.3 H2 — differing usage is refused, not resolved
+
+`tools/msgid.py` no longer bills the first copy when the copies disagree. There is no
+FIRST_WINS, LAST_WINS, MAX_WINS, MIN_WINS or SUM, because no upstream invariant authorises
+one. A `Ledger` is **strict by default**: a differing copy raises `msgid.Ambiguous`, and the
+only caller that opts out is `tools/carry.accumulate`, whose contract is to exclude the
+source and say so rather than abort a sweep of a thousand files. Missing usage on one record
+is *not* a conflict — the copy that exists is the bill, in either ordering.
+
+Fail-closed propagation is mechanical, not documentary. `scan_full` empties the usage counter
+when the ledger is not exact, so no caller can receive an ambiguous total; the aggregate
+excludes the source from every figure and reports it as
+`usage_conflicted_transcripts` / `usage_exact_measurement_excluded`; and
+`tests/test_multiblock.py` drives **every** consumer that reads `message.usage` with the same
+conflicting fixture and asserts each one refuses. The two rigs that glob their own run
+directories and cannot be driven from a test are covered by the property that makes the rest
+true, asserted repo-wide: no module outside `carry.accumulate` constructs a non-strict Ledger.
+A conflict is also never filed as `unreadable` — that counter means bytes could not be read,
+and burying a conflict there would be the silent discard this section exists to prevent.
+
+### 8.4 H1 — detectable collisions fail closed
+
+A repeated identity whose records state **different** values for a proven-invariant field is
+a `MESSAGE_IDENTITY_CONFLICT`. It is not merged and it is not split: the source leaves every
+aggregate, and `identity_conflicted_transcripts` / `identity_exact_measurement_excluded` say
+so. A field that is absent, or explicitly null, states nothing and is never read as a
+disagreement — otherwise the guard would start rejecting legitimate serialisations the day
+the CLI writes `stop_reason` only on a message's last record. A reappearing identity is
+still not a collision; `out_of_order` counts it, and a mutant that calls every reappearance a
+collision turns the suite RED against the fixture modelled on §8.2.
+
+### 8.5 The residual, stated rather than assumed
+
+    CAN_TWO_DISTINCT_LOGICAL_MESSAGES_REMAIN_STRUCTURALLY_INDISTINGUISHABLE
+    FROM_ONE_MULTIBLOCK_MESSAGE = YES
+
+The indistinguishable class is exact: two assistant messages that share one `message.id`
+**and** agree on `role`, `model`, `type`, `stop_reason`, `stop_sequence` **and** `requestId`
+(or on which `requestId` is absent, as it is on 4,208 records here), and whose usage objects
+are also identical — because differing usage is already caught by H2. Nothing in a transcript
+separates that from one message written as several content-block records. It is not a defect
+in this code: the information is not in the file.
+
+    SOURCE_FORMAT_LIMITATION = YES
+    UPSTREAM_ASSUMPTION      = within one transcript, one `message.id` accompanied by one
+                               `requestId` identifies one logical assistant message
+
+That assumption is *used*, not proven. What changed is that it is now bounded on both sides:
+every violation the format can expose is detected and fails closed, and the part that remains
+is named, measured at 0 occurrences on this corpus, and written down here instead of living
+in a docstring as a caveat.
+
+### 8.6 Numerical effect
+
+Compared against the repaired HEAD, not against broken `main`, over a pinned file list (1,395
+transcripts; the 4 transcripts written by the live session were excluded from **both** runs so
+the corpus could not drift between them, and each file's size and mtime were re-checked before
+the run):
+
+| | before H1/H2 | after H1/H2 |
+|---|---|---|
+| sessions | 153 | 153 |
+| turns | 60,105 | 60,105 |
+| input tokens | 20,742,135 | 20,742,135 |
+| output tokens | 66,875,148 | 66,875,148 |
+| cache-read tokens | 24,555,452,904 | 24,555,452,904 |
+| cache-creation tokens | 391,698,532 | 391,698,532 |
+| carry bytes | 91,302,928,883 | 91,302,928,883 |
+| Bash + Read share of carry | 68.4325% | 68.4325% |
+| every per-source share | — | identical |
+
+Unchanged, and for a stated reason rather than by construction: `usage_conflicts = 0` and
+`identity_conflicts = 0` on this corpus, so nothing was excluded. A corpus that did contain
+one would report a different, smaller population — which is the point.
+
+`TOTAL_SAVINGS` remains **NOT_PROVEN**. No p-value, arm ranking, savings percentage or
+promotion conclusion is recomputed here; that needs owner authorisation after the accounting
+semantics are frozen.

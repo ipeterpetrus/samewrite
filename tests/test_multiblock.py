@@ -15,12 +15,13 @@ tests/test_carry.py and tools/make_fixture.py both emit one record per message w
 no `message.id`, which is the one shape the bug does not touch.
 
 Berdiri sendiri — jalankan berkas ini, tanpa runner."""
-import json, os, subprocess, sys, tempfile
+import json, os, re, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "tools"))
 import carry      # noqa: E402
 import extract    # noqa: E402
+import msgid      # noqa: E402
 
 P = F = 0
 
@@ -43,14 +44,21 @@ def usage(i, o, cr, cc):
             "cache_read_input_tokens": cr, "cache_creation_input_tokens": cc}
 
 
-def rec(mid, blocks, u=None, model="claude-opus-5"):
-    """One JSONL record: one assistant message identity, the blocks THIS record holds."""
+def rec(mid, blocks, u=None, model="claude-opus-5", msgfields=None, **recfields):
+    """One JSONL record: one assistant message identity, the blocks THIS record holds.
+
+    `msgfields` / `recfields` carry the metadata the collision guard reads (message-level
+    `stop_reason` and friends; record-level `requestId`). Omitted, they state nothing, and
+    a guard must never treat "not stated" as a disagreement."""
     m = {"content": blocks, "model": model}
     if mid is not None:
         m["id"] = mid
     if u is not None:
         m["usage"] = u
-    return json.dumps({"type": "assistant", "message": m})
+    m.update(msgfields or {})
+    o = {"type": "assistant", "message": m}
+    o.update(recfields)
+    return json.dumps(o)
 
 
 def text(s):
@@ -231,21 +239,299 @@ def main():
         check("out-of-order records are COUNTED, not assumed away",
               meta7c["out_of_order"], 1)
 
-        # --- 7d. the usage-conflict counter is real and it is surfaced ---------
-        p7d = write(d, "conflict.jsonl", [
-            rec("mC", [text("first")], usage(1, 1, 1, 1)),
-            rec("mC", [tool("Bash", "bc", {"command": "x"})], usage(9, 9, 9, 9)),
+        # === H1/H2 matrix ====================================================
+        # T1..T13. The law is that AMBIGUOUS INPUT MUST NOT BECOME EXACT OUTPUT, and the
+        # matrix has to reject both halves of getting that wrong: a build too permissive
+        # (merging two messages, resolving a conflicting bill by guessing) and a build too
+        # aggressive (rejecting the legitimate multi-record serialisation the corpus is
+        # made of). Every fixture below states its metadata explicitly, because "not
+        # stated" is the case a guard must never read as a disagreement.
+        REQ = "req_01"
+
+        def conflicts(path):
+            """-> (kind, counters) for a strict scan: what the ledger refused to guess."""
+            try:
+                carry.scan_full(path)
+            except msgid.Ambiguous as e:
+                return e.kind, carry.scan_full(path, strict=False)[3]
+            return None, carry.scan_full(path, strict=False)[3]
+
+        # T1 same ID + contiguous multi-block + identical usage => ONE valid message.
+        t1 = write(d, "T1.jsonl", [
+            rec("t1", [thinking("th")], U_A, msgfields={"stop_reason": "tool_use"}, requestId=REQ),
+            rec("t1", [tool("Bash", "x1", {"command": "c"})], U_A,
+                msgfields={"stop_reason": "tool_use"}, requestId=REQ),
         ])
-        _, _, uc, meta7d = carry.scan_full(p7d)
-        check("records of one message disagreeing on usage raise a conflict",
-              meta7d["usage_conflicts"], 1)
-        check("the first copy is the one billed", uc["output_tokens"], 1)
-        agg = carry.accumulate([p7d], min_turns=1)
-        check("accumulate aggregates the conflict count", agg["usage_conflicts"], 1)
+        k1, m1 = conflicts(t1)
+        check("T1 contiguous multi-block with identical usage is NOT a conflict", k1, None)
+        check("T1 is one turn", carry.scan(t1)[0], 1)
+        check("T1 is billed once", carry.scan(t1)[2]["output_tokens"], 101)
+
+        # T2 same ID + reappearing legitimate blocks, every guard field agreeing.
+        # This is the shape actually in the corpus: one message's records interrupted in
+        # FILE ORDER by an unrelated record, same requestId, same usage, same stop_reason.
+        t2 = write(d, "T2.jsonl", [
+            rec("t2a", [thinking("th")], U_A, msgfields={"stop_reason": "tool_use"}, requestId=REQ),
+            rec("t2b", [text("other")], U_B, msgfields={"stop_reason": "end_turn"},
+                requestId="req_02"),
+            rec("t2a", [tool("Bash", "x2", {"command": "c"})], U_A,
+                msgfields={"stop_reason": "tool_use"}, requestId=REQ),
+        ])
+        k2, m2 = conflicts(t2)
+        check("T2 a legitimate reappearance is NOT a collision", k2, None)
+        check("T2 the reappearance is COUNTED", m2["out_of_order"], 1)
+        check("T2 stays two turns", carry.scan(t2)[0], 2)
+        check("T2 identity stays exact", m2["identity_exact"], True)
+
+        # T3 different IDs, otherwise identical metadata and content => two messages.
+        t3 = write(d, "T3.jsonl", [
+            rec("t3a", [text("same")], usage(5, 5, 5, 5),
+                msgfields={"stop_reason": "end_turn"}, requestId=REQ),
+            rec("t3b", [text("same")], usage(5, 5, 5, 5),
+                msgfields={"stop_reason": "end_turn"}, requestId=REQ),
+        ])
+        k3, _ = conflicts(t3)
+        check("T3 identical metadata under different ids is NOT a conflict", k3, None)
+        check("T3 stays two turns", carry.scan(t3)[0], 2)
+        check("T3 bills twice", carry.scan(t3)[2]["output_tokens"], 10)
+
+        # T4 same ID + incompatible PROVEN-invariant metadata => MESSAGE_IDENTITY_CONFLICT.
+        t4 = write(d, "T4.jsonl", [
+            rec("t4", [text("a")], U_A, msgfields={"stop_reason": "tool_use"}, requestId="req_A"),
+            rec("t4", [text("b")], U_A, msgfields={"stop_reason": "tool_use"}, requestId="req_B"),
+        ])
+        k4, m4 = conflicts(t4)
+        check("T4 two API requests under one id is MESSAGE_IDENTITY_CONFLICT", k4, "identity")
+        check("T4 the collision is counted", m4["identity_conflicts"], 1)
+        check("T4 identity is no longer exact", m4["identity_exact"], False)
+        check("T4 the usage figure is withheld, not merged",
+              carry.scan_full(t4, strict=False)[2].get("output_tokens", 0), 0)
+        # ...and on a message-level guard too, not only the record-level one.
+        t4b = write(d, "T4b.jsonl", [
+            rec("t4b", [text("a")], U_A, msgfields={"stop_reason": "tool_use"}),
+            rec("t4b", [text("b")], U_A, msgfields={"stop_reason": "end_turn"}),
+        ])
+        check("T4b a differing stop_reason is a collision too", conflicts(t4b)[0], "identity")
+        t4c = write(d, "T4c.jsonl", [
+            rec("t4c", [text("a")], U_A, model="claude-opus-5"),
+            rec("t4c", [text("b")], U_A, model="claude-sonnet-5"),
+        ])
+        check("T4c two models under one id is a collision", conflicts(t4c)[0], "identity")
+        # NOT stated is not a disagreement: the guard must not fire on an absent field.
+        t4d = write(d, "T4d.jsonl", [
+            rec("t4d", [text("a")], U_A, msgfields={"stop_reason": "tool_use"}),
+            rec("t4d", [text("b")], U_A),                       # states nothing
+            rec("t4d", [text("c")], U_A, requestId=REQ),        # states only requestId
+        ])
+        check("T4d an absent guard field is NOT a disagreement", conflicts(t4d)[0], None)
+        check("T4d stays one turn", carry.scan(t4d)[0], 1)
+
+        # T5 same ID + repeated identical usage => charged once.
+        t5 = write(d, "T5.jsonl", [
+            rec("t5", [text("a")], usage(7, 7, 7, 7), requestId=REQ),
+            rec("t5", [text("b")], usage(7, 7, 7, 7), requestId=REQ),
+            rec("t5", [text("c")], usage(7, 7, 7, 7), requestId=REQ),
+        ])
+        check("T5 repeated identical usage is charged once",
+              carry.scan(t5)[2]["output_tokens"], 7)
+        check("T5 is no conflict", conflicts(t5)[0], None)
+
+        # T6 usage A then usage B => USAGE_CONFLICT. T7 the same pair reversed.
+        t6 = write(d, "T6.jsonl", [
+            rec("t6", [text("a")], usage(1, 1, 1, 1), requestId=REQ),
+            rec("t6", [text("b")], usage(9, 9, 9, 9), requestId=REQ),
+        ])
+        k6, m6 = conflicts(t6)
+        check("T6 usage A then B is USAGE_CONFLICT", k6, "usage")
+        check("T6 the conflict is counted", m6["usage_conflicts"], 1)
+        check("T6 identity is untouched by a usage conflict", m6["identity_conflicts"], 0)
+        t7 = write(d, "T7.jsonl", [
+            rec("t7", [text("a")], usage(9, 9, 9, 9), requestId=REQ),
+            rec("t7", [text("b")], usage(1, 1, 1, 1), requestId=REQ),
+        ])
+        check("T7 usage B then A is USAGE_CONFLICT too (order does not decide)",
+              conflicts(t7)[0], "usage")
+        # ...and neither ordering may be resolved into a number.
+        check("T6 no exact usage survives the conflict",
+              sum(carry.scan_full(t6, strict=False)[2].values()), 0)
+        check("T7 no exact usage survives the conflict",
+              sum(carry.scan_full(t7, strict=False)[2].values()), 0)
+
+        # T8 missing usage then usage A => NOT a conflict; the copy that exists is the bill.
+        t8 = write(d, "T8.jsonl", [
+            rec("t8", [text("a")], None, requestId=REQ),
+            rec("t8", [tool("Bash", "x8", {"command": "c"})], usage(4, 4, 4, 4), requestId=REQ),
+        ])
+        check("T8 missing-then-present usage is NOT a conflict", conflicts(t8)[0], None)
+        check("T8 is one turn", carry.scan(t8)[0], 1)
+        check("T8 is billed from the record that has usage",
+              carry.scan(t8)[2]["output_tokens"], 4)
+
+        # T9 usage A then missing usage => the same, in the ordering the corpus shows.
+        t9 = write(d, "T9.jsonl", [
+            rec("t9", [text("a")], usage(4, 4, 4, 4), requestId=REQ),
+            rec("t9", [tool("Bash", "x9", {"command": "c"})], None, requestId=REQ),
+        ])
+        check("T9 present-then-missing usage is NOT a conflict", conflicts(t9)[0], None)
+        check("T9 is billed exactly once", carry.scan(t9)[2]["output_tokens"], 4)
+
+        # T10 three or more records where only ONE copy conflicts.
+        t10 = write(d, "T10.jsonl", [
+            rec("t10", [text("a")], usage(2, 2, 2, 2), requestId=REQ),
+            rec("t10", [text("b")], usage(2, 2, 2, 2), requestId=REQ),
+            rec("t10", [text("c")], usage(2, 2, 8, 2), requestId=REQ),
+        ])
+        check("T10 one differing copy among three is USAGE_CONFLICT", conflicts(t10)[0], "usage")
+
+        # T11 legacy / no message.id: the record-level fallback is unchanged.
+        check("T11 legacy no-id fallback: one record is one message", carry.scan(p3)[0], 3)
+        check("T11 legacy no-id fallback: usage still summed per record",
+              carry.scan(p3)[2]["output_tokens"], 3)
+        check("T11 legacy no-id records raise nothing", conflicts(p3)[0], None)
+
+        # T12 identity conflict + IDENTICAL usage: the identity path is blocked, and no
+        # usage conflict is invented out of it.
+        t12 = write(d, "T12.jsonl", [
+            rec("t12", [text("a")], U_A, requestId="req_A"),
+            rec("t12", [text("b")], U_A, requestId="req_B"),
+        ])
+        k12, m12 = conflicts(t12)
+        check("T12 identity conflict fires", k12, "identity")
+        check("T12 does NOT invent a usage conflict", m12["usage_conflicts"], 0)
+        check("T12 blocks usage anyway — a merged bill is one bill for two messages",
+              m12["usage_exact"], False)
+
+        # T13 valid identity + usage conflict: identity facts stay valid, the bill does not.
+        k13, m13 = conflicts(t6)
+        check("T13 usage conflict leaves identity exact", m13["identity_exact"], True)
+        check("T13 usage conflict blocks the usage-dependent metric", m13["usage_exact"], False)
+        check("T13 the turn count, which does not depend on usage, is still right",
+              carry.scan_full(t6, strict=False)[0], 1)
+
+        # --- 7d. the conflict must reach the AGGREGATE and the REPORT ----------
+        agg = carry.accumulate([t6], min_turns=1)
+        check("accumulate aggregates the usage-conflict count", agg["usage_conflicts"], 1)
+        check("accumulate counts the conflicted transcript",
+              agg["usage_conflicted_transcripts"], 1)
+        check("accumulate EXCLUDES it from the exact figures",
+              agg["usage_exact_measurement_excluded"], 1)
+        check("the excluded source contributes no usage", sum(agg["usage"].values()), 0)
         check("and the report SAYS so rather than keeping it private",
-              "DIFFERING" in carry.render(agg, markdown=True), True)
+              "USAGE_CONFLICT" in carry.render(agg, markdown=True), True)
         check("and says so in plain-text output too, not only markdown",
-              "DIFFERING" in carry.render(agg, markdown=False), True)
+              "USAGE_CONFLICT" in carry.render(agg, markdown=False), True)
+        check("the report names the exclusion, not just the anomaly",
+              "EXCLUDED" in carry.render(agg, markdown=False), True)
+        agg4 = carry.accumulate([t4], min_turns=1)
+        check("accumulate aggregates the identity-conflict count",
+              agg4["identity_conflicts"], 1)
+        check("accumulate counts the identity-conflicted transcript",
+              agg4["identity_conflicted_transcripts"], 1)
+        check("an identity-conflicted source leaves the carry table too",
+              agg4["sessions"], 0)
+        check("and the report names it MESSAGE_IDENTITY_CONFLICT",
+              "MESSAGE_IDENTITY_CONFLICT" in carry.render(agg4, markdown=False), True)
+        # A clean corpus must not be poisoned by a conflicted neighbour: the exclusion is
+        # per SOURCE, and the sources that determine their own numbers keep them.
+        aggmix = carry.accumulate([canonical(d), t6], min_turns=1)
+        check("a clean source beside a conflicted one keeps its own bill",
+              aggmix["usage"]["output_tokens"], TRUE["output_tokens"])
+        check("and the conflicted neighbour is still reported",
+              aggmix["usage_exact_measurement_excluded"], 1)
+
+        # --- 7e. PROPAGATION: no consumer may turn a refused bill into a number ---
+        # Section 10 of the closure brief, made mechanical. Every module that reads
+        # `message.usage` is driven with the SAME conflicting fixtures and must refuse.
+        # Reading the source and believing it is not the check; calling it is.
+        import importlib                       # noqa: E402  (local to this section)
+
+        def refuses(label, fn, *a, **kw):
+            try:
+                r = fn(*a, **kw)
+                if hasattr(r, "__next__"):     # generators refuse only once drained
+                    list(r)
+            except msgid.Ambiguous as e:
+                check(f"{label} refuses an ambiguous transcript", e.kind is not None, True)
+                return
+            except Exception as e:             # any other failure is a different bug
+                check(f"{label} refuses an ambiguous transcript", f"{type(e).__name__}: {e}",
+                      "msgid.Ambiguous")
+                return
+            check(f"{label} refuses an ambiguous transcript", "returned a number", "Ambiguous")
+
+        EXP = os.path.abspath(os.path.join(HERE, "..", "experiments"))
+        for fixture, why in ((t6, "usage conflict"), (t4, "identity conflict")):
+            refuses(f"carry.scan ({why})", carry.scan, fixture)
+            refuses(f"carry.scan_full ({why})", carry.scan_full, fixture)
+            refuses(f"extract.scan ({why})", extract.scan, fixture)
+            import bashcost                     # noqa: E402
+            import prefix                       # noqa: E402
+            import b2t_validate                 # noqa: E402
+            refuses(f"bashcost.scan ({why})", bashcost.scan, fixture)
+            refuses(f"prefix.turns_with_usage ({why})", prefix.turns_with_usage, fixture)
+            refuses(f"b2t_validate.sample ({why})", b2t_validate.sample, fixture)
+            sys.path.insert(0, os.path.join(EXP, "truth"))
+            try:
+                rig_truth = importlib.import_module("rig_truth")
+                refuses(f"rig_truth.usage_of ({why})", rig_truth.usage_of, fixture)
+            except ImportError as e:
+                check(f"rig_truth importable ({why})", str(e), "")
+            # price.toks globs a profile root; give it one holding the conflicted fixture.
+            sys.path.insert(0, os.path.join(EXP, "skill-ab"))
+            price = importlib.import_module("price")
+            root = os.path.join(d, "priceroot_" + os.path.basename(fixture))
+            os.makedirs(os.path.join(root, price.slug(os.path.join("/w", "fx"))), exist_ok=True)
+            open(os.path.join(root, price.slug(os.path.join("/w", "fx")), "t.jsonl"),
+                 "w").write(open(fixture).read())
+            refuses(f"price.toks ({why})", price.toks, "/w", "fx", (root,))
+
+        # The two rigs that cannot be driven from here (they glob their own run directories)
+        # are covered by the property that makes all of the above true: a Ledger is STRICT
+        # unless its constructor is told otherwise, and only the one function whose contract
+        # is to report and exclude says otherwise. If that stops being true, this fails.
+        # A Ledger built non-strict, however it is spelled -- not the string "strict=False"
+        # anywhere in a file, which matched an unrelated helper's default argument.
+        LOOSE_LEDGER = re.compile(r"Ledger\s*\(\s*(?:strict\s*=\s*)?False")
+        allowed = {os.path.join("tools", "carry.py"), os.path.join("tests", "test_multiblock.py")}
+        loose = []
+        for root, dirs, files in os.walk(os.path.abspath(os.path.join(HERE, ".."))):
+            dirs[:] = [x for x in dirs if x not in (".git", "__pycache__")]
+            for fn in files:
+                if not fn.endswith(".py"):
+                    continue
+                q = os.path.join(root, fn)
+                rel = os.path.relpath(q, os.path.abspath(os.path.join(HERE, "..")))
+                if rel in allowed or rel.endswith(os.path.join("tools", "msgid.py")):
+                    continue
+                if LOOSE_LEDGER.search(open(q, encoding="utf-8", errors="replace").read()):
+                    loose.append(rel)
+        check("no consumer outside carry.accumulate opts out of the strict ledger", loose, [])
+
+        # A conflict must never be filed as a LOSS counter either: "unreadable" says the
+        # bytes could not be read, and burying a conflicted source there is the silent
+        # discard this whole section exists to prevent.
+        real = carry.scan_full
+        carry.scan_full = lambda q, **kw: (_ for _ in ()).throw(msgid.Ambiguous("usage"))
+        try:
+            carry.accumulate([t6], min_turns=1)
+            check("accumulate does not swallow Ambiguous into `unreadable`", "swallowed",
+                  "raised")
+        except msgid.Ambiguous:
+            check("accumulate does not swallow Ambiguous into `unreadable`", True, True)
+        finally:
+            carry.scan_full = real
+
+        # The presentation rig wraps carry.scan: it must publish NOTHING and say why,
+        # which is its INFRA_ERROR contract, not a zero it would treat as a measurement.
+        sys.path.insert(0, os.path.join(EXP, "presentation"))
+        try:
+            rig_pres = importlib.import_module("rig_pres")
+            m = rig_pres.metrics(t6, "T0", set())
+            check("rig_pres publishes no usage for an ambiguous transcript", m["usage"], {})
+            check("rig_pres marks the run INFRA_ERROR rather than measuring it",
+                  m["transcript_ok"] is False and "scan:" in m.get("infra_reason", ""), True)
+        except ImportError as e:
+            check("rig_pres importable", str(e), "")
 
         # --- 8. extract.py agrees with carry.py ------------------------------
         e = extract.scan(canonical(d))
@@ -255,54 +541,137 @@ def main():
         # --- 9. mutation oracles ---------------------------------------------
         # The law lives in tools/msgid.py, so that is what gets mutated. Each mutant
         # breaks one half of it and must turn this file RED; a law no mutant can break
-        # is a law nothing depends on.
+        # is a law nothing depends on. M1..M5 cover BOTH failure directions: a build that
+        # merges or resolves what it should refuse, and a build that rejects what the
+        # corpus legitimately contains.
         TOOLS = os.path.abspath(os.path.join(HERE, "..", "tools"))
         law = open(os.path.join(TOOLS, "msgid.py")).read()
         keep = "    return mid if isinstance(mid, str) and mid else None"
+        U_CONFLICT = """                    self.usage_conflicts += 1
+                    self._usage_bad.add(mid)
+                    if self.strict:
+                        raise Ambiguous("usage")"""
+        ID_GUARD = """        if bad is None:
+            return"""
+        REAPPEAR = """            if self._last != mid:
+                self.out_of_order += 1   # legitimate: reappearance is COUNTED, not rejected"""
         mutants = {
             # (a) no identity at all -> every record is its own message -> the old bug
             "no_dedup": law.replace(keep, "    return None  # mutant"),
             # (b) one identity for everything -> distinct messages collapse into one
             "over_dedup": law.replace(keep, '    return "CONST"  # mutant'),
+            # M1 the usage-conflict detection is gone: a differing copy is simply not seen
+            "M1_no_usage_detect": law.replace("                if self._usage[mid] != key:",
+                                              "                if False:  # mutant"),
+            # M2 the conflict is seen and silently resolved FIRST_WINS
+            "M2_first_wins": law.replace(U_CONFLICT, "                    pass  # mutant"),
+            # M3 ...and a silent SUM, the same sin with the other sign. A true LAST_WINS
+            #    is not reachable from a single-site mutation here, and that is itself a
+            #    property of the design: the bill is emitted at the FIRST usage-carrying
+            #    record, so no later record can retract it. What a conflicting later copy
+            #    CAN do silently is add itself, and that is what this mutant does.
+            "M3_silent_sum": law.replace(
+                U_CONFLICT,
+                "                    self._usage[mid] = key  # mutant\n"
+                "                    return t, True"),
+            # M4 the detectable identity collision guard is removed
+            "M4_no_id_guard": law.replace(ID_GUARD, "        if True:  # mutant\n            return"),
+            # M5 TOO AGGRESSIVE: every reappearance is called a collision, which rejects
+            #    the legitimate multi-record serialisation the corpus is actually made of
+            "M5_reappear_is_collision": law.replace(
+                REAPPEAR,
+                REAPPEAR + "\n                self.identity_conflicts += 1  # mutant\n"
+                           "                if self.strict:\n"
+                           '                    raise Ambiguous("identity", "reappearance")'),
         }
-        for name, mutated in mutants.items():
+        probe_src = (
+            "import json, sys\n"
+            "sys.path.insert(0, %r)\n" +
+            "import carry, msgid\n"
+            "out = {}\n"
+            "try:\n"
+            "    N, items, u = carry.scan(sys.argv[1])\n"
+            "    out = {'raised': None, 'N': N, 'out': u['output_tokens']}\n"
+            "except msgid.Ambiguous as e:\n"
+            "    out = {'raised': e.kind, 'N': None, 'out': None}\n"
+            "print(json.dumps(out))\n")
+
+        def run_mutant(name, mutated, target):
+            """-> probe dict for `target` under `name`, or None when the mutant is a no-op."""
             if mutated == law:
                 check(f"mutant {name} actually changed tools/msgid.py", False, True)
-                continue
+                return None
             md = os.path.join(d, "mut_" + name)
-            os.makedirs(md, exist_ok=True)
-            open(os.path.join(md, "msgid.py"), "w").write(mutated)
-            for entry in os.listdir(TOOLS):
-                if entry == "msgid.py":
-                    continue
-                link = os.path.join(md, entry)
-                if not os.path.exists(link):
-                    os.symlink(os.path.join(TOOLS, entry), link)
-            probe = os.path.join(md, "probe.py")
-            open(probe, "w").write(
-                "import json, sys\n"
-                "sys.path.insert(0, %r)\n" % md +
-                "import carry\n"
-                "N, items, u = carry.scan(sys.argv[1])\n"
-                "print(json.dumps({'N': N, 'out': u['output_tokens']}))\n")
-            r = subprocess.run([sys.executable, probe, p], capture_output=True, text=True)
+            if not os.path.isdir(md):
+                os.makedirs(md, exist_ok=True)
+                open(os.path.join(md, "msgid.py"), "w").write(mutated)
+                for entry in os.listdir(TOOLS):
+                    if entry == "msgid.py":
+                        continue
+                    link = os.path.join(md, entry)
+                    if not os.path.exists(link):
+                        os.symlink(os.path.join(TOOLS, entry), link)
+                open(os.path.join(md, "probe.py"), "w").write(probe_src % md)
+            r = subprocess.run([sys.executable, os.path.join(md, "probe.py"), target],
+                               capture_output=True, text=True)
             if r.returncode != 0:
                 check(f"mutant {name} runs at all", r.stderr.strip()[-160:], "")
+                return None
+            return json.loads(r.stdout)
+
+        got = run_mutant("no_dedup", mutants["no_dedup"], p)
+        if got:
+            check("MUTANT removing identity goes RED (turns)", got["N"] != TRUE["turns"], True)
+            check("MUTANT removing identity goes RED (usage)",
+                  got["out"] != TRUE["output_tokens"], True)
+        got = run_mutant("over_dedup", mutants["over_dedup"], p2)
+        if got:
+            check("MUTANT collapsing distinct ids goes RED (two ids -> one turn)",
+                  got["N"] != 2, True)
+        got = run_mutant("over_dedup", mutants["over_dedup"], p)
+        if got:
+            check("MUTANT collapsing distinct ids under-bills",
+                  got["out"] != TRUE["output_tokens"], True)
+
+        # M1..M3 are all judged on ONE fixture with one conflicting usage copy: the honest
+        # build refuses it, and each mutant turns it back into an exact number.
+        for name, want_out in (("M1_no_usage_detect", 1), ("M2_first_wins", 1),
+                               ("M3_silent_sum", 10)):
+            got = run_mutant(name, mutants[name], t6)
+            if not got:
                 continue
-            got = json.loads(r.stdout)
-            if name == "no_dedup":
-                check("MUTANT removing identity goes RED (turns)",
-                      got["N"] != TRUE["turns"], True)
-                check("MUTANT removing identity goes RED (usage)",
-                      got["out"] != TRUE["output_tokens"], True)
-            else:
-                r2 = subprocess.run([sys.executable, probe, p2], capture_output=True,
-                                    text=True)
-                got2 = json.loads(r2.stdout) if r2.returncode == 0 else {"N": None}
-                check("MUTANT collapsing distinct ids goes RED (two ids -> one turn)",
-                      got2["N"] != 2, True)
-                check("MUTANT collapsing distinct ids under-bills",
-                      json.loads(r.stdout)["out"] != TRUE["output_tokens"], True)
+            check(f"MUTANT {name} goes RED: a refused bill became an exact number",
+                  got["raised"], None)
+            check(f"MUTANT {name} is the resolution rule it claims to be",
+                  got["out"], want_out)
+        check("...and the honest build refuses that same fixture",
+              conflicts(t6)[0], "usage")
+        # ...and no resolution rule is applied under the hood either: exactly ONE bill is
+        # emitted (the first usage-carrying record — a later record cannot retract it), and
+        # that one bill is DISQUALIFIED rather than published. This is what makes
+        # LAST_WINS / MAX_WINS / MIN_WINS unreachable rather than merely unimplemented.
+        led = msgid.Ledger(strict=False)
+        bills = [led.bill({"id": "x", "usage": usage(1, 1, 1, 1)}),
+                 led.bill({"id": "x", "usage": usage(9, 9, 9, 9)})]
+        check("exactly one bill is emitted for a conflicting identity", bills, [True, False])
+        check("and that bill is disqualified, not published", led.usage_exact, False)
+
+        got = run_mutant("M4_no_id_guard", mutants["M4_no_id_guard"], t4)
+        if got:
+            check("MUTANT M4_no_id_guard goes RED: a detectable collision merged silently",
+                  got["raised"], None)
+            check("MUTANT M4_no_id_guard merged two messages into one turn", got["N"], 1)
+        check("...and the honest build refuses that same fixture",
+              conflicts(t4)[0], "identity")
+
+        # M5 is the other direction, and it fails against a LEGITIMATE fixture: the
+        # too-aggressive build must be caught by the suite just as the too-permissive ones are.
+        got = run_mutant("M5_reappear_is_collision", mutants["M5_reappear_is_collision"], t2)
+        if got:
+            check("MUTANT M5 goes RED: a legitimate reappearance was rejected as a collision",
+                  got["raised"], "identity")
+        check("...and the honest build accepts that same fixture",
+              conflicts(t2)[0], None)
 
     print(f"\n{P} PASS / {F} FAIL")
     return 1 if F else 0
