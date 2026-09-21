@@ -152,15 +152,15 @@ def main():
     check("a boolean is not a count",
           optimize.record_quality(rec(0, 40.0, oversize=True)), "INVALID")
     check("--accept-partial accepts the bound it is named for",
-          optimize.promotable("PARTIAL", True), True)
+          optimize.may_promote("PARTIAL", True), True)
     check("--accept-partial does not accept a loss",
-          optimize.promotable("DEGRADED", True), False)
+          optimize.may_promote("DEGRADED", True), False)
     check("--accept-partial does not accept what cannot be verified",
-          optimize.promotable("UNKNOWN", True), False)
+          optimize.may_promote("UNKNOWN", True), False)
     check("--accept-partial does not accept an invalid record",
-          optimize.promotable("INVALID", True), False)
-    check("COMPLETE needs no flag", optimize.promotable("COMPLETE", False), True)
-    check("PARTIAL without the flag stays refused", optimize.promotable("PARTIAL", False), False)
+          optimize.may_promote("INVALID", True), False)
+    check("COMPLETE needs no flag", optimize.may_promote("COMPLETE", False), True)
+    check("PARTIAL without the flag stays refused", optimize.may_promote("PARTIAL", False), False)
 
     # ---------------------------------------------------------------- R142_01 / R142_01P
     print("\nR142_01 - a history built from bounded sweeps is not a population")
@@ -198,7 +198,7 @@ def main():
           optimize.sweep_quality(a_torn), "DEGRADED")
     check("control: the clean sweep reads COMPLETE", optimize.sweep_quality(a_clean), "COMPLETE")
     check("a loss is not rescued by --accept-partial",
-          optimize.promotable(optimize.sweep_quality(a_torn), True), False)
+          optimize.may_promote(optimize.sweep_quality(a_torn), True), False)
     case("R142_05 (live, torn)", [], "PARTIAL_EVIDENCE", 40, 0, scan=[torn, "--min-turns", "1"])
     case("R142_05 (live, torn, --accept-partial)", [], "PARTIAL_EVIDENCE", 40, 0,
          scan=[torn, "--min-turns", "1"], extra=["--accept-partial"])
@@ -221,6 +221,16 @@ def main():
     _rc, j2, _n = run([], scan=paths + ["--min-turns", "1"])
     check("control: unbounded, the listing in the oldest transcript IS read",
           bool(j2["listing"]), True)
+
+    # ---------------------------------------------------------------- the bound itself
+    print("\nthe bound a caller asked for is not a loss (and is still not COMPLETE)")
+    bounded = carry.accumulate(paths, min_turns=1, max_files=1)
+    check("a bounded sweep records what it skipped", bounded["skipped_by_limit"], 2)
+    check("the producer labels it PARTIAL", bounded["quality"], "PARTIAL")
+    check("the optimizer reads a bound, not a loss", optimize.sweep_quality(bounded), "PARTIAL")
+    check("refused without the flag",
+          optimize.may_promote(optimize.sweep_quality(bounded), False), False)
+    check("adopted with it", optimize.may_promote(optimize.sweep_quality(bounded), True), True)
 
     # ---------------------------------------------------------------- U1
     print("\nU1 - a generation that never had the field cannot have defaulted to COMPLETE")

@@ -36,7 +36,9 @@ import carry  # noqa: E402  (live scan, trend, history schema — reused, not du
 import skills as skills_tool  # noqa: E402  (listing usage — reused)
 
 OPTIMIZER_VERSION = "1.0"
-OUTPUT_SCHEMA_VERSION = 1        # shape of --json; bump when a field's meaning changes
+OUTPUT_SCHEMA_VERSION = 2        # shape of --json; bump when a field's meaning changes
+                                 # 2 = `evidence_quality` is DERIVED (may read DEGRADED/UNKNOWN),
+                                 #     and `history.quality` reports the eligible history's worst
 THRESHOLD_SCHEMA_VERSION = 1     # bump when any threshold below changes, with a reason and a test
 
 # ---------------------------------------------------------------- frozen thresholds
@@ -61,6 +63,130 @@ MATERIAL_CHANGE_PP = 5.0     # evidence must move this far before a candidate is
 
 SCHEMA_SUPPORTED = (0, 1, 2)  # 0 = pre-1.2, 1 = + population identity, 2 = + run/scope/quality
 STATES = ("OBSERVED", "HYPOTHESIS", "CANDIDATE", "EXPERIMENTAL", "PROVEN", "REJECTED")
+
+# ---------------------------------------------------------------- the legacy evidence-quality law
+# ONE place decides what a piece of legacy evidence is worth, because the alternative was five:
+# load_history checked a vocabulary, comparable() checked two values, analyse() read the live
+# sweep's word for it, the trend read nothing at all, and emit_candidates() never asked. A finding
+# could then be promoted from a corpus nobody had swept completely.
+#
+# Worst wins, never a majority: one bounded observation among nine complete ones still means part
+# of the evidence was never swept, and nine neighbours cannot launder it.
+QUALITY_RANK = {"COMPLETE": 0, "PARTIAL": 1, "DEGRADED": 2, "EMPTY": 3, "UNKNOWN": 4, "INVALID": 5}
+SCHEMA_WITH_QUALITY = 2          # the first history schema that records how a sweep was taken
+# The counters every schema-2 record's writer wrote, split by what they mean. Nothing here is
+# invented for an older schema: a record that never carried these cannot be asked to show them,
+# and is UNKNOWN rather than trusted.
+RECORD_LOSS_COUNTERS = ("unreadable", "oversize")
+RECORD_BOUND_COUNTERS = ("skipped_by_limit",)
+RECORD_COUNTERS = RECORD_LOSS_COUNTERS + RECORD_BOUND_COUNTERS
+
+
+def worst_quality(qualities):
+    """The worst quality in the set. An empty set is COMPLETE: a finding that draws on no sampled
+    evidence is not degraded by sampling that had nothing to do with it."""
+    worst = "COMPLETE"
+    for q in qualities:
+        if QUALITY_RANK.get(q, QUALITY_RANK["UNKNOWN"]) > QUALITY_RANK[worst]:
+            worst = q if q in QUALITY_RANK else "UNKNOWN"
+    return worst
+
+
+def may_promote(quality, accept_partial):
+    """May a finding resting on evidence of this quality become a CANDIDATE?
+
+    `--accept-partial` means one thing: the caller declares the bound they asked for to be the
+    intended corpus. It is not a switch for evidence that was lost (DEGRADED), for a record that
+    cannot attest itself (UNKNOWN), or for one the producer's own rules call INVALID/EMPTY.
+    """
+    return quality == "COMPLETE" or (quality == "PARTIAL" and bool(accept_partial))
+
+
+def _derived_record_quality(rec, schema):
+    """What a record's OWN numbers prove, ignoring what it claims."""
+    nums = {}
+    for k in RECORD_COUNTERS + ("sessions", "turns", "carry_bytes", "scanned"):
+        if k not in rec:
+            continue
+        v = rec[k]
+        if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+            return "INVALID"          # a count that is not a count: the record is not trustworthy
+        nums[k] = v
+    if nums.get("sessions", 1) == 0:
+        # the producer's own terms: a sweep that looked and found nothing usable is INVALID; one
+        # that had nothing to look at is EMPTY
+        return "INVALID" if nums.get("scanned", 0) > 0 else "EMPTY"
+    if "sessions" in nums and (nums.get("turns", 1) == 0 or nums.get("carry_bytes", 1) == 0):
+        # Sessions were counted, so turns were counted and carry was measured. A record reporting
+        # sessions with neither is not a quiet sweep, it is an impossible one.
+        return "INVALID"
+    if any(nums.get(k, 0) for k in RECORD_LOSS_COUNTERS):
+        return "DEGRADED"
+    if any(nums.get(k, 0) for k in RECORD_BOUND_COUNTERS):
+        return "PARTIAL"
+    if schema >= SCHEMA_WITH_QUALITY and not all(k in nums for k in RECORD_COUNTERS):
+        return "UNKNOWN"              # claims a completeness it cannot show
+    return "COMPLETE"
+
+
+def record_quality(rec):
+    """Evidence quality of ONE legacy history record: the worst of what it claims and what it can
+    show.
+
+    A record may only ever describe itself as no better than its own numbers. Two ways it fails to
+    attest at all: the value is missing or unrecognised, or the record declares a schema older than
+    the field itself — schema 0/1 predates `evidence_quality`, so a schema-1 record carrying
+    COMPLETE is asserting something its own writer could not have known. That is a claim from a
+    hand-edited file or a back-filled migration, not provenance. The record stays readable and
+    stays in the report; it simply cannot carry a promotion.
+    """
+    if not isinstance(rec, dict):
+        return "INVALID"
+    try:
+        schema = int(rec.get("schema_version") or 0)
+    except (TypeError, ValueError):
+        schema = 0
+    claimed = rec.get("evidence_quality")
+    if not isinstance(claimed, str) or claimed not in QUALITY_RANK:
+        claimed = "UNKNOWN"
+    if schema < SCHEMA_WITH_QUALITY:
+        claimed = "UNKNOWN"
+    return worst_quality([claimed, _derived_record_quality(rec, schema)])
+
+
+def sweep_quality(live):
+    """Evidence quality of the LIVE sweep, from the counters carry.accumulate() kept.
+
+    The producer reports one word for two different things (see carry.sweep_label): a bound the
+    caller asked for and evidence that was lost both read PARTIAL. Here they separate, because only
+    the first is something `--accept-partial` may adopt. The counters are the evidence and the
+    label is a summary of them, so the worst of the two governs.
+    """
+    if not live:
+        return "COMPLETE"             # no live sweep is not bad live evidence; it is none
+    claimed = live.get("quality")
+    if not isinstance(claimed, str) or claimed not in QUALITY_RANK:
+        claimed = "COMPLETE"
+    if not live.get("sessions"):
+        return "INVALID" if live.get("scanned") else "EMPTY"
+    derived = "COMPLETE"
+    if any(live.get(k) for k in carry.LOSS_FIELDS):
+        derived = "DEGRADED"
+    elif any(live.get(k) for k in carry.BOUND_FIELDS):
+        derived = "PARTIAL"
+    return worst_quality([claimed, derived])
+
+
+def history_quality(records):
+    """The worst quality among the records ELIGIBLE to support a finding.
+
+    Eligibility is not decided here: comparable() already decided it — same scope, same workload
+    class, compatible corpus size, quality that can carry a comparison at all. A partial record
+    belonging to another agent's scope is not evidence for this run and must not block it. That
+    half matters as much as the fail-closed half: a gate that blocks on evidence a finding never
+    used is not correct, it is merely stuck.
+    """
+    return worst_quality([record_quality(r) for r in (records or [])])
 
 # machine-readable outcome. The CLI exits 0 for every VALID run by default (a scheduler must not
 # treat "nothing to do" as breakage); --strict-exit maps the status to the exit code instead.
@@ -203,26 +329,47 @@ def by_scope(recs):
     return dict(out)
 
 
+def eligible_anchor(recs):
+    """The newest record that may speak for a population -> record or None.
+
+    Eligibility comes FIRST. The anchor used to be the newest record of any kind, and the very next
+    line threw it away for being INVALID — after it had already decided which scope, which workload
+    class and which corpus size every other record was measured against. One broken sweep at the
+    top of the file could strand an entire eligible population.
+    """
+    usable = [r for r in recs if record_quality(r) not in ("INVALID", "EMPTY")]
+    return max(usable, key=lambda r: r.get("ts") or 0) if usable else None
+
+
 def comparable(recs):
-    """Records that may be compared with the newest one: same scope, same workload class,
-    compatible corpus size, usable evidence quality."""
+    """Records that may be compared with the newest ELIGIBLE one: same scope, same workload class,
+    compatible corpus size, quality that can carry a comparison at all.
+
+    INVALID and EMPTY records are dropped here; PARTIAL, DEGRADED and UNKNOWN ones stay, because
+    they ARE part of the population and the report should show them. What they cannot do is carry
+    a promotion — that is the promotion gate's job, and it reads history_quality() over exactly the
+    records this function kept.
+    """
     if not recs:
         return [], []
-    newest = max(recs, key=lambda r: r.get("ts") or 0)
+    newest = eligible_anchor(recs)
+    if newest is None:
+        return [], [(r, "evidence quality " + record_quality(r)) for r in recs]
     n_turn = newest.get("turns") or 0
     n_scope = scope_of(newest)
     n_work = str(newest.get("workload_class") or "")
     keep, dropped = [], []
     for r in recs:
+        q = record_quality(r)
+        if q in ("INVALID", "EMPTY"):
+            dropped.append((r, "evidence quality " + q))
+            continue
         if scope_of(r) != n_scope:
             dropped.append((r, f"scope {scope_of(r)!r} vs {n_scope!r}"))
             continue
         if str(r.get("workload_class") or "") != n_work:
             dropped.append((r, f"workload class {str(r.get('workload_class') or '')!r} vs {n_work!r} "
                                "— WORKLOAD_SHIFT, not a trend"))
-            continue
-        if r.get("evidence_quality") in ("INVALID", "EMPTY"):
-            dropped.append((r, "evidence quality " + str(r.get("evidence_quality"))))
             continue
         t = r.get("turns") or 0
         if n_turn and t and max(n_turn, t) / min(n_turn, t) > CORPUS_TURN_RATIO_MAX:
@@ -336,8 +483,14 @@ def finding(cid, state, headline, evidence, scope="default", bucket=0, hypothesi
 
 def analyse(live, hist, ledger, cold, scope="default", accept_partial=False):
     out = []
-    quality = (live or {}).get("quality", "COMPLETE") if live else "COMPLETE"
-    usable = accept_partial or quality == "COMPLETE"
+    # Every candidate-producing path below states which evidence it rests on, and asks the same
+    # question about exactly that evidence. A finding drawing on the live sweep is not blocked by a
+    # partial history it never read, and a finding drawing on history is not waved through because
+    # today's sweep happened to be clean.
+    quality = sweep_quality(live) if live else "COMPLETE"
+    hist_q = history_quality(hist.get("comparable", []))
+    usable = may_promote(quality, accept_partial)            # findings that rest on the live sweep
+    hist_usable = may_promote(hist_q, accept_partial)        # findings that rest on the history
     run_ids = [r.get("run_id") for r in hist.get("comparable", []) if r.get("run_id")]
 
     # 1. concentration — only sayable over a corpus, never over one session, and never from a
@@ -395,19 +548,27 @@ def analyse(live, hist, ledger, cold, scope="default", accept_partial=False):
                                          f"which is the same movement, not a second one"
                 continue
             reported.append((k, per_month))
-            if True:
-                cid = "trend-" + re.sub(r"[^a-z0-9]+", "-", k.lower()).strip("-")
-                spike = (" — but the last value sits z=%+.1f from its own history, so this slope "
-                         "may be one spike rather than a shift" % t["z"]) if abs(t["z"]) >= TREND_MIN_Z else ""
-                out.append(finding(cid, "CANDIDATE", f"{k} share is moving",
-                                   f"{per_month:+.1f} pp/month over {t['n']} records in scope {scope!r}, "
-                                   f"last value z={t['z']:+.1f}{spike}", scope=scope,
-                                   # DIRECTION, not magnitude. A fitted slope decays as its window
-                                   # grows even when the world stopped moving, so bucketing the
-                                   # magnitude mints a fresh proposal every time the estimator
-                                   # settles. One sustained movement is one proposal; a REVERSAL
-                                   # is a new one, which is exactly when a human should look again.
-                                   bucket=1 if per_month > 0 else -1,
+            cid = "trend-" + re.sub(r"[^a-z0-9]+", "-", k.lower()).strip("-")
+            spike = (" — but the last value sits z=%+.1f from its own history, so this slope "
+                     "may be one spike rather than a shift" % t["z"]) if abs(t["z"]) >= TREND_MIN_Z else ""
+            # DIRECTION, not magnitude. A fitted slope decays as its window grows even when the
+            # world stopped moving, so bucketing the magnitude mints a fresh proposal every time
+            # the estimator settles. One sustained movement is one proposal; a REVERSAL is a new
+            # one, which is exactly when a human should look again.
+            direction = 1 if per_month > 0 else -1
+            ev = (f"{per_month:+.1f} pp/month over {t['n']} records in scope {scope!r}, "
+                  f"last value z={t['z']:+.1f}{spike} (evidence {hist_q})")
+            if not hist_usable:
+                # The movement is real arithmetic over records that cannot say how they were
+                # acquired, so it is reported and never promoted. A trend over bounded sweeps is
+                # a trend in the sample, not in the population.
+                out.append(finding(cid, "OBSERVED", f"{k} share is moving",
+                                   ev + f" — history evidence is {hist_q}, not a population",
+                                   scope=scope, bucket=direction,
+                                   metric=f"slope of {k} share", invariants=(SCOPE_INVARIANT,)))
+            else:
+                out.append(finding(cid, "CANDIDATE", f"{k} share is moving", ev, scope=scope,
+                                   bucket=direction,
                                    hypothesis=f"the change in {k} is a shift, not a spike, and has a cause worth naming",
                                    metric=f"slope of {k} share", effect="unknown until measured",
                                    risk="a trend can come from the workload, not from SameWrite",
@@ -415,6 +576,10 @@ def analyse(live, hist, ledger, cold, scope="default", accept_partial=False):
                                    invariants=(SCOPE_INVARIANT,),
                                    benchmark="identify the cause before proposing a rule"))
     # 3. the guard: does it still pay for itself? (rule retirement is a first-class outcome)
+    #    Its evidence is the hook's OWN ledger — writes it saw, no-ops it prevented — not a sample
+    #    of transcripts. No sweep or history quality can make it better or worse, so the eligibility
+    #    decision here is explicit and separate: the ledger's own sample size is its gate.
+    ledger_usable = bool(ledger) and ledger.get("writes", 0) >= LEDGER_MIN_WRITES
     if ledger and ledger["writes"]:
         if ledger["writes"] >= LEDGER_MIN_WRITES:
             if ledger["rate"] >= LEDGER_MIN_NOOP_RATE:
@@ -423,7 +588,9 @@ def analyse(live, hist, ledger, cold, scope="default", accept_partial=False):
                                    f"({ledger['rate']:.1f}% >= {LEDGER_MIN_NOOP_RATE}%)",
                                    scope=scope, bucket=bucket_of(ledger["rate"]), metric="ledger deny rate"))
             else:
-                out.append(finding("noop-guard-retire", "CANDIDATE", "the no-op guard may have stopped paying",
+                out.append(finding("noop-guard-retire",
+                                   "CANDIDATE" if ledger_usable else "OBSERVED",
+                                   "the no-op guard may have stopped paying",
                                    f"{ledger['prevented']} of {ledger['writes']} writes prevented "
                                    f"({ledger['rate']:.1f}% < {LEDGER_MIN_NOOP_RATE}%)",
                                    scope=scope, bucket=bucket_of(ledger["rate"]),
@@ -467,14 +634,32 @@ def analyse(live, hist, ledger, cold, scope="default", accept_partial=False):
 
 
 def overall_status(findings, hist, live, pop, accept_partial):
+    """The run's one word — and the thing that decides whether anything is written.
+
+    CANDIDATE now precedes PARTIAL_EVIDENCE, which it did not before. That is not a loosening: a
+    finding only reaches CANDIDATE after its OWN evidence passed the promotion gate, so a run that
+    has one is a run whose promoted findings rest on evidence that was eligible. The old order
+    blocked a valid history-only finding because today's live sweep happened to be bounded — a
+    refusal by evidence the finding never used.
+    """
     if pop.get("host_shift"):
         return "HOST_BEHAVIOR_SHIFT"
-    q = (live or {}).get("quality", "COMPLETE") if live else "COMPLETE"
-    if q in ("PARTIAL", "INVALID") and not accept_partial:
-        return "PARTIAL_EVIDENCE"
     if any(f["state"] == "CANDIDATE" for f in findings):
         return "CANDIDATE"
-    if not live and len(hist.get("comparable", [])) < MIN_HISTORY_FOR_TREND:
+    # Evidence that EXISTS and was refused is a different answer from evidence that is missing:
+    # PARTIAL_EVIDENCE tells the caller a flag or a full sweep would change the outcome, while
+    # INSUFFICIENT_DATA tells them to keep collecting.
+    refused = []
+    if live:
+        refused.append(sweep_quality(live))
+    comp = hist.get("comparable", [])
+    if comp:
+        refused.append(history_quality(comp))
+    elif any(record_quality(r) in ("INVALID", "EMPTY") for r, _why in hist.get("dropped", [])):
+        refused.append("INVALID")
+    if any(not may_promote(q, accept_partial) for q in refused):
+        return "PARTIAL_EVIDENCE"
+    if not live and len(comp) < MIN_HISTORY_FOR_TREND:
         return "INSUFFICIENT_DATA"
     return "NO_ACTION"
 
@@ -554,12 +739,22 @@ fixtures that were not used to invent the rule, and none of it applied automatic
 """
 
 
-def emit_candidates(findings, outdir):
-    """Atomic, deduplicated, and never inside a governed tree by default.
+def emit_candidates(findings, outdir, status):
+    """Atomic, deduplicated, never inside a governed tree by default — and only under a status that
+    permits promotion at all.
 
     -> (written, existing, failed). A candidate whose id already exists is NOT rewritten: the
-    evidence bucket is part of the id, so a file reappears only when the evidence actually moved."""
+    evidence bucket is part of the id, so a file reappears only when the evidence actually moved.
+
+    The status gate lives HERE rather than at the one call site that used to need it. A status that
+    refuses promotion while a file lands on disk is the worst outcome available: the operator reads
+    exit 30 or 40 and the next reader of the directory finds a specification that looks approved.
+    Putting the gate in the emitter means every caller — the CLI, the long-run simulator, a future
+    scheduler — routes through it, and no new caller can forget.
+    """
     written, existing, failed = [], [], []
+    if status != "CANDIDATE":
+        return written, existing, failed
     for f in findings:
         if f["state"] != "CANDIDATE":
             continue
@@ -631,7 +826,12 @@ def render(live, hist, ledger, cold, pop, findings, sources, status, scope, scop
         L.append(f"  live scan : {live['sessions']} sessions / {live['turns']:,} turns "
                  f"({live['scanned']} transcripts, {live['short']} below the turn floor, "
                  f"{live.get('unreadable', 0)} unreadable, {live.get('oversize', 0)} oversized lines)")
-        L.append(f"  evidence  : {live.get('quality', 'COMPLETE')}")
+        L.append(f"  evidence  : {sweep_quality(live)}"
+                 + (f" (the sweep reports {live.get('quality')})"
+                    if sweep_quality(live) != live.get("quality") else ""))
+    if hist["comparable"]:
+        L.append(f"  history   : {history_quality(hist['comparable'])} "
+                 f"(worst of {len(hist['comparable'])} eligible records)")
     L.append("")
     if live and live["sessions"]:
         C = sum(live["carry"].values()) or 1
@@ -711,7 +911,12 @@ def main(argv=None):
     if a.scope_id:
         scope, scoped = a.scope_id, scopes.get(a.scope_id, [])
     elif recs:
-        scope = scope_of(max(recs, key=lambda r: r.get("ts") or 0))
+        # Which scope gets analysed is an anchor too: taking the newest record of ANY quality let a
+        # single INVALID sweep in another agent's scope send the whole run to a population that was
+        # never going to be analysable. The newest record that can speak chooses; if none can, the
+        # newest record still names a scope, and the status below says why nothing came of it.
+        anchor = eligible_anchor(recs) or max(recs, key=lambda r: r.get("ts") or 0)
+        scope = scope_of(anchor)
         scoped = scopes[scope]
     else:
         scope, scoped = "default", []
@@ -731,7 +936,9 @@ def main(argv=None):
     if paths:
         live = carry.accumulate(paths, min_turns=a.min_turns, max_files=a.max_files)
         try:
-            listing, uses, sess = skills_tool.scan(paths[:a.max_files] if a.max_files else paths)
+            # The SAME bounded sample the sweep used. Two selections of "the newest N" is two
+            # populations reported as one.
+            listing, uses, sess = skills_tool.scan(carry.bounded_paths(paths, a.max_files))
             if listing:
                 ent = skills_tool.parse_listing(listing)
                 rows = skills_tool.tally(ent, uses, sess)
@@ -754,7 +961,7 @@ def main(argv=None):
             if not got:
                 status = "ALREADY_RUNNING"
             else:
-                written, existing, failed = emit_candidates(findings, a.emit_candidate)
+                written, existing, failed = emit_candidates(findings, a.emit_candidate, status)
 
     if a.json:
         print(json.dumps({
@@ -767,8 +974,11 @@ def main(argv=None):
             "status": status, "status_code": STATUS.get(status, STATUS["INTERNAL_ERROR"]),
             "scope": {"analysed": scope, "known": scopes_seen, "records_in_scope": len(scoped),
                       "comparable": len(keep)},
-            "evidence_quality": (live or {}).get("quality", "NO_SCAN") if live else "NO_SCAN",
+            # DERIVED, not the producer's summary word: a sweep that lost records reads DEGRADED
+            # here even though the 1.3 label for it is PARTIAL (output_schema_version 2).
+            "evidence_quality": sweep_quality(live) if live else "NO_SCAN",
             "history": {"records": len(recs), "comparable": len(keep),
+                        "quality": history_quality(keep),
                         "rejected": dict(rejected), "time_order": hist["time_order"]},
             "ledger": ledger,
             "live": ({"sessions": live["sessions"], "turns": live["turns"], "scanned": live["scanned"],

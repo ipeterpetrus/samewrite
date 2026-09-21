@@ -32,9 +32,14 @@ def check(label, got, want):
 
 
 def rec(ts, shares, scope="default", turns=1000, sessions=40, **kw):
+    # The acquisition counters are part of the record, not decoration: carry.history() has written
+    # them since schema 2, and since 1.4.2 a record that claims COMPLETE without them cannot carry
+    # a promotion (see tests/test_evidence_integrity.py). A fixture that omitted them was asserting
+    # a completeness no real sweep asserts that way.
     r = {"schema_version": 2, "record_type": "carry_run", "ts": ts, "sessions": sessions,
          "turns": turns, "carry_bytes": 10 ** 7, "scanned": 100, "scope_id": scope,
          "workload_class": "", "evidence_quality": "COMPLETE",
+         "unreadable": 0, "oversize": 0, "skipped_by_limit": 0,
          "run_id": kw.pop("run_id", None) or carry.new_run_id(),
          "shares": shares, "bpt": {k: 1.0 for k in shares}}
     r.update(kw)
@@ -295,12 +300,27 @@ def main():
           far["candidate_id"] != f1["candidate_id"], True)
     check("candidate_id membawa scope-nya", f1["candidate_id"].split("-")[-2], "x")
 
+    # Lock the rule the fixture above now satisfies: the SAME record without its counters claims a
+    # completeness it cannot show, and a population of those cannot promote anything.
+    bare = [{k: v for k, v in r.items() if k not in ("unreadable", "oversize", "skipped_by_limit")}
+            for r in [rec(100 + i * 86400 * 7, {"Bash": 30.0 + i * 8, "Read": 70.0 - i * 8},
+                          scope="bare") for i in range(6)]]
+    keep_bare, _dropped_bare = optimize.comparable(bare)
+    check("record tanpa counters: tetap dibandingkan, tapi kualitasnya UNKNOWN",
+          (len(keep_bare), optimize.history_quality(keep_bare)), (6, "UNKNOWN"))
+    h_bare = {"comparable": keep_bare, "total": 6, "in_scope": 6, "rejected": {}, "dropped": [],
+              "time_order": "ok"}
+    check("dan UNKNOWN tak melahirkan kandidat, dgn atau tanpa --accept-partial",
+          {x["state"] for x in optimize.analyse(None, h_bare, None, None, scope="bare")}
+          | {x["state"] for x in optimize.analyse(None, h_bare, None, None, scope="bare",
+                                                  accept_partial=True)}, {"OBSERVED"})
+
     out2 = os.path.join(d, "cand_dedup")
-    w, e, _fail = optimize.emit_candidates([f1], out2)
+    w, e, _fail = optimize.emit_candidates([f1], out2, "CANDIDATE")
     check("emisi pertama menulis", (len(w), len(e)), (1, 0))
-    w, e, _fail = optimize.emit_candidates([f2], out2)
+    w, e, _fail = optimize.emit_candidates([f2], out2, "CANDIDATE")
     check("emisi kedua dgn bukti setara: EXISTING, nol penulisan ulang", (len(w), len(e)), (0, 1))
-    w, e, _fail = optimize.emit_candidates([far], out2)
+    w, e, _fail = optimize.emit_candidates([far], out2, "CANDIDATE")
     check("bukti yang benar-benar bergerak: kandidat baru ditulis", (len(w), len(e)), (1, 0))
 
     # ------------------------------------------------------------ 8b. identitas tren stabil

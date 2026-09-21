@@ -44,8 +44,7 @@ def main():
     a = ap.parse_args()
 
     paths, _ = profiles.resolve(a.scan or [])
-    if a.max_files and len(paths) > a.max_files:
-        paths = sorted(paths, key=os.path.getmtime, reverse=True)[:a.max_files]
+    paths = carry.bounded_paths(paths, a.max_files)   # one definition of "the newest N"
 
     sizes = collections.defaultdict(list)
     total = collections.Counter()

@@ -130,7 +130,11 @@ def main():
                 "schema_version": 2, "record_type": "carry_run", "run_id": carry.new_run_id(),
                 "ts": 1_750_000_000 + i * 604800, "sessions": 60, "turns": 3000,
                 "carry_bytes": 10 ** 8, "scope_id": "governed", "workload_class": "audit",
-                "evidence_quality": "COMPLETE", "runtimes": {"2.1.271": 60}, "models": {"m": 60},
+                "evidence_quality": "COMPLETE", "scanned": 120,
+                # the acquisition counters the producer writes; since 1.4.2 a COMPLETE claim
+                # without them cannot promote (tests/test_evidence_integrity.py)
+                "unreadable": 0, "oversize": 0, "skipped_by_limit": 0,
+                "runtimes": {"2.1.271": 60}, "models": {"m": 60},
                 "shares": {"Bash": 40.0 + i * 9, "Read": 60.0 - i * 9},
                 "bpt": {"Bash": 1.0, "Read": 1.0}}) + "\n")
 
@@ -152,6 +156,25 @@ def main():
                         capture_output=True, text=True, timeout=900)
     check("JSON leaks no secret", CANARY in rj.stdout, False)
     check("JSON leaks no path", ("/home/" in rj.stdout) or (ws in rj.stdout), False)
+
+    # The same population with the counters stripped claims a completeness it cannot show: it must
+    # refuse, and it must write nothing. Without this, the fixture edit above could hide the gate.
+    bare_hist = os.path.join(state, "bare_history.jsonl")
+    bare_cand = os.path.join(state, "bare_candidates")
+    with open(hist, encoding="utf-8") as fh, open(bare_hist, "w", encoding="utf-8") as out_fh:
+        for line in fh:
+            o = json.loads(line)
+            for k in ("unreadable", "oversize", "skipped_by_limit"):
+                o.pop(k, None)
+            out_fh.write(json.dumps(o) + "\n")
+    rb = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "optimize.py"),
+                         "--history", bare_hist, "--ledger", os.path.join(state, "none.jsonl"),
+                         "--scan", "--scope-id", "governed", "--json", "--strict-exit",
+                         "--emit-candidate", bare_cand],
+                        capture_output=True, text=True, timeout=900)
+    check("a record that cannot attest its own sweep does not promote", rb.returncode, 40)
+    check("and nothing is written for it",
+          [f for r_, _d, fs in os.walk(bare_cand) for f in fs], [])
 
     specs = [os.path.join(r_, f) for r_, _d, fs in os.walk(cand) for f in fs if f.endswith(".md")]
     check("a specification was written, outside the governed repository", bool(specs), True)

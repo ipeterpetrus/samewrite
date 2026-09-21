@@ -30,8 +30,12 @@ EMPTY_HIST = {"comparable": [], "total": 0, "in_scope": 0, "rejected": {}, "drop
 
 
 def rec(ts, shares, scope, turns=1000, workload="", runtimes=None):
+    # The acquisition counters a real 1.2/1.3 sweep always wrote. Since 1.4.2 a record claiming
+    # COMPLETE without them cannot carry a promotion, so a simulation that omitted them would be
+    # simulating a population no producer ever writes.
     return {"schema_version": 2, "record_type": "carry_run", "run_id": carry.new_run_id(),
-            "ts": ts, "sessions": 40, "turns": turns, "carry_bytes": 10 ** 7,
+            "ts": ts, "sessions": 40, "turns": turns, "carry_bytes": 10 ** 7, "scanned": 100,
+            "unreadable": 0, "oversize": 0, "skipped_by_limit": 0,
             "scope_id": scope, "workload_class": workload, "evidence_quality": "COMPLETE",
             "runtimes": runtimes or {"2.1.270": 40}, "models": {"m1": 40},
             "shares": shares, "bpt": {k: 1.0 for k in shares}}
@@ -164,7 +168,7 @@ def longrun(days, cycles, out, plateau=20):
                 f = optimize.analyse(lv, h, None, None, scope=role)
                 st = optimize.overall_status(f, h, lv, optimize.population(keep), False)
                 statuses[st] += 1
-                w, e, _fail = optimize.emit_candidates(f, cand)
+                w, e, _fail = optimize.emit_candidates(f, cand, st)
                 written += len(w)
                 existing += len(e)
                 day_new += len(w)
