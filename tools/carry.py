@@ -86,39 +86,39 @@ def scan_full(path, strict=True):
     ledger = msgid.Ledger(strict=strict)   # Claude Code writes one record per content block
     usage = collections.Counter()
     runtimes, models = collections.Counter(), collections.Counter()
-    oversize = malformed = unchecked = 0
+    oversize = malformed = 0
     digest = hashlib.sha256()
     for raw in open(path, "rb"):
         digest.update(raw)
-        if len(raw) > MAX_LINE:               # counted, never silently dropped
-            # MAX_LINE exists so that one enormous line cannot dominate the ITEM table.
-            # It never meant "do not look at it": skipping the line outright meant an
-            # oversize assistant record reached neither the identity guard nor the usage
-            # guard, so "no conflict found" was really "not looked at" (cross-family review
-            # of the first cut). The bytes are already in memory -- `raw` had to be read to
-            # measure it -- so parsing costs CPU and nothing else. The record is therefore
-            # weighed by the ledger and then dropped from the item table, which is what the
-            # limit was for. Deciding this from a substring test on the unparsed bytes was
-            # the first repair and it was wrong: `"type":"\u0061ssistant"` is valid JSON
-            # that no such test sees.
+        # MAX_LINE bounds the ITEM table, so that one enormous line cannot dominate it. It
+        # never meant "do not look at this line": skipping it outright meant an oversize
+        # assistant record reached neither the identity guard nor the usage guard, so "no
+        # conflict found" was really "not looked at". Two cross-family rounds were needed to
+        # get this right -- the first repair decided it from a substring test on the
+        # unparsed bytes, which `"type":"\u0061ssistant"` defeats, and the second parsed the
+        # record but then dropped its BILL along with its blocks, understating the tokens.
+        # The bytes are already in memory (`raw` had to be read to be measured), so an
+        # oversize record is parsed, weighed and BILLED like any other, and only its content
+        # blocks are kept out of the item table. Measured: 0 oversize lines in 1,390
+        # transcripts.
+        oversize_line = len(raw) > MAX_LINE
+        if oversize_line:                     # counted, never silently dropped
             oversize += 1
-            try:
-                o = json.loads(raw.decode("utf-8", "replace"))
-            except Exception:
-                malformed += 1
-                unchecked += 1     # genuinely unreadable: it reached no guard, and says so
-                continue
-            if (isinstance(o, dict) and o.get("type") == "assistant"
-                    and isinstance(o.get("message"), dict)):
-                turn = max(turn, ledger.observe(o["message"], o)[0])
-            continue
         line = raw.decode("utf-8", "replace").strip()
         if not line:
             continue
         try:
             o = json.loads(line)
         except Exception:
-            malformed += 1                    # a line this parser could not use, and says so
+            # A line this parser could not use, and says so. It is NOT folded into the
+            # exactness flags, and the distinction is deliberate: a conflict is two
+            # incompatible statements, a malformed line is an ABSENT one. The frozen
+            # certificate already carries `malformed` as a loss counter, so a sweep holding
+            # one cannot read INTACT and its reader is already told the transcript was not
+            # fully read. Refusing the source instead would replace a precise report with a
+            # blunt one and would exclude every live session whose last line is half
+            # written. Measured: 0 malformed lines in 1,390 transcripts.
+            malformed += 1
             continue
 
         v = o.get("version")
@@ -127,6 +127,8 @@ def scan_full(path, strict=True):
 
         att = o.get("attachment")
         if isinstance(att, dict):           # hook output, skill listing, reminders
+            if oversize_line:
+                continue                    # weighed nowhere, and not itemised
             c = att.get("content")
             if not isinstance(c, str):
                 c = json.dumps(c, ensure_ascii=False) if c is not None else ""
@@ -154,6 +156,11 @@ def scan_full(path, strict=True):
                 u = msg.get("usage") or {}
                 for k in msgid.USAGE_KEYS:
                     usage[k] += u.get(k) or 0
+            if oversize_line:
+                # Guarded and BILLED above; only its blocks are kept out of the item table,
+                # which is the whole of what MAX_LINE was ever for. Dropping the bill here
+                # published a token total that was too LOW -- found by the second round.
+                continue
             for c in (msg.get("content") or []):
                 if not isinstance(c, dict):
                     continue
@@ -165,6 +172,8 @@ def scan_full(path, strict=True):
                     items.append((turn, len(json.dumps(c.get("input") or {},
                                                        ensure_ascii=False)), "call:" + name))
         elif kind == "user" and isinstance(msg, dict):
+            if oversize_line:
+                continue                    # not itemised; a user record carries no bill
             content = msg.get("content")
             if isinstance(content, str):
                 items.append((turn, len(content), "human"))
@@ -178,10 +187,8 @@ def scan_full(path, strict=True):
                     items.append((turn, n, "result:" + str(id2name.get(c.get("tool_use_id")))))
                 elif c.get("type") == "text":
                     items.append((turn, len(c.get("text", "")), "human"))
-    if unchecked and strict:
-        raise msgid.Ambiguous("unchecked", "an oversize line could not be parsed at all")
-    exact_identity = ledger.identity_exact and not unchecked
-    exact_usage = ledger.usage_exact and not unchecked
+    exact_identity = ledger.identity_exact
+    exact_usage = ledger.usage_exact
     if not exact_usage:
         # AMBIGUOUS_INPUT MUST_NOT_BECOME EXACT_OUTPUT. A strict ledger has already raised;
         # this is the strict=False path, and handing back a Counter built from a bill the
@@ -196,7 +203,6 @@ def scan_full(path, strict=True):
         "identity_conflicts": ledger.identity_conflicts,
         "usage_conflicted_messages": ledger.usage_conflicted_messages,
         "identity_conflicted_messages": ledger.identity_conflicted_messages,
-        "unchecked_records": unchecked,
         "usage_exact": exact_usage, "identity_exact": exact_identity}
 
 

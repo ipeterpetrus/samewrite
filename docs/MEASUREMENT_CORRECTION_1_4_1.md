@@ -390,15 +390,33 @@ cannot name was the first repair, and it turned a correctly-refused source into 
 ACCOUNTING VIOLATION — the producer accusing itself of being broken instead of reporting a
 loss. The confirmation round caught that.
 
-One more path was checked and closed: a record larger than `MAX_LINE` used to be skipped
-*before* it was parsed, so an oversize assistant record reached neither guard and "no conflict
-found" was really "not looked at". `MAX_LINE` exists so one enormous line cannot dominate the
-item table, not to avoid reading it — and the bytes are already in memory, since the line had
-to be read to be measured. So it is parsed and weighed by the ledger now, then dropped from
-the item table, which is what the limit was for; `oversize` still counts it and the sweep
-still reads PARTIAL. Only a line that is oversize **and** unparseable reached no guard, and
-that one does make the source inexact. Deciding this from a substring test on the unparsed
-bytes was the first repair, and `"type":"\u0061ssistant"` defeated it.
+One more path was checked and closed, and it took three attempts to get right. A record larger
+than `MAX_LINE` used to be skipped *before* it was parsed, so an oversize assistant record
+reached neither guard and "no conflict found" was really "not looked at". `MAX_LINE` exists so
+one enormous line cannot dominate the item table, not to avoid reading it — and the bytes are
+already in memory, since the line had to be read to be measured. It is therefore parsed,
+guarded and **billed** like any other record now, and only its content blocks are kept out of
+the item table, which is the whole of what the limit was ever for; `oversize` still counts it
+and the sweep still reads PARTIAL. The first repair decided this from a substring test on the
+unparsed bytes and `"type":"\u0061ssistant"` defeated it; the second parsed the record but
+dropped its bill along with its blocks, publishing a token total that was too LOW. Both were
+caught by confirmation rounds, which is what confirmation rounds are for.
+
+A line the parser cannot read at all stays what it always was: a counted line-level loss, not
+a conflict. The distinction is deliberate. A conflict is two incompatible statements; a
+malformed line is an **absent** one, and the frozen certificate already carries `malformed` as
+a loss counter, so a sweep holding one cannot read INTACT and its reader is already told the
+transcript was not fully read. Refusing the source instead would replace a precise report with
+a blunt one, and would exclude every live session whose last line is half written. Measured:
+0 malformed and 0 oversize lines in 1,390 transcripts.
+
+Removing the prefilters also corrected *which* records carry a bill, and this is a behaviour
+change worth stating rather than burying. The old `'"usage"' not in line` filter in `price.py`
+and `rig_confirmatory.py` passed any record whose line contained a usage object — including a
+**user** record that carried one — so those rigs could count a turn `carry.py` does not. They
+now bill assistant records only, which is the definition `carry.py` has always used, and
+`tests/test_multiblock.py` pins it. On a transcript where every record is an assistant record
+the two behaviours are identical.
 
 ### 8.4 H1 — detectable collisions fail closed
 
@@ -421,11 +439,13 @@ wider than that, and stating it narrowly would understate the limitation. The gu
 only values that are *stated*: a field that is absent, or explicitly null, states nothing.
 So the residual is:
 
-> two assistant messages sharing one `message.id` on which **no guard field states two
-> different values** — including the case where one message states a field and the other
-> omits it entirely (`requestId` is absent on 4,208 records here, so this is a real shape,
-> not a hypothetical) — and whose four billed usage counters are also identical, because
-> differing usage is already caught by H2.
+> two assistant messages sharing one `message.id` on which **nothing states two different
+> values** — no guard field, and no billed usage counter. That includes every case where one
+> message states something and the other omits it: a `requestId` present on one and absent on
+> the other (it is absent on 4,208 records here, so this is a real shape, not a hypothetical),
+> and equally a message that carries usage beside one that carries none, since missing usage
+> is deliberately not a conflict. Two messages whose four billed counters merely *differ* are
+> caught by H2; two where only one of them states them at all are not.
 
 Nothing in a transcript separates that from one message written as several content-block
 records. That is not a defect in this code: the information is not in the file. Treating an

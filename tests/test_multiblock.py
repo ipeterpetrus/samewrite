@@ -488,22 +488,33 @@ def main():
             check("T16 a collision inside an oversize record is still caught", k16, "identity")
             check("T16 the oversize line is still counted as a line-level loss",
                   m16["oversize"], 1)
-            check("T16 nothing was left unchecked — it was parsed, just not itemised",
-                  m16["unchecked_records"], 0)
+            check("T16 the collision was caught because the record WAS parsed",
+                  m16["identity_conflicts"], 1)
+            # ...and BILLED. The second repair parsed the record and then dropped its bill
+            # with its blocks, which published a token total that was too LOW.
+            t16c = write(d, "T16c.jsonl", [rec("t16c", [text("z" * 4000)], usage(37, 37, 37, 37),
+                                               requestId="req_A")])
+            n16c, items16c, u16c = carry.scan(t16c)
+            check("T16c an oversize assistant record is still billed",
+                  u16c["output_tokens"], 37)
+            check("T16c ...and still opens its turn", n16c, 1)
+            check("T16c ...but its blocks stay out of the item table", items16c, [])
             check("T16 no usage survives the collision",
                   sum(carry.scan_full(t16, strict=False)[2].values()), 0)
             a16 = carry.accumulate([t16], min_turns=1)
             check("T16 accumulate excludes the source", a16["sessions"], 0)
             check("T16 and the source never enters the evidence manifest", a16["parsed"], {})
-            # ...and an oversize line that is not JSON at all reached no guard and says so.
+            # An oversize line that is not JSON at all is an ABSENT statement, not a
+            # conflicting one: it is counted as a line-level loss, which the frozen
+            # certificate already carries and which keeps the sweep out of INTACT. It does
+            # NOT refuse the source — doing that would exclude every live session whose
+            # last line is half written.
             t16b = write(d, "T16b.jsonl", [small, "{" + "x" * 4000])
             k16b, m16b = conflicts(t16b)
-            check("T16b an unparseable oversize line makes the scan not exact",
-                  k16b, "unchecked")
-            check("T16b it is counted rather than assumed clean",
-                  m16b["unchecked_records"], 1)
-            check("T16b and no usage survives it",
-                  sum(carry.scan_full(t16b, strict=False)[2].values()), 0)
+            check("T16b an unparseable oversize line is a counted loss, not a conflict",
+                  k16b, None)
+            check("T16b it is counted as malformed", m16b["malformed"], 1)
+            check("T16b and as oversize", m16b["oversize"], 1)
         finally:
             carry.MAX_LINE = real_max
 
@@ -557,6 +568,28 @@ def main():
               json.loads(esc)["type"], "assistant")
         check("T18 a conflict hidden behind an escaped type is still refused",
               conflicts(t18)[0], "usage")
+
+        # T19 a malformed line is an ABSENT statement, not a conflicting one. It stays a
+        # counted line-level loss, and the reader sees the sweep as DEGRADED because of it.
+        t19 = write(d, "T19.jsonl", [rec("t19", [text("a")], usage(1, 1, 1, 1)), "{not json"])
+        k19, m19 = conflicts(t19)
+        check("T19 a malformed line is not treated as a conflict", k19, None)
+        check("T19 it is counted as malformed", m19["malformed"], 1)
+        a19 = carry.accumulate([t19], min_turns=1)
+        check("T19 and the source is still measured", a19["sessions"], 1)
+        check("T19 but the sweep is not COMPLETE", a19["counters"]["malformed"], 1)
+
+        # T20 only an ASSISTANT record carries a bill. The old `'"usage"' not in line`
+        # prefilter in price.py billed a user record that happened to carry a usage object,
+        # which made those rigs count a different number of turns than carry.py does — the
+        # exact disagreement this repository has now fixed twice.
+        t20 = write(d, "T20.jsonl", [
+            rec("t20", [text("a")], usage(2, 2, 2, 2)),
+            json.dumps({"type": "user", "message": {"content": [{"type": "text", "text": "q"}],
+                                                    "usage": usage(11, 11, 11, 11)}})])
+        check("T20 a user record carrying a usage object is not billed",
+              carry.scan(t20)[2]["output_tokens"], 2)
+        check("T20 and does not open a turn", carry.scan(t20)[0], 1)
 
         # --- 7e. PROPAGATION: no consumer may turn a refused bill into a number ---
         # Section 10 of the closure brief, made mechanical. Every module that reads

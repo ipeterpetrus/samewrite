@@ -155,9 +155,9 @@ CASES = [
 
     ("baris raksasa: dilewati DAN membuat bukti PARTIAL",
      [("carry.py",
-       """        if len(raw) > MAX_LINE:               # counted, never silently dropped"""
+       """        oversize_line = len(raw) > MAX_LINE"""
        ,
-       """        if False:""")],
+       """        oversize_line = False""")],
      """
      p = os.path.join(D, "s.jsonl")
      rows = []
