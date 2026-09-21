@@ -15,6 +15,7 @@ pakai: python3 tools/extract.py OUT.pkl transcript.jsonl [...] [--keep-content]
 import hashlib, json, os, pickle, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import profiles  # directories and profile discovery; see tools/profiles.py
+import msgid     # one assistant message, however many records carry it
 
 try:
     import tiktoken
@@ -36,6 +37,7 @@ def redact(text):
 
 def scan(path, keep=False):
     prev, turn, items, rew = {}, 0, [], []
+    ledger = msgid.Ledger()   # one record per content block; see tools/msgid.py
     for line in open(path, errors="replace"):
         line = line.strip()
         if not line or ('"usage"' not in line and '"tool_use"' not in line
@@ -47,7 +49,8 @@ def scan(path, keep=False):
             continue
         m, t = o.get("message") or {}, o.get("type")
         if t == "assistant" and isinstance(m, dict):
-            if m.get("usage"):
+            # Blocks of one message arrive on separate records; they share its turn.
+            if ledger.bill(m):
                 turn += 1
             for c in (m.get("content") or []):
                 if not isinstance(c, dict):

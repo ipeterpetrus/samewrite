@@ -17,6 +17,8 @@ Cross-check the sizes here against how often you actually used each tool
 (tools/skills.py does the same job for skills) before concluding anything.
 """
 import argparse, collections, json, os, statistics, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import msgid     # one assistant message, however many records carry it
 
 B2T = 1 / 3.14
 
@@ -60,6 +62,7 @@ def turns_with_usage(path):
     Tanpa ini, kohort prefix.py (semua sesi ber-snapshot) tak sebanding dengan kohort
     carry.py (default >= 50 turn) — dan angkanya diperbandingkan orang."""
     n = 0
+    ledger = msgid.Ledger()
     try:
         fh = open(path, encoding="utf-8")
     except OSError:
@@ -73,7 +76,7 @@ def turns_with_usage(path):
             except Exception:
                 continue
             if isinstance(o, dict) and o.get("type") == "assistant" \
-                    and isinstance((o.get("message") or {}).get("usage"), dict):
+                    and ledger.bill(o.get("message")):
                 n += 1
     return n
 

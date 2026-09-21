@@ -15,6 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(ROOT, "tools")); sys.path.insert(0, os.path.join(ROOT, "experiments", "vnext")); sys.path.insert(0, HERE)
 import carry  # noqa: E402
+import msgid  # noqa: E402  one assistant message, however many records carry it
 from fixtures import shape_ok  # noqa: E402
 from fixtures_pres import classify, blocked_verdict  # noqa: E402
 import fixtures_pres, fixtures_confirm  # noqa: E402
@@ -97,6 +98,7 @@ def metrics(tp, arm, prompts):
     for _, b, src in items:
         by[carry.bucket(src)] = by.get(carry.bucket(src), 0) + b
     per_turn, cur, listing, banners, counts, injected = [], None, "", set(), {}, 0
+    ledger = msgid.Ledger()   # one message, however many records carry it
     for line in open(tp, errors="replace"):
         try:
             o = json.loads(line)
@@ -114,7 +116,7 @@ def metrics(tp, arm, prompts):
                 cur = {"prompt": c.strip()[:40], "output_tokens": 0, "assistant_msgs": 0}; per_turn.append(cur)
         if t == "assistant":
             u = (o.get("message") or {}).get("usage") or {}
-            if cur is not None:
+            if cur is not None and ledger.bill(o.get("message")):
                 cur["output_tokens"] += u.get("output_tokens") or 0; cur["assistant_msgs"] += 1
             for c in (o.get("message") or {}).get("content") or []:
                 if isinstance(c, dict) and c.get("type") == "tool_use":

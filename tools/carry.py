@@ -20,6 +20,7 @@ the quiet error this replaces.
 import argparse, collections, hashlib, json, os, re, sys, time, uuid
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import profiles  # multi-profile discovery; see tools/profiles.py
+import msgid     # one assistant message, however many records carry it
 import evidence_acquire                        # typed v1.4 producer (frozen constructors)
 import evidence_history                        # the history file, read/written through the kernel
 from evidence.records import RECORD_SCHEMA_VERSION
@@ -79,6 +80,7 @@ def scan_full(path):
     single pass and makes the digest the true one.
     """
     turn, id2name, items = 0, {}, []
+    ledger = msgid.Ledger()   # Claude Code writes one record per content block
     usage = collections.Counter()
     runtimes, models = collections.Counter(), collections.Counter()
     oversize = malformed = 0
@@ -111,14 +113,15 @@ def scan_full(path):
 
         kind, msg = o.get("type"), o.get("message")
         if kind == "assistant" and isinstance(msg, dict):
-            m = msg.get("model")
-            if isinstance(m, str) and m:
-                models[m] += 1
-            u = msg.get("usage") or {}
-            if u:
+            # A message split across records repeats its id and its usage on every one
+            # of them. Bill it once; its blocks below still land on this same turn.
+            if ledger.bill(msg):
+                m = msg.get("model")
+                if isinstance(m, str) and m:
+                    models[m] += 1
                 turn += 1
-                for k in ("input_tokens", "output_tokens",
-                          "cache_read_input_tokens", "cache_creation_input_tokens"):
+                u = msg.get("usage") or {}
+                for k in msgid.USAGE_KEYS:
                     usage[k] += u.get(k) or 0
             for c in (msg.get("content") or []):
                 if not isinstance(c, dict):
@@ -145,7 +148,9 @@ def scan_full(path):
                 elif c.get("type") == "text":
                     items.append((turn, len(c.get("text", "")), "human"))
     return turn, items, usage, {"runtimes": runtimes, "models": models, "oversize": oversize,
-                                "malformed": malformed, "content": digest.hexdigest()}
+                                "malformed": malformed, "content": digest.hexdigest(),
+                                "records": ledger.records,
+                                "usage_conflicts": ledger.usage_conflicts}
 
 
 def bucket(src):

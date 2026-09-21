@@ -11,6 +11,10 @@ input; cache read = 0,1x input.
 """
 import collections, glob, json, os, statistics as st, sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "..", "tools"))
+import msgid     # one assistant message, however many records carry it
+
 RATE = {                      # nama: (input, output)
     "Fable 5":   (10.00, 50.00),
     "Opus 5":    (5.00, 25.00),
@@ -34,6 +38,7 @@ def toks(work, fixture, extra_roots=()):
             if b in seen:
                 continue
             seen.add(b)
+            ledger = msgid.Ledger()   # per transcript: one message, however many records
             for line in open(f, errors="replace"):
                 if '"usage"' not in line:
                     continue
@@ -41,9 +46,11 @@ def toks(work, fixture, extra_roots=()):
                     o = json.loads(line)
                 except Exception:
                     continue
-                u = (o.get("message") or {}).get("usage") or {}
-                for k in ("input_tokens", "output_tokens",
-                          "cache_read_input_tokens", "cache_creation_input_tokens"):
+                m = o.get("message") or {}
+                if not ledger.bill(m):
+                    continue
+                u = m.get("usage") or {}
+                for k in msgid.USAGE_KEYS:
                     tot[k] += u.get(k) or 0
     return tot
 

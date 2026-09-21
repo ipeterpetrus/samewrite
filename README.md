@@ -111,13 +111,21 @@ no file: a shadow that failed the run would already be a decision.
 
 | measured | number | scope |
 |---|---|---|
-| where a session's tokens actually go | Bash + Read results **63.8%** of carry | 1,316 Claude Code transcripts, 237,541 turns |
+| where a session's tokens actually go | Bash + Read results **63.8%** of carry | 1,316 Claude Code transcripts, 237,541 turns [^acct] |
 | overwrites byte-identical to what is already on disk | **20.8%** (154/741) — the guard denies them | same corpus |
 | one terseness sentence vs no instruction | **−22.7%** output tokens, facts kept 100% | pre-registered A/B, 16 pairs |
 | the same intent as a 4.7 kB always-on block | **−0.8%** over the sentence, p = 0.86 | pre-registered A/B |
 | observer added to a model's context | **0 bytes** | hashed policy tree, 80 transcripts |
 | Hermes unused skill body | **0 bytes** | isolated profile, 11/11 checks |
 | removing one stale hand-copied skill from a real profile | **−251 B per turn** | one machine's configuration, not a product saving |
+
+[^acct]: The **63.8%** is a share and it survives the v1.4.1 accounting correction — re-measured,
+    it moves by 0.047 pp. The **237,541 turns** beside it does not: until v1.4.1 the parsers
+    counted one turn per JSONL record, and Claude Code writes one record per content block, so
+    that count is inflated about 1.95x. It is left as published rather than quietly restated,
+    because its August-2026 corpus no longer exists to recount. Full re-derivation:
+    [docs/MEASUREMENT_CORRECTION_1_4_1.md](docs/MEASUREMENT_CORRECTION_1_4_1.md). Found by
+    [roy-tong](https://github.com/ipeterpetrus/samewrite/issues/1) in public issue #1.
 
 **Overall end-to-end token savings remain `NOT_PROVEN`.** The best measurement is −1.7%, cheaper on
 8 of 10 fixtures at p = 0.109 — smaller than the same rig's variance between two byte-identical
@@ -342,6 +350,8 @@ hooks/write_noop_guard.py   PreToolUse(Write) — deny writes identical to disk
 hooks/install.sh · uninstall.sh   idempotent, foreign-preserving, exact-path ownership; --human-output
 tools/adapters.py           generate adapters/ (AGENTS.md / GEMINI.md form); --check fails CI on drift
 tools/carry.py · skills.py · prefix.py · bashcost.py · b2t_validate.py · extract.py · simulate.py
+tools/msgid.py              one assistant message, however many JSONL records carry it — the
+                            identity law every counter above calls (public issue #1)
                             measure your own transcripts (read-only, stdlib only)
 tools/optimize.py           read those aggregates offline: where cost is concentrated, what moved,
                             and whether anything justifies an experiment — or NO_ACTION
@@ -356,7 +366,7 @@ docs/VNEXT.md               build report · docs/RELEASE_NOTES_1.1.0.md · _1.2.
                             docs/reference-audits/ — nine projects read at pinned commits
 docs/MULTI_AGENT.md         many agents, running all the time · docs/AI_VOS_PROFILE.md (one profile)
 docs/EVIDENCE_CONTRACT_V1_4.md   the frozen contract the kernel implements
-tests/                      1037 assertions in fifteen suites, mutation-tested; CI on Python 3.9 and 3.12
+tests/                      1066 assertions in sixteen suites, mutation-tested; CI on Python 3.9 and 3.12
                             plus two shell suites: the OpenClaw one-liner's cleanup, the OpenClaw host
 ```
 

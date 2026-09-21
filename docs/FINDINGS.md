@@ -12,6 +12,20 @@ and the old numbers are named so they can be checked against.
 Reproduce: `tools/extract.py` + `tools/simulate.py` for the overwrite analysis,
 `tools/carry.py` for the carry table, `tools/skills.py` for the skill-listing audit.
 
+> **Correction, v1.4.1 — every absolute count on this page is inflated; the shares are not.**
+> Until v1.4.1 the parsers counted one assistant *turn*, and summed `message.usage`, once per
+> JSONL **record**. Claude Code writes one record per content block and repeats the message's
+> id and usage on each, so turns and token totals here are inflated by the mean block
+> multiplicity — **1.95x** measured over 4,143 transcripts. The numbers on this page are left
+> exactly as they were published and are **not** restated: their population (August 2026,
+> 1,316 transcripts) no longer exists to recount. What was re-derived, on the corpus that does
+> exist, is in [MEASUREMENT_CORRECTION_1_4_1.md](MEASUREMENT_CORRECTION_1_4_1.md). Read it
+> before citing any absolute figure below. In short: turn counts and token totals roughly
+> halve, `Bash + Read = 63.8%` and the other carry **shares** move by less than 0.05 pp, and
+> the **741 overwrites / 20.8% byte-identical** figures do not move at all — they are counted
+> per content block, which the correction does not touch. Public issue #1, reported by
+> [roy-tong](https://github.com/ipeterpetrus/samewrite/issues/1).
+
 ## 1. Where the tokens actually go
 
 **Units.** Every "byte" figure in this document is a character count from `len()`, not a

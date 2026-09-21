@@ -37,7 +37,7 @@ def main():
                                     "--allowedTools", "Bash(python3:*),Bash(pytest:*),Read,Edit,Write,Grep,Glob,Skill"],
                                    cwd=d, capture_output=True, text=True, timeout=300, env=env)
                 tp = rp.vn.transcript_for(cfg, d)
-                skills, usage = [], {}
+                skills, usage, led = [], {}, rp.msgid.Ledger()
                 if tp:
                     for line in open(tp, errors="replace"):
                         try:
@@ -45,7 +45,8 @@ def main():
                         except Exception:
                             continue
                         if o.get("type") == "assistant":
-                            u = (o.get("message") or {}).get("usage") or {}
+                            u = (o.get("message") or {}).get("usage") or {} \
+                                if led.bill(o.get("message")) else {}
                             for k, v in u.items():
                                 if isinstance(v, (int, float)):        # usage juga memuat objek bersarang
                                     usage[k] = usage.get(k, 0) + v
