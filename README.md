@@ -41,7 +41,7 @@ python3 tools/doctor.py     # what is actually installed, observed rather than a
 
 | host | core skill | unused body | host-specific extras | observer | tested against |
 |---|---|---|---|---|---|
-| Claude Code | **VERIFIED** | 0 B body · 415 B listing | write no-op guard, optional output sentence | generic offline | 2.1.271 |
+| Claude Code | **VERIFIED** | 0 B body · 405-char listing entry[^listing] | write no-op guard, optional output sentence | generic offline | skill/routing surface 2.1.278; hook acceptance 2.1.271 |
 | Codex | **VERIFIED** | `NOT_OBSERVABLE` | native plugin, no hooks | generic offline | codex-cli 0.153.2 |
 | Hermes Agent | **VERIFIED** | 0 B body · 80 B listing | none | `DEFERRED_BY_SCOPE` | 0.21.3 / `437116f` |
 | OpenClaw | **VERIFIED** | 0 B body · ~440 B catalog | none | `UNTESTED` | 2026.9.4 / `388f57a` |
@@ -119,6 +119,8 @@ no file: a shadow that failed the run would already be a decision.
 | Hermes unused skill body | **0 bytes** | isolated profile, 11/11 checks |
 | removing one stale hand-copied skill from a real profile | **−251 B per turn** | one machine's configuration, not a product saving |
 
+[^listing]: Three different quantities, kept apart. The frontmatter **description** is **391 characters / 393 UTF-8 bytes**. The **listing entry** — the `- samewrite: …` line the host injects, measured the way `tools/skills.py` measures every entry — is **405 characters / 407 UTF-8 bytes**, observed in an isolated Claude Code 2.1.278 configuration. The 415 this table carried before was the same measurement taken against an earlier description; the method is unchanged, the description is not.
+
 [^acct]: The **63.8%** is a share and it survives the v1.4.1 accounting correction — re-measured,
     it moves by 0.047 pp. The **237,541 turns** beside it does not: until v1.4.1 the parsers
     counted one turn per JSONL record, and Claude Code writes one record per content block, so
@@ -174,8 +176,8 @@ Three channels, honestly labelled:
 
 | channel | always on? | measured behaviour |
 |---|---|---|
-| listing description | yes, every turn (~370 chars) | routing hint; the only always-on text |
-| `SKILL.md` body | no — loads on `/samewrite` or when the model invokes it | in 256 headless runs the model never invoked it on its own; `/samewrite` loads it every time |
+| listing description | host-provided discovery surface; present while the host keeps that listing (391 chars) | routing hint; the only text SameWrite puts in front of the model by default. Not a permanent post-compaction guarantee — what the host does to the listing after an auto-compact is untested here |
+| `SKILL.md` body | no — loads on `/samewrite` or when the model invokes it | `/samewrite` is a **deterministic load**, not a promise of better results: it loaded the body on 16 of 16 measured runs, while implicit invocation fired roughly once in seventy opportunities ([C3](docs/C3_ROUTING_EXPERIMENT_v1_4_1.md)) |
 | deterministic hooks | opt-in, separate install | the no-op-write guard; the optional one-sentence output hook |
 
 `edit-discipline`, the 1.0.0 skill, is a hidden compatibility alias (`disable-model-invocation`): it
@@ -206,12 +208,13 @@ token-efficiency claim that has never been allowed to fail is not evidence.
 
 | experiment | result | kept because |
 |---|---|---|
-| a 4.7 kB always-on instruction block vs one sentence | **−0.8%, p = 0.86** — the big block bought nothing | it is the reason the skill body is on-demand and the listing entry is 415 bytes |
+| a 4.7 kB always-on instruction block vs one sentence | **−0.8%, p = 0.86** — the big block bought nothing | it is the reason the skill body is on-demand and the listing entry is 405 characters |
 | the optional human-output hook | **NOT_PROVEN** over 256 pre-registered runs | it stayed opt-in and off by default instead of shipping on a hunch |
 | vNext cost improvement over the previous skill | **within noise** | correctness was non-inferior, so the release shipped on correctness, not on a cost claim |
 | `bash-output-shaping`, the strongest candidate the optimizer found | **REJECTED — duplicated by platform behaviour** | 30,731 real Bash results: median 449 B, p90 2,246 B, **none above 30 kB**. The host already caps and spills to a file. See [docs/CANDIDATES.md](docs/CANDIDATES.md) |
 | the AI-VOS role matrix, 80 runs on Opus 5 | **NOT_PROVEN** | two byte-identical arms differed by more than any effect measured, so the honest answer is that this rig cannot resolve it at this sample size |
 | a persistent status-reporting rule, 130 runs on Opus 5 | **NOT_PROMOTED** | we tested whether one sentence could reduce unsupported success claims. It did not meet the pre-registered threshold, so no rule shipped. The baseline was already 4/24, and the remaining failures clustered in evidence *sampling* — truncated output, version mismatch, conflicting state — not in wording. See [experiments/truth/RESULTS.md](experiments/truth/RESULTS.md) |
+| trigger-first routing description, 199 runs on Claude Haiku 4.5 and Sonnet 5 | **KEEP_CURRENT_DESCRIPTION** — **0.0 pp** routing change | a pure 391-character reorder moved implicit loading by nothing at all across 148 scored runs, against a byte-identical null control, in the tested headless configuration. Under a crowded listing the host strips the whole description to a bare name, so ordering has nothing left to act on. v1.5 is not justified by this experiment. See [docs/C3_ROUTING_EXPERIMENT_v1_4_1.md](docs/C3_ROUTING_EXPERIMENT_v1_4_1.md) |
 
 ## How it compares
 
@@ -224,7 +227,7 @@ Legend: ● audited yes · ○ audited no · – not in the audit
 
 | | primary job | always-on cost | mech. hooks | measures itself | evidence loop | presentation | build minimalism | tool-output filtering | symbol navigation | per-scope isolation |
 |---|---|---|---|---|---|---|---|---|---|---|
-| **samewrite** | cheapest correct, verified change | **415 B** (measured) | ● `PreToolUse(Write)` deny-if-identical | ● pre-registered, scorers self-tested, in CI | ● offline, proposes only | ● one output rule | ○ | ○ | ○ | ● scope / workload |
+| **samewrite** | cheapest correct, verified change | **407 B** (measured)[^listing] | ● `PreToolUse(Write)` deny-if-identical | ● pre-registered, scorers self-tested, in CI | ● offline, proposes only | ● one output rule | ○ | ○ | ○ | ● scope / workload |
 | [Ponytail](https://github.com/DietrichGebert/ponytail) | YAGNI build ladder | 6,637 B file; injected subset – | ○ text injection only | ● 3 arms × 5 tasks × 3 models, scorer self-test in CI | – | ● self-limited | ● 7-rung ladder | – | – | ○ propagates, not isolates |
 | [i-have-adhd](https://github.com/ayghri/i-have-adhd) | ADHD-shaped answers | 7,207 B file; **zero unless a flag file exists** | ○ SessionStart only | ● 84 judged rows; its own gate says FAILED | – | ● | – | ○ | – | ○ no subagent propagation |
 | [Caveman](https://github.com/JuliusBrussee/caveman) | terse prose | ~1–1.5k tok/turn (**upstream's own caveat**) | ○ injection + mode regex | ● 3 arms, tiktoken; scorer not self-tested | – | ● | ● separate skill | – | – | per-session |
@@ -242,7 +245,7 @@ Three things this table will not do:
   until you run `tests/` and `experiments/` yourself, which is why both ship.
 - **Treat a file size as a context cost.** Caveman's 7.0 kB and Ponytail's 6.6 kB skill files are
   *level-filtered before injection*, and neither audit gives the filtered size. Only samewrite's
-  415 B and superpowers' 3,308 B are measured injected bytes.
+  407 B and superpowers' 3,308 B are measured injected bytes.
 - **Hide the audits' limits.** Seven of eight are `SCOPED`: they did not read every file. Only the
   i-have-adhd audit is `FULL`. Caveman's proxy directories — exactly where its −33% input-token
   claim would live — were not opened.
