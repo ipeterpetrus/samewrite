@@ -67,3 +67,15 @@ S_LOCK     ALREADY_RUNNING      exit 41  files 0  comparable 6   (already correc
 ## 3. Deviations from the frozen expectations
 
 None.
+
+## 4. Cases added AFTER the freeze
+
+Not changed expectations — new rows, each from an attack on the repair itself rather than on the
+original defect. They are listed separately so the frozen matrix stays readable as what it was.
+
+| case | fixture | expectation |
+|---|---|---|
+| **R142_07** | two records sharing one `run_id`, the first `COMPLETE`, the retry `PARTIAL` with `skipped_by_limit=7` | the retry is dropped as an observation and counted, and the quality it reported travels with the record that survives: `PARTIAL_EVIDENCE` / exit 40 / 0 files, `CANDIDATE` with `--accept-partial` |
+| **R142_07b** | `schema_version` of `"2"` (string) or `2.0` (float) | `UNKNOWN` — a version this reader cannot name is not a newer generation to trust |
+| **R142_08** | schema-2 record with zeroed counters and no `sessions` / `turns` / `carry_bytes` at all | `UNKNOWN` — zero counters say nothing went wrong, not that a sweep happened (cross-family review, round 1) |
+| **R142_09** | `--max-files 2` where one of three sources cannot be dated | the datable sources still order by mtime; one unreadable mtime no longer sends the whole selection back to a discovery-order slice (cross-family review, round 1) |
