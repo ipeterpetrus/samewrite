@@ -239,6 +239,54 @@ def main():
     case("U1 (--accept-partial does not rescue it)", old, "PARTIAL_EVIDENCE", 40, 0,
          extra=["--accept-partial"])
 
+    # ---------------------------------------------------------------- a retry cannot launder
+    print("\nR142_07 - a retry cannot upgrade what its own run_id saw")
+    dup = [rec(i, 30.0 + 3.0 * i) for i in range(5)]
+    dup.append(rec(5, 45.0))
+    dup[-1]["run_id"] = "dup"
+    worse = rec(5, 45.0, quality="PARTIAL", skipped=7)
+    worse["run_id"] = "dup"
+    dup.append(worse)
+    hist_path = write(os.path.join(d, "dup.jsonl"), dup)
+    recs, rejected, _lines = optimize.load_history(hist_path)
+    check("the retry is dropped as an observation", len(recs), 6)
+    check("and counted", rejected["duplicate run_id (retry)"], 1)
+    keep, _dropped = optimize.comparable(recs)
+    check("but its quality travels with the record that survived",
+          optimize.history_quality(keep), "PARTIAL")
+    case("R142_07", dup, "PARTIAL_EVIDENCE", 40, 0, history_quality="PARTIAL")
+    case("R142_07 (--accept-partial adopts the bound)", dup, "CANDIDATE", 10, 1,
+         extra=["--accept-partial"])
+    check("a schema_version this reader cannot name is not a newer one",
+          optimize.record_quality(dict(rec(0, 40.0), schema_version="2")), "UNKNOWN")
+    check("nor is a float one",
+          optimize.record_quality(dict(rec(0, 40.0), schema_version=2.0)), "UNKNOWN")
+
+    # ------------------------------------------------- round-1 cross-family review findings
+    print("\nR142_08 - what a record must SHOW before its zeroes mean anything")
+    no_corpus = {"schema_version": 2, "record_type": "carry_run", "ts": TS0,
+                 "evidence_quality": "COMPLETE", "unreadable": 0, "oversize": 0,
+                 "skipped_by_limit": 0, "shares": {"Bash": 60.0, "Read": 40.0},
+                 "bpt": {"Bash": 1.0, "Read": 1.0}}
+    check("zero counters do not say a sweep happened",
+          optimize.record_quality(no_corpus), "UNKNOWN")
+    for missing in ("sessions", "turns", "carry_bytes"):
+        partial_rec = {k: v for k, v in rec(0, 40.0).items() if k != missing}
+        check(f"a record without {missing} cannot attest completeness",
+              optimize.record_quality(partial_rec), "UNKNOWN")
+
+    print("\nR142_09 - one undateable source does not collapse the bound")
+    undated = []
+    for n, name in enumerate(("x.jsonl", "y.jsonl", "z.jsonl")):
+        q = transcript(os.path.join(d, name), turns=5)
+        os.utime(q, (TS0 + n * 1000, TS0 + n * 1000))            # z newest
+        undated.append(q)
+    os.remove(undated[2])                                      # ...and now undateable
+    picked = [os.path.basename(q) for q in carry.bounded_paths(undated, 2)]
+    check("the datable sources still order by mtime", picked, ["y.jsonl", "x.jsonl"])
+    check("and discovery order still does not matter",
+          carry.bounded_paths(list(reversed(undated)), 2), carry.bounded_paths(undated, 2))
+
     # ---------------------------------------------------------------- positive controls
     print("\npositive controls - a gate that refuses everything is not a gate")
     good = [rec(i, 30.0 + 3.0 * i) for i in range(6)]

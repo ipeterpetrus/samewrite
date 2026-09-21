@@ -77,6 +77,9 @@ SCHEMA_WITH_QUALITY = 2          # the first history schema that records how a s
 # The counters every schema-2 record's writer wrote, split by what they mean. Nothing here is
 # invented for an older schema: a record that never carried these cannot be asked to show them,
 # and is UNKNOWN rather than trusted.
+# Set by load_history() when a duplicate run_id shows a worse sweep than the record that survives.
+# It is a private, in-memory annotation; nothing writes it back to a file.
+QUALITY_FLOOR = "_evidence_quality_floor"
 RECORD_LOSS_COUNTERS = ("unreadable", "oversize")
 RECORD_BOUND_COUNTERS = ("skipped_by_limit",)
 RECORD_COUNTERS = RECORD_LOSS_COUNTERS + RECORD_BOUND_COUNTERS
@@ -124,6 +127,12 @@ def _derived_record_quality(rec, schema):
         return "DEGRADED"
     if any(nums.get(k, 0) for k in RECORD_BOUND_COUNTERS):
         return "PARTIAL"
+    if not all(k in nums for k in ("sessions", "turns", "carry_bytes")):
+        # Zero counters say "nothing went wrong"; they do not say a sweep happened. A record whose
+        # corpus fields are absent entirely has a share vector and no population behind it, and
+        # reading its zeroed counters as completeness would trust a measurement nobody took.
+        # (cross-family review, round 1)
+        return "UNKNOWN"
     if schema >= SCHEMA_WITH_QUALITY and not all(k in nums for k in RECORD_COUNTERS):
         return "UNKNOWN"              # claims a completeness it cannot show
     return "COMPLETE"
@@ -142,16 +151,21 @@ def record_quality(rec):
     """
     if not isinstance(rec, dict):
         return "INVALID"
-    try:
-        schema = int(rec.get("schema_version") or 0)
-    except (TypeError, ValueError):
+    schema = rec.get("schema_version", 0)
+    if isinstance(schema, bool) or not isinstance(schema, int):
+        # "2" is a string, 2.0 is a float, True is neither. A version this reader cannot name is
+        # not a newer generation to be trusted; it is an older one to be doubted.
         schema = 0
     claimed = rec.get("evidence_quality")
     if not isinstance(claimed, str) or claimed not in QUALITY_RANK:
         claimed = "UNKNOWN"
     if schema < SCHEMA_WITH_QUALITY:
         claimed = "UNKNOWN"
-    return worst_quality([claimed, _derived_record_quality(rec, schema)])
+    qualities = [claimed, _derived_record_quality(rec, schema)]
+    floor = rec.get(QUALITY_FLOOR)
+    if floor:                         # absent is not UNKNOWN: most records carry no floor at all
+        qualities.append(floor)
+    return worst_quality(qualities)
 
 
 def sweep_quality(live):
@@ -310,14 +324,23 @@ def load_history(path):
                 continue
             ok, why = valid_record(o)
             (recs.append(o) if ok else rejected.__setitem__(why, rejected[why] + 1))
-    seen, uniq = set(), []
+    seen, uniq = {}, []
     for r in recs:
         rid = r.get("run_id")
         if isinstance(rid, str) and rid:
             if rid in seen:
                 rejected["duplicate run_id (retry)"] += 1
+                # The retry is dropped as an OBSERVATION, never as provenance. One run_id that
+                # says COMPLETE once and PARTIAL once cannot be resolved in favour of the better
+                # claim: the sweep that reported less is part of what this id actually saw, and
+                # keeping the better one would let a retry launder a bounded sweep into a
+                # complete one. The floor travels with the record the law already reads.
+                kept = seen[rid]
+                worse = worst_quality([record_quality(kept), record_quality(r)])
+                if worse != record_quality(kept):
+                    kept[QUALITY_FLOOR] = worse
                 continue
-            seen.add(rid)
+            seen[rid] = r
         uniq.append(r)
     return uniq, rejected, lines
 

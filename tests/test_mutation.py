@@ -670,6 +670,28 @@ CASES = [
      assert [x["state"] for x in g] == ["CANDIDATE"], [x["state"] for x in g]
      """),
 
+
+    ("M_DEDUP_LAUNDERS: retry dgn run_id sama tak boleh menaikkan kualitas yang bertahan",
+     [("optimize.py", """                kept = seen[rid]
+                worse = worst_quality([record_quality(kept), record_quality(r)])
+                if worse != record_quality(kept):
+                    kept[QUALITY_FLOOR] = worse
+                continue""",
+       "                continue")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="d")
+             for i in range(5)]
+     good = rec(100 + 5 * 604800, {"Bash": 45.0, "Read": 55.0}, scope="d", run_id="dup")
+     bad = rec(100 + 5 * 604800, {"Bash": 45.0, "Read": 55.0}, scope="d", run_id="dup")
+     bad["evidence_quality"] = "PARTIAL"
+     bad["skipped_by_limit"] = 7
+     p = w(os.path.join(D, "dup.jsonl"), rows + [good, bad])
+     recs, rej, _ = optimize.load_history(p)
+     keep, _d = optimize.comparable(recs)
+     q = optimize.history_quality(keep)
+     assert q == "PARTIAL", q
+     """),
+
 ]
 
 

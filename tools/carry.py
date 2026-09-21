@@ -253,11 +253,18 @@ def bounded_paths(paths, max_files):
     paths = list(paths)
     if not max_files or len(paths) <= max_files:
         return paths
-    try:
-        return sorted(paths, key=lambda q: os.path.getmtime(q), reverse=True)[:max_files]
-    except OSError:
-        # A path that lost its mtime cannot order the sample; the bound still has to hold.
-        return paths[:max_files]
+
+    def age(q):
+        # Per SOURCE, not per sweep: one file whose mtime cannot be read used to send the whole
+        # selection back to a discovery-order slice, which is the very sample this function
+        # exists to avoid. A source that cannot be dated simply cannot claim to be the newest.
+        # (cross-family review, round 1)
+        try:
+            return os.path.getmtime(q)
+        except OSError:
+            return float("-inf")
+
+    return sorted(paths, key=age, reverse=True)[:max_files]
 
 
 def sweep_label(facts):
