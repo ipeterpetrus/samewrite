@@ -114,8 +114,15 @@ def scan_full(path):
         kind, msg = o.get("type"), o.get("message")
         if kind == "assistant" and isinstance(msg, dict):
             # A message split across records repeats its id and its usage on every one of
-            # them. `t` is THIS message's turn — which is not always the newest one, because
-            # a record of an older message can reappear after a newer message opened.
+            # them: one turn, one bill. `observe` opens that turn on the message's FIRST
+            # record, with or without usage, so a block never lands on the turn before it.
+            #
+            # Items are then indexed by `turn`, the NEWEST turn open — not by the message's
+            # own turn. carry is a REPLAY cost: an item is billed on every turn after the
+            # one it entered the context on, so its index has to be where it entered the
+            # FILE. For the 3-in-197,127 records that belong to a message a newer one has
+            # already overtaken, indexing by the message's turn would move the item earlier
+            # than it was ever sent and overstate its carry. `out_of_order` counts them.
             t, billed = ledger.observe(msg)
             turn = max(turn, t)
             if billed:
@@ -129,11 +136,11 @@ def scan_full(path):
                 if not isinstance(c, dict):
                     continue
                 if c.get("type") == "text":
-                    items.append((t, len(c.get("text", "")), "prose"))
+                    items.append((turn, len(c.get("text", "")), "prose"))
                 elif c.get("type") == "tool_use":
                     name = c.get("name") or "?"
                     id2name[c.get("id")] = name
-                    items.append((t, len(json.dumps(c.get("input") or {},
+                    items.append((turn, len(json.dumps(c.get("input") or {},
                                                        ensure_ascii=False)), "call:" + name))
         elif kind == "user" and isinstance(msg, dict):
             content = msg.get("content")
@@ -315,8 +322,9 @@ def _identity_notes(a):
     promises these are surfaced, so this is what makes that sentence true."""
     out = []
     if a.get("usage_conflicts"):
-        out.append(f"\n**{a['usage_conflicts']:,} message(s) carried DIFFERING usage on "
-                   "records sharing one `message.id`.** This build bills the first copy. "
+        out.append(f"\n**{a['usage_conflicts']:,} record(s) carried usage DIFFERING from "
+                   "the copy already billed for their `message.id`.** This build bills the "
+                   "first copy. "
                    "Every copy was identical in the corpus this rule was measured on, so a "
                    "non-zero count here means the transcript format changed and the token "
                    "totals above need re-deriving, not reading.")
@@ -383,7 +391,6 @@ def render(a, markdown=False, b2t=None):
         out.append("\nShares are immune to the bytes-per-token constant; absolute token "
                    "figures are not. Measure yours with `tools/b2t_validate.py` and pass "
                    "`--b2t` if you want a token column.")
-        out += _identity_notes(a)
     else:
         out.append(f"# sessions={a['sessions']} turns={T:,} median_turns={med} "
                    f"carry_bytes={C:,}"
@@ -408,6 +415,7 @@ def render(a, markdown=False, b2t=None):
             out.append("  carry in BYTES. Shares above are immune to the bytes-per-token "
                        "constant; token figures are not.")
             out.append("  Measure yours: tools/b2t_validate.py — then pass --b2t <bytes-per-token>.")
+    out += _identity_notes(a)   # both branches: a private counter is an unchecked one
     return "\n".join(out) + "\n"
 
 

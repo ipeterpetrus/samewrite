@@ -68,7 +68,10 @@ def turns_with_usage(path):
         return 0
     with fh:
         for line in fh:
-            if '"usage"' not in line:
+            # No cheap substring filter. A turn opens on a message's FIRST record, and that
+            # record need not carry usage — skipping it here would count a different number
+            # of turns than carry.py does, and this function exists to match carry.py.
+            if '"assistant"' not in line:
                 continue
             try:
                 o = json.loads(line)

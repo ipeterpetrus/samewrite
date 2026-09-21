@@ -44,16 +44,22 @@ ask has an answer: the copies are not provisional-then-final, they are identical
   fallback is kept rather than removed: it is what makes those fixtures still mean what they
   meant.
 - **turn** — one per identity, opened by the **first record that carries the identity**,
-  whether or not that record carries usage. Every block of the message belongs to that turn,
-  including a block on a record that arrives before the usage does, and including a record of
-  an older message that reappears after a newer one has opened.
+  whether or not that record carries usage. A block on a record that arrives before the usage
+  does therefore lands on its own message's turn rather than on the one before it.
+- **item position** — by where the item entered the **file**, not by which message owns it.
+  carry is a replay cost: an item is billed on every turn after the one it was sent on. For
+  the 3-in-197,127 records belonging to a message that a newer one has already overtaken,
+  indexing the item at its message's turn would move it earlier than it was ever sent and
+  overstate its carry. Identity governs the turn COUNT and the BILL; file order governs
+  position. A second review round moved this line, after the first fix put those blocks back
+  on their message's turn and a reviewer asked what carry is actually measuring.
 - **usage** — billed once per identity, from the first record that carries it. All observed
   copies are identical, so first and last are the same number today; `usage_conflicts` counts
   the day that stops being true instead of silently picking a winner.
 - **blocks** — *not* deduplicated. Identity is a message-level law. The prose block and the
   tool_use block of one message remain two items, and both belong to that message's turn.
 
-`tests/test_multiblock.py` (39 assertions) pins all four, including two mutation oracles: an
+`tests/test_multiblock.py` (40 assertions) pins all four, including two mutation oracles: an
 identity function that returns `None` (dedup removed) and one that returns a constant
 (distinct messages collapsed) must each turn the suite red.
 
@@ -85,6 +91,28 @@ Both are now fixed by making the Ledger own turn numbering (`observe()` returns 
 record's blocks belong to) rather than letting each caller keep a counter, and both have
 assertions that fail on the old behaviour. The second shape is measured at 3 of 197,127
 message openings on this corpus, all in one transcript — rare, and real.
+
+A second, confirmation round on the fixed code closed both ordering findings and found two
+more, both now fixed: `carry.render` printed the identity notes only on its markdown branch,
+so the default CLI output never showed them; and `tools/prefix.py` kept a
+`'"usage"' not in line` prefilter, which skipped exactly the usage-less first record that now
+opens a turn — so its turn count no longer matched `carry.py`, which is the one thing that
+function exists to do.
+
+Two findings are NOT code-fixed, and are stated here rather than closed quietly:
+
+- **Two genuinely different messages sharing one `message.id` merge into one.** No transcript
+  can distinguish that from one message written twice. The law assumes vendor ids identify a
+  message. `out_of_order` catches the non-adjacent form (and an anonymous record now breaks
+  adjacency too, so `X → anonymous → X` is counted); a consecutive collision would not be
+  caught at all.
+- **A provisional-then-final usage pair would bill the provisional copy.** First-wins is what
+  the measurement supports — 0 differing copies in 127,934 multi-record messages — and
+  switching to last-wins on zero evidence would be a guess. What the fix owes is visibility,
+  and that is now real: `usage_conflicts` is aggregated and printed in both output modes.
+
+Both are residual HIGHs by the reviewer's rating. They are open, on purpose, with an
+observable each.
 
 The same review is why the equivalence claim in §4 is stated with its scope: forcing
 `identity` to `None` reproduces the pre-fix arithmetic **on transcripts where every assistant
@@ -140,7 +168,7 @@ accounting fix and nothing else.
 | output_tokens | 150,120,545 | 65,969,295 | −84,151,250 | −56.06% | YES |
 | cache_read | 45,182,880,291 | 24,141,034,610 | −21,041,845,681 | −46.57% | YES |
 | cache_creation | 923,794,084 | 388,486,996 | −535,307,088 | −57.95% | YES |
-| carry total | 161,315,792,936 | 90,542,043,126 | −70,773,749,810 | −43.87% | YES |
+| carry total | 161,315,792,936 | 90,542,042,853 | −70,773,750,083 | −43.87% | YES |
 | cache_read share of volume | 97.534% | 98.070% | +0.536 pp | — | marginally |
 | **Bash + Read share of carry** | 68.573% | 68.526% | **−0.047 pp** | — | **no** |
 | Bash bytes/turn | 879.4 | 1,693.1 | +813.7 | +92.5% | YES |

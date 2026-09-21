@@ -219,9 +219,13 @@ def main():
         ])
         N7c, items7c, u7c = carry.scan(p7c)
         check("a reappearing message does not open a third turn", N7c, 2)
-        check("its late block is attributed to ITS turn, not the newest",
+        # carry is a REPLAY cost, so an item is indexed by where it entered the FILE, not
+        # by which message owns it. The late block of mA was sent after mB existed, so it is
+        # replayed from turn 2 on; indexing it at turn 1 would bill it for a turn it was not
+        # in the context for. Identity governs turn COUNT and the BILL, not item position.
+        check("a late block is indexed where it entered the file, not where its message began",
               sorted((n, i) for (i, n, s_) in items7c if s_ == "prose"),
-              [(5, 1), (6, 2), (7, 1)])
+              [(5, 1), (6, 2), (7, 2)])
         check("the reappearing message is still billed once", u7c["output_tokens"], 3)
         _, _, _, meta7c = carry.scan_full(p7c)
         check("out-of-order records are COUNTED, not assumed away",
@@ -239,7 +243,9 @@ def main():
         agg = carry.accumulate([p7d], min_turns=1)
         check("accumulate aggregates the conflict count", agg["usage_conflicts"], 1)
         check("and the report SAYS so rather than keeping it private",
-              "DIFFERING usage" in carry.render(agg, markdown=True), True)
+              "DIFFERING" in carry.render(agg, markdown=True), True)
+        check("and says so in plain-text output too, not only markdown",
+              "DIFFERING" in carry.render(agg, markdown=False), True)
 
         # --- 8. extract.py agrees with carry.py ------------------------------
         e = extract.scan(canonical(d))

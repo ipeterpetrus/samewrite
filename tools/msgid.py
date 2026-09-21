@@ -109,6 +109,7 @@ class Ledger:
         has_u = isinstance(msg, dict) and bool(msg.get("usage"))
         if mid is None:
             self.anonymous += 1
+            self._last = None      # it broke adjacency: a later repeat IS out of order
             if not has_u:
                 return self.turns, False
             self.turns += 1
