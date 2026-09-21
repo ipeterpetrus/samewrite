@@ -49,6 +49,10 @@ jobs:
         run: python3 tests/test_evidence_phase2.py
       - name: offline optimizer (privacy canary, corruption, zero policy mutation)
         run: python3 tests/test_optimize.py
+      - name: legacy evidence integrity - the frozen v1.4.2 counterexample matrix
+        # Ambiguous, incomplete, invalid, non-comparable or host-shifted evidence must not produce
+        # a candidate specification unless the bounded-evidence exception was explicitly asked for.
+        run: python3 tests/test_evidence_integrity.py
       - name: the 1.4.0 release ships shadow evaluation and nothing that writes
         # Sebuah rilis paling mudah "menyalakan" sesuatu tanpa sengaja saat versinya dinaikkan.
         # Suite ini yang membuat kalimat "promotion/persistence tidak aktif" bisa diperiksa.

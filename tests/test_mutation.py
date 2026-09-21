@@ -41,9 +41,12 @@ def oracle(toolsdir, body):
                     "unreadable": 0, "oversize": 0, "skipped_by_limit": 0, "quality": quality,
                     "carry": collections.Counter(carry_map or {{"Bash": 90, "Read": 10}})}}
         def rec(ts, shares, scope="default", turns=1000, run_id=None):
+            # acquisition counters included: since 1.4.2 a record claiming COMPLETE without the
+            # counters its writer always wrote is UNKNOWN, and UNKNOWN cannot promote
             return {{"schema_version": 2, "record_type": "carry_run", "ts": ts, "sessions": 40,
                     "turns": turns, "carry_bytes": 10**7, "scope_id": scope, "workload_class": "",
                     "evidence_quality": "COMPLETE", "run_id": run_id or carry.new_run_id(),
+                    "scanned": 100, "unreadable": 0, "oversize": 0, "skipped_by_limit": 0,
                     "shares": shares, "bpt": {{k: 1.0 for k in shares}}}}
         def w(path, rows):
             with open(path, "w", encoding="utf-8") as fh:
@@ -122,7 +125,7 @@ CASES = [
      """),
 
     ("fail-closed: bukti PARTIAL tak boleh melahirkan kandidat",
-     [("optimize.py", 'usable = accept_partial or quality == "COMPLETE"', "usable = True")],
+     [("optimize.py", "usable = may_promote(quality, accept_partial)", "usable = True")],
      """
      f = optimize.analyse(acc(quality="PARTIAL"), EMPTY_HIST, None, None, scope="s")
      assert [x["state"] for x in f] == ["OBSERVED"], "kandidat lahir dari sapuan setengah jadi"
@@ -148,8 +151,8 @@ CASES = [
      """
      f = optimize.analyse(acc(), EMPTY_HIST, None, None, scope="x")[0]
      out = os.path.join(D, "c")
-     optimize.emit_candidates([f], out)
-     w2, e2, _ = optimize.emit_candidates([f], out)
+     optimize.emit_candidates([f], out, "CANDIDATE")
+     w2, e2, _ = optimize.emit_candidates([f], out, "CANDIDATE")
      assert (len(w2), len(e2)) == (0, 1), "penjadwal menulis ulang usulan yang sama tiap siklus"
      """),
 
@@ -375,8 +378,8 @@ CASES = [
      """),
 
     ("identitas tren stabil: jendela membesar bukan usulan baru",
-     [("optimize.py", "                                   bucket=1 if per_month > 0 else -1,",
-       "                                   bucket=bucket_of(abs(per_month)),")],
+     [("optimize.py", "            direction = 1 if per_month > 0 else -1",
+       "            direction = bucket_of(abs(per_month))")],
      """
      # Deret harus NAIK lalu MENDATAR. Deret linier sempurna punya kemiringan yang sama di
      # jendela mana pun, jadi ia tak bisa membedakan identitas-dari-arah dari
@@ -538,6 +541,135 @@ CASES = [
      c = evidence_history.read_container(p)
      assert c.lines_rejected == 1, c.lines_rejected
      """),
+
+    # ------------------------------------ v1.4.2: the legacy optimizer's evidence-integrity gate
+    ("M_PARTIAL_PROMOTES: riwayat PARTIAL tak boleh dipromosikan tanpa izin eksplisit",
+     [("optimize.py",
+       'return quality == "COMPLETE" or (quality == "PARTIAL" and bool(accept_partial))',
+       "return True")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="p")
+             for i in range(6)]
+     for r in rows:
+         r["evidence_quality"] = "PARTIAL"
+         r["skipped_by_limit"] = 5
+     keep, dropped = optimize.comparable(rows)
+     h = {"comparable": keep, "total": 6, "in_scope": 6, "rejected": {}, "dropped": dropped,
+          "time_order": "ok"}
+     f = optimize.analyse(None, h, None, None, scope="p")
+     assert [x["state"] for x in f] == ["OBSERVED"], [x["state"] for x in f]
+     st = optimize.overall_status(f, h, None, optimize.population(keep), False)
+     assert st == "PARTIAL_EVIDENCE", st
+     """),
+
+    ("M_INVALID_ANCHOR: jangkar komparabilitas hanya dari rekaman yang lolos filternya sendiri",
+     [("optimize.py",
+       'usable = [r for r in recs if record_quality(r) not in ("INVALID", "EMPTY")]',
+       "usable = list(recs)")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a")
+             for i in range(6)]
+     bad = rec(100 + 9 * 604800, {"Bash": 55.0, "Read": 45.0}, scope="a", turns=100000)
+     bad["evidence_quality"] = "INVALID"
+     bad["sessions"] = 0
+     keep, _d = optimize.comparable(rows + [bad])
+     assert len(keep) == 6, len(keep)
+     """),
+
+    ("M_HOST_SHIFT_WRITES: status yang menolak promosi tidak menulis berkas",
+     [("optimize.py", '    if status != "CANDIDATE":\n        return written, existing, failed\n',
+       "")],
+     """
+     f = optimize.finding("x", "CANDIDATE", "h", "e", scope="s", bucket=1)
+     out = os.path.join(D, "gate")
+     for st in ("HOST_BEHAVIOR_SHIFT", "PARTIAL_EVIDENCE", "INSUFFICIENT_DATA", "ALREADY_RUNNING"):
+         w, e, fail = optimize.emit_candidates([f], out, st)
+         assert (w, e, fail) == ([], [], []), (st, w, e, fail)
+         assert not os.path.exists(out), st
+     w, e, fail = optimize.emit_candidates([f], out, "CANDIDATE")
+     assert len(w) == 1, (w, e, fail)
+     """),
+
+    ("M_MALFORMED_COMPLETE: transcript dengan baris JSON robek bukan sapuan COMPLETE",
+     [("carry.py",
+       'LOSS_FIELDS = ("unreadable", "oversize", "malformed", "identity_changed", "conflicted_sources")',
+       'LOSS_FIELDS = ("unreadable", "oversize", "identity_changed", "conflicted_sources")')],
+     """
+     d = tempfile.mkdtemp()
+     p = os.path.join(d, "t.jsonl")
+     rows = []
+     for t in range(30):
+         rows.append(json.dumps({"type": "assistant", "message": {"id": "m%d" % t,
+                     "usage": {"output_tokens": 5},
+                     "content": [{"type": "tool_use", "name": "Bash",
+                                  "input": {"command": "ls"}}]}}))
+         rows.append(json.dumps({"type": "user", "message": {
+                     "content": [{"type": "tool_result", "content": "o" * 200}]}}))
+     rows[11] = chr(123) + '"type": "assistant", "message": {"usage": {"out'
+     open(p, "w").write(chr(10).join(rows) + chr(10))
+     a = carry.accumulate([p], min_turns=1)
+     assert a["malformed"] == 1, a["malformed"]
+     assert a["quality"] != "COMPLETE", a["quality"]
+     assert optimize.sweep_quality(a) == "DEGRADED", optimize.sweep_quality(a)
+     """),
+
+    ("M_BOUND_SAMPLE_DIVERGES: sapuan dan pindaian listing memakai sampel terbatas yang SAMA",
+     [("optimize.py",
+       "listing, uses, sess = skills_tool.scan(carry.bounded_paths(paths, a.max_files))",
+       "listing, uses, sess = skills_tool.scan(paths[:a.max_files] if a.max_files else paths)")],
+     """
+     import subprocess
+     d = tempfile.mkdtemp()
+     paths = []
+     for n, name in enumerate(("a.jsonl", "b.jsonl", "c.jsonl")):
+         q = os.path.join(d, name)
+         rows = []
+         if name == "a.jsonl":
+             rows.append(json.dumps({"type": "user", "attachment": {"type": "skill_listing",
+                         "content": chr(10).join(["- alpha: does a thing described at length",
+                                                  "- beta: does another thing, also at length",
+                                                  ""])}}))
+         for t in range(40):
+             rows.append(json.dumps({"type": "assistant", "message": {"id": "m%d" % t,
+                         "usage": {"output_tokens": 5},
+                         "content": [{"type": "tool_use", "name": "Bash",
+                                      "input": {"command": "ls"}}]}}))
+             rows.append(json.dumps({"type": "user", "message": {
+                         "content": [{"type": "tool_result", "content": "o" * 200}]}}))
+         open(q, "w").write(chr(10).join(rows) + chr(10))
+         os.utime(q, (1750000000 + n * 1000, 1750000000 + n * 1000))
+         paths.append(q)
+     empty = os.path.join(d, "none.jsonl")
+     open(empty, "w").write("")
+     opt = os.path.join(os.path.dirname(carry.__file__), "optimize.py")
+     r = subprocess.run([sys.executable, opt, "--history", empty, "--ledger", empty, "--json",
+                         "--scan"] + paths + ["--max-files", "1", "--min-turns", "1"],
+                        capture_output=True, text=True, timeout=300)
+     j = json.loads(r.stdout)
+     assert j["listing"] is None, j["listing"]
+     r2 = subprocess.run([sys.executable, opt, "--history", empty, "--ledger", empty, "--json",
+                          "--scan"] + paths + ["--min-turns", "1"],
+                         capture_output=True, text=True, timeout=300)
+     assert json.loads(r2.stdout)["listing"], "kontrol: sapuan penuh HARUS membaca listing itu"
+     """),
+
+    ("M_TREND_QUALITY_BYPASS: tren dari riwayat tak layak dilaporkan, bukan dipromosikan",
+     [("optimize.py", "            if not hist_usable:", "            if False:")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="q")
+             for i in range(6)]
+     for r in rows:
+         r["evidence_quality"] = "PARTIAL"
+         r["skipped_by_limit"] = 5
+     keep, dropped = optimize.comparable(rows)
+     h = {"comparable": keep, "total": 6, "in_scope": 6, "rejected": {}, "dropped": dropped,
+          "time_order": "ok"}
+     f = optimize.analyse(None, h, None, None, scope="q")
+     assert [x["state"] for x in f] == ["OBSERVED"], [x["state"] for x in f]
+     g = optimize.analyse(None, h, None, None, scope="q", accept_partial=True)
+     assert [x["state"] for x in g] == ["CANDIDATE"], [x["state"] for x in g]
+     """),
+
 ]
 
 
