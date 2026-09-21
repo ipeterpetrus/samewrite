@@ -77,12 +77,12 @@ SCHEMA_WITH_QUALITY = 2          # the first history schema that records how a s
 # The counters every schema-2 record's writer wrote, split by what they mean. Nothing here is
 # invented for an older schema: a record that never carried these cannot be asked to show them,
 # and is UNKNOWN rather than trusted.
-# Set by load_history() when a duplicate run_id shows a worse sweep than the record that survives.
-# It is a private, in-memory annotation; nothing writes it back to a file.
-QUALITY_FLOOR = "_evidence_quality_floor"
 RECORD_LOSS_COUNTERS = ("unreadable", "oversize")
 RECORD_BOUND_COUNTERS = ("skipped_by_limit",)
 RECORD_COUNTERS = RECORD_LOSS_COUNTERS + RECORD_BOUND_COUNTERS
+# Set by load_history() when a duplicate run_id shows a worse sweep than the record that survives.
+# A private, in-memory annotation; nothing writes it back to a file.
+QUALITY_FLOOR = "_evidence_quality_floor"
 
 
 def worst_quality(qualities):
