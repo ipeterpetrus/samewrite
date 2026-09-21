@@ -976,8 +976,11 @@ def main(argv=None):
     elif recs:
         # Which scope gets analysed is an anchor too: taking the newest record of ANY quality let a
         # single INVALID sweep in another agent's scope send the whole run to a population that was
-        # never going to be analysable. The newest record that can speak chooses; if none can, the
-        # newest record still names a scope, and the status below says why nothing came of it.
+        # never going to be analysable. The newest record that CAN speak chooses.
+        # The fallback names a scope only when NOTHING in the file is eligible — and then there is
+        # no population to strand and nothing that can be promoted: the status is PARTIAL_EVIDENCE
+        # and the emitter is closed. Both halves are pinned by tests (a reviewer read the fallback
+        # as a way back in; it is a label on an empty run, verified by execution).
         anchor = eligible_anchor(recs) or max(recs, key=lambda r: r.get("ts") or 0)
         scope = scope_of(anchor)
         scoped = scopes[scope]

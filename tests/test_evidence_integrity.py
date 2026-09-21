@@ -355,6 +355,18 @@ def main():
     check("and the exit code follows the status", proc.returncode, 50)
     check("the failure is named", len(jf["candidates_failed"]), 1)
 
+    print("\nR142_14 - the scope fallback is a label on an empty run, not a way back in")
+    only_bad = [{"schema_version": 2, "record_type": "carry_run", "ts": TS0, "sessions": 0,
+                 "scanned": 1, "scope_id": "attack", "evidence_quality": "INVALID",
+                 "shares": {"Bash": 100.0}}]
+    j = case("R142_14 (nothing eligible anywhere)", only_bad, "PARTIAL_EVIDENCE", 40, 0,
+             comparable=0)
+    check("the scope it names is the one real record's scope", j["scope"]["analysed"], "attack")
+    prod = [dict(r, scope_id="prod", run_id="prod%d" % i) for i, r in enumerate(good_rows)]
+    j2 = case("R142_14 (an eligible population is never stranded by it)", prod + only_bad,
+              "CANDIDATE", 10, 1, comparable=6)
+    check("and the eligible population chooses the scope", j2["scope"]["analysed"], "prod")
+
     # ---------------------------------------------------------------- positive controls
     print("\npositive controls - a gate that refuses everything is not a gate")
     good = good_rows
