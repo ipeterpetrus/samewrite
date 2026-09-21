@@ -79,7 +79,7 @@ def scan_full(path):
     pass would answer it about a different read. Reading bytes and decoding per line keeps the
     single pass and makes the digest the true one.
     """
-    turn, id2name, items = 0, {}, []
+    turn, id2name, items = 0, {}, []   # `turn` = the latest turn opened, for non-assistant items
     ledger = msgid.Ledger()   # Claude Code writes one record per content block
     usage = collections.Counter()
     runtimes, models = collections.Counter(), collections.Counter()
@@ -113,13 +113,15 @@ def scan_full(path):
 
         kind, msg = o.get("type"), o.get("message")
         if kind == "assistant" and isinstance(msg, dict):
-            # A message split across records repeats its id and its usage on every one
-            # of them. Bill it once; its blocks below still land on this same turn.
-            if ledger.bill(msg):
+            # A message split across records repeats its id and its usage on every one of
+            # them. `t` is THIS message's turn — which is not always the newest one, because
+            # a record of an older message can reappear after a newer message opened.
+            t, billed = ledger.observe(msg)
+            turn = max(turn, t)
+            if billed:
                 m = msg.get("model")
                 if isinstance(m, str) and m:
                     models[m] += 1
-                turn += 1
                 u = msg.get("usage") or {}
                 for k in msgid.USAGE_KEYS:
                     usage[k] += u.get(k) or 0
@@ -127,11 +129,11 @@ def scan_full(path):
                 if not isinstance(c, dict):
                     continue
                 if c.get("type") == "text":
-                    items.append((turn, len(c.get("text", "")), "prose"))
+                    items.append((t, len(c.get("text", "")), "prose"))
                 elif c.get("type") == "tool_use":
                     name = c.get("name") or "?"
                     id2name[c.get("id")] = name
-                    items.append((turn, len(json.dumps(c.get("input") or {},
+                    items.append((t, len(json.dumps(c.get("input") or {},
                                                        ensure_ascii=False)), "call:" + name))
         elif kind == "user" and isinstance(msg, dict):
             content = msg.get("content")
@@ -147,10 +149,11 @@ def scan_full(path):
                     items.append((turn, n, "result:" + str(id2name.get(c.get("tool_use_id")))))
                 elif c.get("type") == "text":
                     items.append((turn, len(c.get("text", "")), "human"))
-    return turn, items, usage, {"runtimes": runtimes, "models": models, "oversize": oversize,
-                                "malformed": malformed, "content": digest.hexdigest(),
-                                "records": ledger.records,
-                                "usage_conflicts": ledger.usage_conflicts}
+    return ledger.turns, items, usage, {
+        "runtimes": runtimes, "models": models, "oversize": oversize,
+        "malformed": malformed, "content": digest.hexdigest(),
+        "records": ledger.records, "usage_conflicts": ledger.usage_conflicts,
+        "out_of_order": ledger.out_of_order}
 
 
 def bucket(src):
@@ -190,6 +193,9 @@ def accumulate(paths, min_turns=50, max_files=0):
     # was selected. `sources` is every source attempted; `parsed` is the subset that was read.
     sources, parsed_files = {}, {}
     malformed = identity_changed = empty_source = vanished = 0
+    # Two assumptions of the message-identity law, counted rather than believed:
+    # a message whose records disagree on usage, and one whose records are not adjacent.
+    usage_conflicts = out_of_order = 0
     # A bound has to mean "the most RECENT N", not "the first N the filesystem listed". An
     # alphabetical prefix of a long-lived archive is a sample of whatever was created first, which
     # for a 24x7 population is the least informative slice there is.
@@ -231,6 +237,8 @@ def accumulate(paths, min_turns=50, max_files=0):
             continue
         oversize += meta.get("oversize", 0)
         malformed += meta.get("malformed", 0)
+        usage_conflicts += meta.get("usage_conflicts", 0)
+        out_of_order += meta.get("out_of_order", 0)
         if N == 0:
             # Read, and it held no turn at all. The contract gives that its OWN outcome, and it
             # is not `parsed`: a source in the manifest is a source something was read FROM, so
@@ -288,7 +296,8 @@ def accumulate(paths, min_turns=50, max_files=0):
                 # what the new record carries, and no record asserts it.
                 sources=sources, parsed=parsed_files, counters=counters,
                 sample_bound=max_files or 0, malformed=malformed,
-                identity_changed=identity_changed, empty_source=empty_source)
+                identity_changed=identity_changed, empty_source=empty_source,
+                usage_conflicts=usage_conflicts, out_of_order=out_of_order)
 
 
 # Relative price of one token in each bucket, base input = 1.0. A bucket's share of the
@@ -297,6 +306,26 @@ def accumulate(paths, min_turns=50, max_files=0):
 # sends you optimising the wrong line.
 PRICE = {"cache_read_input_tokens": 0.1, "cache_creation_input_tokens": 1.25,
          "output_tokens": 5.0, "input_tokens": 1.0}
+
+
+def _identity_notes(a):
+    """The two assumptions of the message-identity law, printed when they are violated.
+
+    A counter nobody prints is a counter nobody checks; the docstring in tools/msgid.py
+    promises these are surfaced, so this is what makes that sentence true."""
+    out = []
+    if a.get("usage_conflicts"):
+        out.append(f"\n**{a['usage_conflicts']:,} message(s) carried DIFFERING usage on "
+                   "records sharing one `message.id`.** This build bills the first copy. "
+                   "Every copy was identical in the corpus this rule was measured on, so a "
+                   "non-zero count here means the transcript format changed and the token "
+                   "totals above need re-deriving, not reading.")
+    if a.get("out_of_order"):
+        out.append(f"\n{a['out_of_order']:,} record(s) belonged to a message that had "
+                   "already been overtaken by a newer one. Their blocks were attributed to "
+                   "their own message's turn, not the newest; the count is here because "
+                   "that attribution is a choice and not an observation.")
+    return out
 
 
 def per_turn(a):
@@ -320,7 +349,11 @@ def render(a, markdown=False, b2t=None):
         return (f"no carry to report: {a['sessions']} session(s) read "
                 f"({a.get('short', 0)} below --min-turns, "
                 f"{a.get('unreadable', 0)} unreadable). "
-                "A session whose every item lands on its final turn carries nothing.\n")
+                "A session whose every item lands on its final turn carries nothing.\n"
+                # A transcript that broke the identity law still broke it when the carry
+                # total happened to be zero, and this is the path a tiny corpus takes.
+                + "".join(_identity_notes(a)) + ("\n" if a.get("usage_conflicts")
+                                                 or a.get("out_of_order") else ""))
     T, out = a["turns"], []
     med = a["lengths"][len(a["lengths"]) // 2]
     U = sum(a["usage"].values()) or 1
@@ -350,6 +383,7 @@ def render(a, markdown=False, b2t=None):
         out.append("\nShares are immune to the bytes-per-token constant; absolute token "
                    "figures are not. Measure yours with `tools/b2t_validate.py` and pass "
                    "`--b2t` if you want a token column.")
+        out += _identity_notes(a)
     else:
         out.append(f"# sessions={a['sessions']} turns={T:,} median_turns={med} "
                    f"carry_bytes={C:,}"

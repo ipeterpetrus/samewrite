@@ -64,8 +64,7 @@ def scan(path):
                 # Hitung turn dengan definisi yang SAMA seperti carry.py: hanya record
                 # assistant yang membawa `usage`. Dua alat di repo yang sama memberi N
                 # berbeda = dua tabel yang tak bisa dibandingkan (review ronde-2).
-                if ledger.bill(m):
-                    N += 1
+                N, _billed = ledger.observe(m)
                 for b in content:
                     if isinstance(b, dict) and b.get("type") == "tool_use" \
                             and b.get("name") == "Bash":
@@ -87,7 +86,7 @@ def scan(path):
     # membuat dua alat melaporkan populasi berbeda atas transkrip yang sama.
     for i, cmd in pend.values():
         rows.append((i, nbytes(cmd), 0, cmd))
-    return N, rows
+    return ledger.turns, rows
 
 
 def accumulate(paths, min_turns=50):

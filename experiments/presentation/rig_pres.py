@@ -116,7 +116,8 @@ def metrics(tp, arm, prompts):
                 cur = {"prompt": c.strip()[:40], "output_tokens": 0, "assistant_msgs": 0}; per_turn.append(cur)
         if t == "assistant":
             u = (o.get("message") or {}).get("usage") or {}
-            if cur is not None and ledger.bill(o.get("message")):
+            billed = ledger.bill(o.get("message"))   # every record, prompt matched or not
+            if cur is not None and billed:
                 cur["output_tokens"] += u.get("output_tokens") or 0; cur["assistant_msgs"] += 1
             for c in (o.get("message") or {}).get("content") or []:
                 if isinstance(c, dict) and c.get("type") == "tool_use":

@@ -24,12 +24,24 @@ THE LAW
              in tests/test_carry.py emit, and keeping their behaviour unchanged is why
              pre-existing fixtures still mean what they meant.
 
-  turn       one per identity, opened by the first record that carries it.
+  turn       one per identity, opened by the FIRST RECORD THAT CARRIES THE IDENTITY --
+             not by the first record that carries usage. Every block of the message then
+             belongs to that turn, including blocks on a record that arrives before the
+             usage does, and including a record of an older message that reappears after a
+             newer one has already opened. Measured: 3 of 197,127 message openings in this
+             corpus are such a reappearance, all in one transcript, so the shape is rare
+             and real; `out_of_order` counts it rather than leaving it to be believed.
 
-  usage      billed once per identity, from the first record that carries it. The
-             corpus shows every copy identical, so "first" and "last" are the same
-             number today; `usage_conflicts` counts the day that stops being true
-             instead of silently picking a winner.
+  usage      billed once per identity, from the first record of it that carries usage. The
+             corpus shows every copy identical, so first and last are the same number
+             today; `usage_conflicts` counts the day that stops being true, and
+             tools/carry.py aggregates it and prints it, so the counter is a signal rather
+             than a private field.
+
+             HONEST LIMIT: two genuinely different messages that shared one id would merge
+             here, and nothing in a transcript could distinguish that from one message
+             written twice. This law assumes vendor message ids identify a message. What it
+             does not do is assume it silently -- a reappearance is counted.
 
   blocks     NOT deduplicated. Identity is a message-level law. The prose block and
              the tool_use block of one message are two distinct items that both belong
@@ -59,52 +71,74 @@ def usage_of(msg):
     return {k: (u.get(k) or 0) for k in USAGE_KEYS}
 
 
-class Ledger:
-    """Answers one question per assistant record: is this the record to bill?
+def _key(msg):
+    u = usage_of(msg)
+    return tuple(u[k] for k in USAGE_KEYS)
 
-    Call `bill(msg)` once per assistant record, in file order. It returns True exactly
-    once per assistant message — on the first record of that message that carries
-    usage — and False for every further record of the same message. Records with no
-    usable identity are each their own message, so legacy and synthetic transcripts
-    keep one-record-one-message.
+
+class Ledger:
+    """Turn numbering and usage billing for one transcript.
+
+    `observe(msg)` once per assistant record, in file order, returns
+    `(turn, bill)`: the turn index this record's CONTENT BLOCKS belong to, and whether
+    this record's usage is the copy to bill. `bill(msg)` is the same call for consumers
+    that only need the second half.
+
+    Records with no usable identity are each their own message and open a turn only when
+    they carry usage -- which is exactly what this repository did before message identity
+    existed, and what tools/make_fixture.py and tests/test_carry.py still emit.
     """
 
-    __slots__ = ("_billed", "messages", "records", "usage_conflicts", "anonymous")
+    __slots__ = ("_turn", "_usage", "_last", "turns", "messages", "records",
+                 "usage_conflicts", "anonymous", "out_of_order")
 
     def __init__(self):
-        self._billed = {}         # identity -> the usage tuple already billed for it
-        self.messages = 0         # assistant messages billed
-        self.records = 0          # assistant records observed
-        self.usage_conflicts = 0  # same identity, different usage — 0 in 127,934 observed
+        self._turn = {}           # identity -> turn index
+        self._usage = {}          # identity -> usage tuple billed, or None if not yet
+        self._last = None         # identity of the previous identified record
+        self.turns = 0
+        self.messages = 0
+        self.records = 0
+        self.usage_conflicts = 0  # same identity, different usage -- 0 in 127,934 observed
         self.anonymous = 0        # records with no usable identity
+        self.out_of_order = 0     # a known identity reappearing after a newer one opened
+
+    def observe(self, msg):
+        self.records += 1
+        mid = identity(msg)
+        has_u = isinstance(msg, dict) and bool(msg.get("usage"))
+        if mid is None:
+            self.anonymous += 1
+            if not has_u:
+                return self.turns, False
+            self.turns += 1
+            self.messages += 1
+            return self.turns, True
+        if mid in self._turn:
+            if self._last != mid:
+                self.out_of_order += 1
+            self._last = mid
+            t = self._turn[mid]
+            if has_u:
+                key = _key(msg)
+                if self._usage.get(mid) is None:
+                    self._usage[mid] = key     # usage arrived on a later record of it
+                    return t, True
+                if self._usage[mid] != key:
+                    self.usage_conflicts += 1
+            return t, False
+        self.turns += 1
+        self.messages += 1
+        self._turn[mid] = self.turns
+        self._last = mid
+        self._usage[mid] = _key(msg) if has_u else None
+        return self.turns, has_u
 
     def bill(self, msg):
-        self.records += 1
-        u = usage_of(msg)
-        key = tuple(u[k] for k in USAGE_KEYS)
-        has_usage = isinstance(msg, dict) and bool(msg.get("usage"))
-        mid = identity(msg)
-        if mid is None:
-            # No identity to merge on. One record, one message — but only a record that
-            # carries usage opens a turn, which is what this repo has always done.
-            if has_usage:
-                self.anonymous += 1
-                self.messages += 1
-                return True
-            return False
-        prev = self._billed.get(mid)
-        if prev is None:
-            # Identity not billed yet. Only a record that carries usage can bill it; a
-            # usage-less first record leaves the message open for a later one.
-            if not has_usage:
-                return False
-            self._billed[mid] = key
-            self.messages += 1
-            return True
-        if has_usage and prev != key:
-            self.usage_conflicts += 1
-        return False
+        """-> True when this record's usage is the copy to bill for its message."""
+        return self.observe(msg)[1]
 
     def stats(self):
-        return {"messages": self.messages, "records": self.records,
-                "usage_conflicts": self.usage_conflicts, "anonymous": self.anonymous}
+        return {"messages": self.messages, "turns": self.turns, "records": self.records,
+                "usage_conflicts": self.usage_conflicts, "anonymous": self.anonymous,
+                "out_of_order": self.out_of_order}

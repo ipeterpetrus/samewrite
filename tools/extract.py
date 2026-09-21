@@ -49,9 +49,9 @@ def scan(path, keep=False):
             continue
         m, t = o.get("message") or {}, o.get("type")
         if t == "assistant" and isinstance(m, dict):
-            # Blocks of one message arrive on separate records; they share its turn.
-            if ledger.bill(m):
-                turn += 1
+            # Blocks of one message arrive on separate records; they share ITS turn, which
+            # is not always the newest one — a record of an older message can reappear.
+            turn, _billed = ledger.observe(m)
             for c in (m.get("content") or []):
                 if not isinstance(c, dict):
                     continue
@@ -72,7 +72,7 @@ def scan(path, keep=False):
                     ct = c.get("content")
                     items.append((turn, len(ct if isinstance(ct, str)
                                             else json.dumps(ct, ensure_ascii=False))))
-    N = turn
+    N = ledger.turns
     return dict(id=os.path.basename(path)[:8], N=N, redacted=not keep,
                 ctx_in=sum(s for _, s in items),
                 carry=sum(s * (N - i) for i, s in items),

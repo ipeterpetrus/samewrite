@@ -43,16 +43,53 @@ ask has an answer: the copies are not provisional-then-final, they are identical
   touch. That is why 1,037 assertions were green over a defect this large, and why the
   fallback is kept rather than removed: it is what makes those fixtures still mean what they
   meant.
-- **turn** — one per identity, opened by the first record that carries usage.
+- **turn** — one per identity, opened by the **first record that carries the identity**,
+  whether or not that record carries usage. Every block of the message belongs to that turn,
+  including a block on a record that arrives before the usage does, and including a record of
+  an older message that reappears after a newer one has opened.
 - **usage** — billed once per identity, from the first record that carries it. All observed
   copies are identical, so first and last are the same number today; `usage_conflicts` counts
   the day that stops being true instead of silently picking a winner.
 - **blocks** — *not* deduplicated. Identity is a message-level law. The prose block and the
   tool_use block of one message remain two items, and both belong to that message's turn.
 
-`tests/test_multiblock.py` (29 assertions) pins all four, including two mutation oracles: an
+`tests/test_multiblock.py` (39 assertions) pins all four, including two mutation oracles: an
 identity function that returns `None` (dedup removed) and one that returns a constant
 (distinct messages collapsed) must each turn the suite red.
+
+### The two assumptions, counted rather than believed
+
+`usage_conflicts` counts a message whose records disagree on usage. `out_of_order` counts a
+message whose records are not adjacent. `carry.accumulate` aggregates both and
+`carry.render` prints them — including on the empty-carry path, because a transcript that
+broke the law still broke it when the carry total happened to be zero. Over the 50+ cohort of
+this host: **usage_conflicts = 0, out_of_order = 1**.
+
+This does not make the law safe against everything. Two genuinely different messages that
+shared one `message.id` would merge here and no transcript could tell that apart from one
+message written twice. The law assumes vendor ids identify a message; what it does not do is
+assume it silently.
+
+### What an adversarial review changed
+
+The first cut of this fix counted turns correctly and still attributed blocks to the wrong
+turn in two shapes, both found by a cross-family review that was asked to break it rather
+than approve it:
+
+- a message whose **first record carried no usage** opened its turn on the second record, so
+  the first record's blocks were attributed to the previous turn — or to turn 0;
+- a message that **reappeared after a newer one had opened** had its late blocks attributed
+  to the newer message's turn.
+
+Both are now fixed by making the Ledger own turn numbering (`observe()` returns the turn a
+record's blocks belong to) rather than letting each caller keep a counter, and both have
+assertions that fail on the old behaviour. The second shape is measured at 3 of 197,127
+message openings on this corpus, all in one transcript — rare, and real.
+
+The same review is why the equivalence claim in §4 is stated with its scope: forcing
+`identity` to `None` reproduces the pre-fix arithmetic **on transcripts where every assistant
+record carries usage**, which is all 377,648 of them here, and is not a universal identity —
+the old code counted a model name on records with no usage, and this one does not.
 
 ## 3. Consumers audited
 
@@ -103,7 +140,7 @@ accounting fix and nothing else.
 | output_tokens | 150,120,545 | 65,969,295 | −84,151,250 | −56.06% | YES |
 | cache_read | 45,182,880,291 | 24,141,034,610 | −21,041,845,681 | −46.57% | YES |
 | cache_creation | 923,794,084 | 388,486,996 | −535,307,088 | −57.95% | YES |
-| carry total | 161,315,792,936 | 90,542,042,853 | −70,773,750,083 | −43.87% | YES |
+| carry total | 161,315,792,936 | 90,542,043,126 | −70,773,749,810 | −43.87% | YES |
 | cache_read share of volume | 97.534% | 98.070% | +0.536 pp | — | marginally |
 | **Bash + Read share of carry** | 68.573% | 68.526% | **−0.047 pp** | — | **no** |
 | Bash bytes/turn | 879.4 | 1,693.1 | +813.7 | +92.5% | YES |

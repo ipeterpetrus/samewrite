@@ -197,6 +197,50 @@ def main():
         check("a message whose usage arrives on a later record is one turn", N7, 1)
         check("that message is billed exactly once", u7["output_tokens"], 9)
 
+        # --- 7b. ordering: a block must land on ITS OWN message's turn ---------
+        # Found by an adversarial cross-family review of the first cut of this fix, which
+        # is why the assertions are about the TURN OF THE ITEM and not only about counts:
+        # the first cut counted turns correctly and still put blocks on the wrong one.
+        p7b = write(d, "order_no_usage_first.jsonl", [
+            rec("m9", [text("z" * 12)], None),
+            rec("m9", [tool("Bash", "b9", {"command": "x"})], usage(3, 3, 3, 3)),
+        ])
+        N7b, items7b, _ = carry.scan(p7b)
+        check("a message opens its turn on its FIRST record, usage or not", N7b, 1)
+        check("a block on the usage-less first record lands on turn 1, not turn 0",
+              [i for (i, n, s_) in items7b if s_ == "prose"], [1])
+
+        # A message that reappears AFTER a newer one has opened. Rare and real: 3 of
+        # 197,127 message openings in this author's corpus, all in one transcript.
+        p7c = write(d, "order_reopen.jsonl", [
+            rec("mA", [text("A" * 5)], usage(1, 1, 1, 1)),
+            rec("mB", [text("B" * 6)], usage(2, 2, 2, 2)),
+            rec("mA", [text("A" * 7)], usage(1, 1, 1, 1)),
+        ])
+        N7c, items7c, u7c = carry.scan(p7c)
+        check("a reappearing message does not open a third turn", N7c, 2)
+        check("its late block is attributed to ITS turn, not the newest",
+              sorted((n, i) for (i, n, s_) in items7c if s_ == "prose"),
+              [(5, 1), (6, 2), (7, 1)])
+        check("the reappearing message is still billed once", u7c["output_tokens"], 3)
+        _, _, _, meta7c = carry.scan_full(p7c)
+        check("out-of-order records are COUNTED, not assumed away",
+              meta7c["out_of_order"], 1)
+
+        # --- 7d. the usage-conflict counter is real and it is surfaced ---------
+        p7d = write(d, "conflict.jsonl", [
+            rec("mC", [text("first")], usage(1, 1, 1, 1)),
+            rec("mC", [tool("Bash", "bc", {"command": "x"})], usage(9, 9, 9, 9)),
+        ])
+        _, _, uc, meta7d = carry.scan_full(p7d)
+        check("records of one message disagreeing on usage raise a conflict",
+              meta7d["usage_conflicts"], 1)
+        check("the first copy is the one billed", uc["output_tokens"], 1)
+        agg = carry.accumulate([p7d], min_turns=1)
+        check("accumulate aggregates the conflict count", agg["usage_conflicts"], 1)
+        check("and the report SAYS so rather than keeping it private",
+              "DIFFERING usage" in carry.render(agg, markdown=True), True)
+
         # --- 8. extract.py agrees with carry.py ------------------------------
         e = extract.scan(canonical(d))
         check("extract.py: N matches the true message count", e["N"], TRUE["turns"])

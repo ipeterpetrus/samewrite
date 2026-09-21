@@ -61,7 +61,6 @@ def turns_with_usage(path):
     """Jumlah turn dengan definisi yang SAMA seperti carry.py: record assistant ber-`usage`.
     Tanpa ini, kohort prefix.py (semua sesi ber-snapshot) tak sebanding dengan kohort
     carry.py (default >= 50 turn) — dan angkanya diperbandingkan orang."""
-    n = 0
     ledger = msgid.Ledger()
     try:
         fh = open(path, encoding="utf-8")
@@ -75,10 +74,9 @@ def turns_with_usage(path):
                 o = json.loads(line)
             except Exception:
                 continue
-            if isinstance(o, dict) and o.get("type") == "assistant" \
-                    and ledger.bill(o.get("message")):
-                n += 1
-    return n
+            if isinstance(o, dict) and o.get("type") == "assistant":
+                ledger.observe(o.get("message"))
+    return ledger.turns
 
 
 def accumulate(paths, min_turns=0):
