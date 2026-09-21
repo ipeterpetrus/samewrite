@@ -1,10 +1,11 @@
 # SameWrite 1.4.1 — release notes
 
-**One sentence.** Every token figure this repository ever published was computed by summing
-`message.usage` once per JSONL record, and a Claude Code transcript writes one record per
-*content block*, so a message that thought, called a tool and wrote prose was billed three
-times and counted as three turns; 1.4.1 makes the accounting message-identity-aware, and makes
-an accounting it cannot determine refuse to produce a number at all.
+**One sentence.** The transcript-derived token and turn measurements this repository published
+were computed by summing `message.usage` once per JSONL record, and a Claude Code transcript
+writes one record per *content block*, so a message that thought, called a tool and wrote prose
+was billed three times and counted as three turns; 1.4.1 makes the accounting
+message-identity-aware, and makes an accounting it cannot determine refuse to produce a number
+at all.
 
 This is a patch release. **The skill body is byte-identical**, its description is unchanged, no
 hook behaviour changed, and nothing new is activated. It exists for the measurement, the
@@ -96,10 +97,20 @@ candidate, and no runtime module branches on the product version.
 ## 4. Measurement impact
 
 **The historical inflation is documented, not silently rewritten.** Re-deriving the author's
-corpus with message identity reduced the turn count by **48.7%** and the carry total by
-**43.9%** against the pre-repair arithmetic. Every number this repository published before
-1.4.1 was computed the old way; `docs/MEASUREMENT_CORRECTION_1_4_1.md` states which of them
-survive, which move, and which are withdrawn.
+corpus with message identity reduced the cohort turn count by **48.7%** and the carry total by
+**43.9%** against the pre-repair arithmetic. The transcript-derived measurements identified in
+`docs/MEASUREMENT_CORRECTION_1_4_1.md` were computed with the old per-record arithmetic; that
+document states which of them survive, which move, which are withdrawn, and which are
+unaffected by construction.
+
+**What the old arithmetic did and did not touch.** Affected: transcript turn counts,
+transcript usage totals, the carry figures derived from those turns, and the experiment cost
+and token measurements taken from transcripts. Not affected, and not claimed here to be:
+canonical hashes and skill bytes; facts counted per *content block*, since content blocks were
+never deduplicated — the overwrite counts and the byte-identical overwrite rate are the same
+before and after, while the turn count over the same sample halves; and correctness scores,
+which are read from diffs and verdicts rather than from token counts. The per-claim table is
+in §5 of the correction document, with an `affected` column stating the verdict for each.
 
 **The H1/H2 hardening on top of that repair changed nothing measurable.** Compared against the
 repaired HEAD over a pinned list of 1,390 transcripts whose size and mtime were re-checked
