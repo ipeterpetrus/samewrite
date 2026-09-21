@@ -692,6 +692,79 @@ CASES = [
      assert q == "PARTIAL", q
      """),
 
+
+    ("M_IMPOSSIBLE_COUNTERS: sesi lebih banyak daripada transcript yang dipindai = mustahil",
+     [("optimize.py", '    if "scanned" in nums and nums["scanned"] < nums.get("sessions", 0):',
+       "    if False:")],
+     """
+     r = rec(100, {"Bash": 60.0, "Read": 40.0})
+     r["scanned"] = 1
+     q = optimize.record_quality(r)
+     assert q == "INVALID", q
+     """),
+
+    ("M_CONTAINER_DAMAGE_IGNORED: baris robek di berkas history menurunkan kualitas evidence",
+     [("optimize.py", '        if count and any(str(reason).startswith(d) for d in CONTAINER_DAMAGE):',
+       "        if False:")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="c")
+             for i in range(6)]
+     p = w(os.path.join(D, "torn_hist.jsonl"),
+           [json.dumps(r) for r in rows] + [chr(123) + '"torn":'])
+     recs, rej, _ = optimize.load_history(p)
+     keep, dropped = optimize.comparable(recs)
+     h = {"comparable": keep, "total": len(recs), "in_scope": len(recs), "rejected": rej,
+          "dropped": dropped, "time_order": "ok"}
+     f = optimize.analyse(None, h, None, None, scope="c")
+     assert [x["state"] for x in f] == ["OBSERVED"], [x["state"] for x in f]
+     st = optimize.overall_status(f, h, None, optimize.population(keep), True)
+     assert st == "PARTIAL_EVIDENCE", st
+     """),
+
+    ("M_LEDGER_TORN_PROMOTES: ledger yang kehilangan baris bukan sampel lapangan",
+     [("optimize.py", """    ledger_usable = (bool(ledger) and ledger.get("writes", 0) >= LEDGER_MIN_WRITES
+                     and not ledger.get("rejected"))""",
+       "    ledger_usable = bool(ledger) and ledger.get(\"writes\", 0) >= LEDGER_MIN_WRITES")],
+     """
+     p = os.path.join(D, "led.jsonl")
+     with open(p, "w") as fh:
+         fh.write(chr(10).join('{"event": "checked"}' for _ in range(100)) + chr(10))
+         fh.write('{"event":' + chr(10))
+     led = optimize.load_ledger(p)
+     assert led["writes"] == 100 and led["rejected"] == 1, led
+     EMPTY = {"comparable": [], "total": 0, "in_scope": 0, "rejected": {}, "dropped": [],
+              "time_order": "ok"}
+     f = optimize.analyse(None, EMPTY, led, None)
+     assert [x["state"] for x in f] == ["OBSERVED"], [x["state"] for x in f]
+     """),
+
+    ("M_EMIT_FAILURE_SILENT: kandidat yang gagal ditulis tak boleh dilaporkan CANDIDATE",
+     [("optimize.py", """                if failed and not written:""", "                if False:")],
+     """
+     import subprocess
+     d = tempfile.mkdtemp()
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="e")
+             for i in range(6)]
+     h = w(os.path.join(d, "h.jsonl"), rows)
+     empty = os.path.join(d, "none.jsonl")
+     open(empty, "w").write("")
+     out = os.path.join(d, "cand")
+     os.makedirs(out)
+     keep, _dr = optimize.comparable(rows)
+     hh = {"comparable": keep, "total": 6, "in_scope": 6, "rejected": {}, "dropped": [],
+           "time_order": "ok"}
+     cid = [x["candidate_id"] for x in optimize.analyse(None, hh, None, None, scope="e")
+            if x["state"] == "CANDIDATE"][0]
+     open(os.path.join(out, cid), "w").write("a file where a directory must go")
+     opt = os.path.join(os.path.dirname(carry.__file__), "optimize.py")
+     r = subprocess.run([sys.executable, opt, "--history", h, "--ledger", empty, "--scan",
+                         "--emit-candidate", out, "--json", "--strict-exit"],
+                        capture_output=True, text=True, timeout=300)
+     j = json.loads(r.stdout)
+     assert j["status"] == "INTERNAL_ERROR", (j["status"], j["candidates_failed"])
+     assert r.returncode == 50, r.returncode
+     """),
+
 ]
 
 

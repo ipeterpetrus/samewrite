@@ -117,8 +117,13 @@ def transcript(path, turns=80, listing=False, torn=False):
     return path
 
 
+EMPTY_HIST = {"comparable": [], "total": 0, "in_scope": 0, "rejected": {}, "dropped": [],
+              "time_order": "ok"}
+
+
 def main():
     d = tempfile.mkdtemp(prefix="sw-142-fx-")
+    good_rows = [rec(i, 30.0 + 3.0 * i) for i in range(6)]
 
     # ---------------------------------------------------------------- the law itself
     print("\nlegacy evidence-quality law")
@@ -287,9 +292,68 @@ def main():
     check("and discovery order still does not matter",
           carry.bounded_paths(list(reversed(undated)), 2), carry.bounded_paths(undated, 2))
 
+    print("\nR142_10 - counters that cannot describe one sweep")
+    check("more sessions than transcripts scanned",
+          optimize.record_quality(rec(0, 40.0, sessions=40, scanned=1)), "INVALID")
+    check("sessions out of a sweep that scanned nothing",
+          optimize.record_quality(rec(0, 40.0, sessions=40, scanned=0)), "INVALID")
+    check("...and the bound flag does not rescue that either",
+          optimize.may_promote(optimize.record_quality(
+              rec(0, 40.0, quality="PARTIAL", sessions=40, scanned=0, skipped=5)), True), False)
+    check("control: sessions within what was scanned",
+          optimize.record_quality(rec(0, 40.0, sessions=40, scanned=40)), "COMPLETE")
+    case("R142_10", [rec(i, 30.0 + 3.0 * i, sessions=40, scanned=1) for i in range(6)],
+         "PARTIAL_EVIDENCE", 40, 0, comparable=0)
+
+    print("\nR142_11 - a torn line in the history file is lost evidence, not a footnote")
+    torn_hist = [json.dumps(r) for r in good_rows] + ['{"torn":']
+    j = case("R142_11", torn_hist, "PARTIAL_EVIDENCE", 40, 0, history_quality="DEGRADED")
+    check("the torn line is still counted", j["history"]["rejected"].get("unparseable line"), 1)
+    case("R142_11 (--accept-partial does not adopt a loss)", torn_hist,
+         "PARTIAL_EVIDENCE", 40, 0, extra=["--accept-partial"])
+    envelope_line = json.dumps({"envelope": {"schema_version": 4, "run_id": "x"},
+                                "payload": {}, "certificate": {}})
+    case("R142_11 control: a refusal by design is not damage",
+         [json.dumps(r) for r in good_rows] + [envelope_line], "CANDIDATE", 10, 1,
+         history_quality="COMPLETE")
+
+    print("\nR142_12 - a ledger that lost a line is not a field sample")
+    ledger_dir = tempfile.mkdtemp(dir=d)
+    clean_ledger = os.path.join(ledger_dir, "clean.jsonl")
+    with open(clean_ledger, "w", encoding="utf-8") as fh:
+        fh.write("\n".join('{"event": "checked"}' for _ in range(100)) + "\n")
+    torn_ledger = os.path.join(ledger_dir, "torn.jsonl")
+    with open(torn_ledger, "w", encoding="utf-8") as fh:
+        fh.write("\n".join('{"event": "checked"}' for _ in range(100)) + "\n" + '{"event":' + "\n")
+    clean = optimize.load_ledger(clean_ledger)
+    lost = optimize.load_ledger(torn_ledger)
+    check("control: a clean sample retires the guard",
+          [f["state"] for f in optimize.analyse(None, dict(EMPTY_HIST), clean, None)], ["CANDIDATE"])
+    check("a sample that lost a line only observes",
+          [f["state"] for f in optimize.analyse(None, dict(EMPTY_HIST), lost, None)], ["OBSERVED"])
+    check("a ledger that exists and cannot be read is not 'no ledger'",
+          (optimize.load_ledger(ledger_dir) or {}).get("rejected"), 1)
+
+    print("\nR142_13 - a status that promised a candidate and could not write one")
+    fail_dir = tempfile.mkdtemp(dir=d)
+    findings = optimize.analyse(None, {"comparable": good_rows, "total": 6, "in_scope": 6,
+                                       "rejected": {}, "dropped": [], "time_order": "ok"},
+                                None, None)
+    blocked = [f["candidate_id"] for f in findings if f["state"] == "CANDIDATE"][0]
+    open(os.path.join(fail_dir, blocked), "w").write("a file where a directory must go")
+    hist_file = write(os.path.join(fail_dir, "h.jsonl"), good_rows)
+    argv = [sys.executable, OPT, "--history", hist_file, "--ledger",
+            os.path.join(fail_dir, "none.jsonl"), "--scan", "--emit-candidate", fail_dir,
+            "--json", "--strict-exit"]
+    proc = subprocess.run(argv, capture_output=True, text=True, timeout=300)
+    jf = json.loads(proc.stdout)
+    check("nothing landed, so the status does not claim it did", jf["status"], "INTERNAL_ERROR")
+    check("and the exit code follows the status", proc.returncode, 50)
+    check("the failure is named", len(jf["candidates_failed"]), 1)
+
     # ---------------------------------------------------------------- positive controls
     print("\npositive controls - a gate that refuses everything is not a gate")
-    good = [rec(i, 30.0 + 3.0 * i) for i in range(6)]
+    good = good_rows
     case("P1 clean COMPLETE population", good, "CANDIDATE", 10, 1, comparable=6,
          history_quality="COMPLETE")
     case("P3 an invalid record in ANOTHER scope does not poison this one",

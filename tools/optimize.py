@@ -123,11 +123,17 @@ def _derived_record_quality(rec, schema):
         # Sessions were counted, so turns were counted and carry was measured. A record reporting
         # sessions with neither is not a quiet sweep, it is an impossible one.
         return "INVALID"
+    if "scanned" in nums and nums["scanned"] < nums.get("sessions", 0):
+        # A session is a transcript that was scanned AND cleared the turn floor, so the producer
+        # can never report more sessions than it scanned. Forty sessions out of one scanned file
+        # is not a sweep that went well; it is a record describing a sweep that cannot have
+        # happened. (cross-family review, round 1)
+        return "INVALID"
     if any(nums.get(k, 0) for k in RECORD_LOSS_COUNTERS):
         return "DEGRADED"
     if any(nums.get(k, 0) for k in RECORD_BOUND_COUNTERS):
         return "PARTIAL"
-    if not all(k in nums for k in ("sessions", "turns", "carry_bytes")):
+    if not all(k in nums for k in ("sessions", "turns", "carry_bytes", "scanned")):
         # Zero counters say "nothing went wrong"; they do not say a sweep happened. A record whose
         # corpus fields are absent entirely has a share vector and no population behind it, and
         # reading its zeroed counters as completeness would trust a measurement nobody took.
@@ -189,6 +195,28 @@ def sweep_quality(live):
     elif any(live.get(k) for k in carry.BOUND_FIELDS):
         derived = "PARTIAL"
     return worst_quality([claimed, derived])
+
+
+# Reasons load_history() counts that mean a record EXISTED and could not be read as one. A
+# refusal by design (current-generation evidence this optimizer does not read) and a deduplicated
+# retry are not damage: the first is a contract, the second is bookkeeping.
+CONTAINER_DAMAGE = ("unparseable line", "record above the size cap", "history unreadable",
+                    "not an object", "no shares", "non-numeric share", "share out of range",
+                    "implausible", "unknown evidence_quality", "unknown record_type")
+
+
+def container_quality(rejected):
+    """What the history FILE itself can attest, separately from the records inside it.
+
+    A torn line in the history is a record that was written and cannot be read — a loss, not a
+    bound, so no flag adopts it. It used to appear only as a line in `history.rejected` while the
+    trend built from the surviving records was promoted as if nothing had been lost.
+    (cross-family review, round 1)
+    """
+    for reason, count in (rejected or {}).items():
+        if count and any(str(reason).startswith(d) for d in CONTAINER_DAMAGE):
+            return "DEGRADED"
+    return "COMPLETE"
 
 
 def history_quality(records):
@@ -449,7 +477,9 @@ def load_ledger(path):
     try:
         fh = open(path, encoding="utf-8", errors="replace")
     except OSError:
-        return None
+        # A ledger that EXISTS and cannot be read is not the same as no ledger at all: the guard's
+        # evidence is missing rather than absent by design, and `rejected` says so.
+        return {"writes": 0, "prevented": 0, "rejected": 1, "rate": 0.0, "unreadable": True}
     with fh:
         for line in fh:
             line = line.strip()
@@ -511,7 +541,8 @@ def analyse(live, hist, ledger, cold, scope="default", accept_partial=False):
     # partial history it never read, and a finding drawing on history is not waved through because
     # today's sweep happened to be clean.
     quality = sweep_quality(live) if live else "COMPLETE"
-    hist_q = history_quality(hist.get("comparable", []))
+    hist_q = worst_quality([history_quality(hist.get("comparable", [])),
+                            container_quality(hist.get("rejected"))])
     usable = may_promote(quality, accept_partial)            # findings that rest on the live sweep
     hist_usable = may_promote(hist_q, accept_partial)        # findings that rest on the history
     run_ids = [r.get("run_id") for r in hist.get("comparable", []) if r.get("run_id")]
@@ -602,7 +633,8 @@ def analyse(live, hist, ledger, cold, scope="default", accept_partial=False):
     #    Its evidence is the hook's OWN ledger — writes it saw, no-ops it prevented — not a sample
     #    of transcripts. No sweep or history quality can make it better or worse, so the eligibility
     #    decision here is explicit and separate: the ledger's own sample size is its gate.
-    ledger_usable = bool(ledger) and ledger.get("writes", 0) >= LEDGER_MIN_WRITES
+    ledger_usable = (bool(ledger) and ledger.get("writes", 0) >= LEDGER_MIN_WRITES
+                     and not ledger.get("rejected"))
     if ledger and ledger["writes"]:
         if ledger["writes"] >= LEDGER_MIN_WRITES:
             if ledger["rate"] >= LEDGER_MIN_NOOP_RATE:
@@ -676,10 +708,13 @@ def overall_status(findings, hist, live, pop, accept_partial):
     if live:
         refused.append(sweep_quality(live))
     comp = hist.get("comparable", [])
+    damage = container_quality(hist.get("rejected"))
     if comp:
-        refused.append(history_quality(comp))
+        refused.append(worst_quality([history_quality(comp), damage]))
     elif any(record_quality(r) in ("INVALID", "EMPTY") for r, _why in hist.get("dropped", [])):
         refused.append("INVALID")
+    elif damage != "COMPLETE":
+        refused.append(damage)
     if any(not may_promote(q, accept_partial) for q in refused):
         return "PARTIAL_EVIDENCE"
     if not live and len(comp) < MIN_HISTORY_FOR_TREND:
@@ -985,6 +1020,12 @@ def main(argv=None):
                 status = "ALREADY_RUNNING"
             else:
                 written, existing, failed = emit_candidates(findings, a.emit_candidate, status)
+                if failed and not written:
+                    # The run promised a candidate and nothing landed — an unwritable directory, a
+                    # path that is a regular file, a full disk. Reporting CANDIDATE and exit 10
+                    # tells a scheduler a specification exists; the status has to say otherwise.
+                    # (cross-family review, round 1)
+                    status = "INTERNAL_ERROR"
 
     if a.json:
         print(json.dumps({
@@ -1001,7 +1042,8 @@ def main(argv=None):
             # here even though the 1.3 label for it is PARTIAL (output_schema_version 2).
             "evidence_quality": sweep_quality(live) if live else "NO_SCAN",
             "history": {"records": len(recs), "comparable": len(keep),
-                        "quality": history_quality(keep),
+                        "quality": worst_quality([history_quality(keep),
+                                                  container_quality(rejected)]),
                         "rejected": dict(rejected), "time_order": hist["time_order"]},
             "ledger": ledger,
             "live": ({"sessions": live["sessions"], "turns": live["turns"], "scanned": live["scanned"],
