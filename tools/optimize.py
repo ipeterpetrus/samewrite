@@ -1072,6 +1072,68 @@ fixtures that were not used to invent the rule, and none of it applied automatic
 """
 
 
+# A candidate_id is a LOGICAL identity: it carries the analysed scope verbatim, because the scope is
+# what the finding is about. It used to be the directory name as well, and a scope is an opaque label
+# nobody ever validated as a path — `x/../../up` put HYPOTHESIS.md outside the --emit-candidate root
+# (issue #15). Identity and storage are two things now; the scope itself is never rewritten.
+STORAGE_HASHED_PREFIX = "candidate-sha256-"
+
+
+def candidate_storage_component(candidate_id):
+    """The ONE directory name a logical candidate_id is stored under -> str | None.
+
+    An id that is already one ordinary pathname component is its own name, byte for byte, so every
+    directory an existing installation holds keeps its path. An id holding a separator of either
+    platform, a dot segment or nothing at all is stored under the SHA-256 of the COMPLETE id:
+    deterministic, so an existing candidate is still found; collision-resistant, so two ids never
+    share a directory; one component of hex, so it can never be a path. The prefix is reserved — an
+    id that already starts with it the way a case-insensitive volume compares names is hashed too —
+    so a stored name has exactly one logical source. That comparison is UPPER-casing, because NTFS
+    compares upper-cased names: `candıdate-…` (U+0131) and `CANDIDATE-…` are the hashed directory
+    there. For every letter of this prefix it also covers case folding (`ſ` folds to `s` and
+    upper-cases to `S`). Python's upper() models those tables rather than being them; it can only
+    over-match, which hashes more ids. (cross-family review, two rounds)
+
+    None when the id cannot be a pathname at all: an embedded NUL, or text the filesystem encoding
+    cannot represent. Hashing those into a name would decide, silently, that such an identity is
+    acceptable; the emitter refuses them instead.
+    """
+    if not isinstance(candidate_id, str) or "\x00" in candidate_id:
+        return None
+    try:
+        os.fsencode(candidate_id)
+    except (UnicodeError, ValueError):
+        return None
+    if (candidate_id in ("", ".", "..")
+            or candidate_id.upper().startswith(STORAGE_HASHED_PREFIX.upper())
+            or "/" in candidate_id or "\\" in candidate_id):
+        return STORAGE_HASHED_PREFIX + hashlib.sha256(
+            candidate_id.encode("utf-8", "surrogatepass")).hexdigest()
+    return candidate_id
+
+
+def candidate_dir(root, candidate_id):
+    """The directory a candidate is stored in, under the RESOLVED output root -> path | None.
+
+    The emitter's own containment check, applied whatever the caller handed it rather than trusting
+    the mapping above to have been used: the directory must be a direct child of the root by path
+    semantics — never a string prefix — and a symlink already sitting at that name is refused, not
+    followed out of the root. A Windows junction is the same hazard; `os.path.isjunction` exists
+    from Python 3.12 and is used when it does. (Windows paths are UNTESTED here, as in the README.)
+    """
+    name = candidate_storage_component(candidate_id)
+    if name is None:
+        return None
+    d = os.path.normpath(os.path.join(root, name))
+    if os.path.dirname(d) != root:
+        return None
+    if os.path.islink(d):
+        return None
+    if getattr(os.path, "isjunction", lambda _p: False)(d):
+        return None
+    return d
+
+
 def emit_candidates(findings, outdir, status):
     """Atomic, deduplicated, never inside a governed tree by default — and only under a status that
     permits promotion at all.
@@ -1088,10 +1150,17 @@ def emit_candidates(findings, outdir, status):
     written, existing, failed = [], [], []
     if status != "CANDIDATE":
         return written, existing, failed
+    root = os.path.realpath(outdir)
     for f in findings:
         if f["state"] != "CANDIDATE":
             continue
-        d = os.path.join(outdir, f["candidate_id"])
+        # Nothing is inspected or created for a candidate before this answers. The lists below keep
+        # naming the LOGICAL id; only the directory is the storage name. (issue #15)
+        d = candidate_dir(root, f["candidate_id"])
+        if d is None:
+            # Static on purpose: the refused id is candidate-controlled text.
+            failed.append((f["candidate_id"], "not a single directory inside the output root"))
+            continue
         p = os.path.join(d, "HYPOTHESIS.md")
         if os.path.exists(p):
             existing.append(f["candidate_id"])
