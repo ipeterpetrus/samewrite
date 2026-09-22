@@ -1087,9 +1087,12 @@ def candidate_storage_component(candidate_id):
     platform, a dot segment or nothing at all is stored under the SHA-256 of the COMPLETE id:
     deterministic, so an existing candidate is still found; collision-resistant, so two ids never
     share a directory; one component of hex, so it can never be a path. The prefix is reserved — an
-    id that already starts with it IN ANY CASE is hashed too, because a case-insensitive volume
-    treats `CANDIDATE-SHA256-<hex>` as the same directory — so a stored name has exactly one
-    logical source. (cross-family review of the first cut)
+    id that already starts with it the way a case-insensitive volume compares names is hashed too —
+    so a stored name has exactly one logical source. That comparison is UPPER-casing, because NTFS
+    compares upper-cased names: `candıdate-…` (U+0131) and `CANDIDATE-…` are the hashed directory
+    there. For every letter of this prefix it also covers case folding (`ſ` folds to `s` and
+    upper-cases to `S`). Python's upper() models those tables rather than being them; it can only
+    over-match, which hashes more ids. (cross-family review, two rounds)
 
     None when the id cannot be a pathname at all: an embedded NUL, or text the filesystem encoding
     cannot represent. Hashing those into a name would decide, silently, that such an identity is
@@ -1101,7 +1104,8 @@ def candidate_storage_component(candidate_id):
         os.fsencode(candidate_id)
     except (UnicodeError, ValueError):
         return None
-    if (candidate_id in ("", ".", "..") or candidate_id.casefold().startswith(STORAGE_HASHED_PREFIX)
+    if (candidate_id in ("", ".", "..")
+            or candidate_id.upper().startswith(STORAGE_HASHED_PREFIX.upper())
             or "/" in candidate_id or "\\" in candidate_id):
         return STORAGE_HASHED_PREFIX + hashlib.sha256(
             candidate_id.encode("utf-8", "surrogatepass")).hexdigest()

@@ -43,7 +43,7 @@ def check(label, got, want):
 def expected_storage(cid):
     """The frozen storage rule, written out again here: an oracle that imported the helper it
     checks would agree with any mutant of it."""
-    if cid in ("", ".", "..") or cid.casefold().startswith(HASHED) or "/" in cid or "\\" in cid:
+    if cid in ("", ".", "..") or cid.upper().startswith(HASHED.upper()) or "/" in cid or "\\" in cid:
         return HASHED + hashlib.sha256(cid.encode("utf-8", "surrogatepass")).hexdigest()
     return cid
 
@@ -295,7 +295,7 @@ def o_helper(tools, base):
     safe = ["trend-bash-default-c806aa12", "noop-guard-retire-agent-a-1234abcd", "trend-bash-..-73f155b7",
             "listing-prune-team-a-0000ffff", "a\x7fb", "x" * 200]
     unsafe = ["a/b", "a\\b", "..", ".", "", "/abs", "x/../../up", HASHED + "0" * 64, HASHED + "x",
-              HASHED.upper() + "AB", "Candidate-Sha256-x", "candidate-\u017fha256-x"]
+              HASHED.upper() + "AB", "Candidate-Sha256-x", "candidate-\u017fha256-x", "cand\u0131date-sha256-x"]
     out = [("HELPER: ordinary ids are their own directory name, byte for byte",
             [h(c) for c in safe], safe)]
     names = [h(c) for c in unsafe]
@@ -311,13 +311,35 @@ def o_helper(tools, base):
     # A case-insensitive volume (macOS, Windows) is one directory for names equal under folding,
     # so a verbatim id must never fold onto a hashed name. The upper-cased hashed name of `a/b` is
     # the concrete collision the cross-family review of the first cut found.
-    probe = safe + unsafe + [expected_storage(u).upper() for u in unsafe] + [c.upper() for c in safe]
-    stored = {}
-    for c in probe:
-        stored.setdefault(h(c).casefold(), set()).add(c)
-    out.append(("HELPER: ids that differ beyond letter case never share a directory on a case-insensitive volume",
-                sorted(sorted(v) for v in stored.values() if len({x.casefold() for x in v}) > 1), []))
+    # NTFS compares UPPER-cased names, macOS folds case: both models are checked, and the probes
+    # include the two letters that reach ASCII only through them (U+0131 dotless i, U+017F long s).
+    hashed = [expected_storage(u) for u in unsafe]
+    probe = (safe + unsafe + [n.upper() for n in hashed] + [c.upper() for c in safe]
+             + [n.replace("i", "\u0131", 1) for n in hashed] + [n.replace("s", "\u017f", 1) for n in hashed])
+    for model, fold in (("upper-casing (NTFS)", str.upper), ("case folding (macOS)", str.casefold)):
+        stored = {}
+        for c in probe:
+            stored.setdefault(fold(h(c)), set()).add(c)
+        out.append((f"HELPER: under {model}, ids that differ beyond letter case never share a directory",
+                    sorted(sorted(v) for v in stored.values() if len({fold(x) for x in v}) > 1), []))
     return out
+
+
+_AUDIT = {"sink": None}
+# event -> positions of its PATH arguments (the rest are modes, flags and descriptors)
+_FS_EVENTS = {"open": (0,), "os.mkdir": (0,), "os.rename": (0, 1), "os.remove": (0,), "os.rmdir": (0,),
+              "os.symlink": (0, 1), "os.link": (0, 1), "os.chmod": (0,), "os.utime": (0,),
+              "os.listdir": (0,), "os.scandir": (0,), "os.truncate": (0,), "os.chown": (0,), "os.chdir": (0,)}
+
+
+def _audit(event, args):
+    sink = _AUDIT["sink"]
+    if sink is not None and event in _FS_EVENTS:
+        sink.extend(os.fsdecode(args[i]) for i in _FS_EVENTS[event]
+                    if i < len(args) and isinstance(args[i], (str, bytes)))
+
+
+sys.addaudithook(_audit)
 
 
 def o_inspect(tools, base):
@@ -337,18 +359,25 @@ def o_inspect(tools, base):
             return fn(*a, **k)
         return wrapped
 
-    targets = ([(os.path, n) for n in ("exists", "lexists", "isdir", "isfile", "islink")]
-               + [(os, n) for n in ("stat", "lstat", "makedirs", "mkdir", "replace", "rename", "unlink",
-                                    "open", "listdir", "scandir")] + [(builtins, "open")])
+    # Two nets, because neither is complete alone: wrappers catch the INSPECTING calls (stat, access,
+    # readlink — CPython raises no audit event for them), and an audit hook catches every open,
+    # create, rename, remove and listing, including ones made through pathlib or io directly.
+    targets = ([(os.path, n) for n in ("exists", "lexists", "isdir", "isfile", "islink", "samefile",
+                                        "realpath", "getsize", "getmtime")]
+               + [(os, n) for n in ("stat", "lstat", "access", "readlink", "makedirs", "mkdir", "replace",
+                                    "rename", "unlink", "remove", "rmdir", "open", "listdir", "scandir",
+                                    "chmod", "utime", "link", "symlink")] + [(builtins, "open")])
     fs = [optimize.finding("inspect", "CANDIDATE", "h", "e", scope=sc) for sc in ("x/../../up", "/abs/x", "a\x00b", "ok")]
     saved = [(m, n, getattr(m, n)) for m, n in targets if hasattr(m, n)]
     for m, n, fn in saved:
         setattr(m, n, spy(fn))
+    _AUDIT["sink"] = seen                           # the emitter's calls only, not finding()'s
     try:
         w, _e, fail = optimize.emit_candidates(fs, sb.emit, "CANDIDATE")
     except Exception as exc:                        # noqa: BLE001 — the oracle reports, never crashes
         w, fail = ["raised " + type(exc).__name__], []
     finally:
+        _AUDIT["sink"] = None
         for m, n, fn in saved:
             setattr(m, n, fn)
 
@@ -394,11 +423,28 @@ MUTANTS = [
     ("M_PREEXISTING_SYMLINK_FOLLOWED", ["symlink"],
      '    if os.path.islink(d):\n', '    if False:\n'),
     ("M_RESERVED_PREFIX_CASE_SENSITIVE", ["helper"],
-     'candidate_id.casefold().startswith(STORAGE_HASHED_PREFIX)',
+     'candidate_id.upper().startswith(STORAGE_HASHED_PREFIX.upper())',
      'candidate_id.startswith(STORAGE_HASHED_PREFIX)'),
+    ("M_RESERVED_PREFIX_CASEFOLD_MODEL_ONLY", ["helper"],
+     'candidate_id.upper().startswith(STORAGE_HASHED_PREFIX.upper())',
+     'candidate_id.casefold().startswith(STORAGE_HASHED_PREFIX)'),
     ("M_INSPECT_RAW_PATH_BEFORE_GUARD", ["inspect"],
      '        d = candidate_dir(root, f["candidate_id"])\n',
      '        os.path.lexists(os.path.join(outdir, f["candidate_id"], "HYPOTHESIS.md"))\n'
+     '        d = candidate_dir(root, f["candidate_id"])\n'),
+    ("M_INSPECT_RAW_PATH_VIA_ACCESS", ["inspect"],
+     '        d = candidate_dir(root, f["candidate_id"])\n',
+     '        try:\n'
+     '            os.access(os.path.join(outdir, f["candidate_id"], "HYPOTHESIS.md"), os.F_OK)\n'
+     '        except (OSError, ValueError):\n'
+     '            pass\n'
+     '        d = candidate_dir(root, f["candidate_id"])\n'),
+    ("M_WRITE_RAW_PATH_VIA_PATHLIB", ["inspect"],
+     '        d = candidate_dir(root, f["candidate_id"])\n',
+     '        try:\n'
+     '            __import__("pathlib").Path(outdir, f["candidate_id"] + ".probe").open("a").close()\n'
+     '        except (OSError, ValueError):\n'
+     '            pass\n'
      '        d = candidate_dir(root, f["candidate_id"])\n'),
 ]
 
