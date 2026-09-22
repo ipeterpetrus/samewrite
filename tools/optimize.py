@@ -1017,8 +1017,10 @@ def render(live, hist, ledger, cold, pop, findings, sources, status, scope, scop
              + (f"   (history also holds: {', '.join(sorted(s for s in scopes_seen if s != scope))})"
                 if len(scopes_seen) > 1 else ""))
     L.append("scope")
+    epoch_note = ("" if hist.get("in_epoch", hist["in_scope"]) == hist["in_scope"]
+                  else f" ({hist.get('in_epoch', 0)} after the newest loss)")
     L.append(f"  history   : {sources['history'] or '(none)'} — {hist['total']} records, "
-             f"{hist['in_scope']} in this scope, {len(hist['comparable'])} comparable, "
+             f"{hist['in_scope']} in this scope{epoch_note}, {len(hist['comparable'])} comparable, "
              f"{sum(hist['rejected'].values())} rejected, time order {hist['time_order']}")
     for why, n in hist["rejected"].most_common():
         L.append(f"              rejected: {n} × {why}")
