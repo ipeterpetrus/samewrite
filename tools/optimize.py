@@ -1087,7 +1087,9 @@ def candidate_storage_component(candidate_id):
     platform, a dot segment or nothing at all is stored under the SHA-256 of the COMPLETE id:
     deterministic, so an existing candidate is still found; collision-resistant, so two ids never
     share a directory; one component of hex, so it can never be a path. The prefix is reserved — an
-    id that already starts with it is hashed too — so a stored name has exactly one logical source.
+    id that already starts with it IN ANY CASE is hashed too, because a case-insensitive volume
+    treats `CANDIDATE-SHA256-<hex>` as the same directory — so a stored name has exactly one
+    logical source. (cross-family review of the first cut)
 
     None when the id cannot be a pathname at all: an embedded NUL, or text the filesystem encoding
     cannot represent. Hashing those into a name would decide, silently, that such an identity is
@@ -1099,7 +1101,7 @@ def candidate_storage_component(candidate_id):
         os.fsencode(candidate_id)
     except (UnicodeError, ValueError):
         return None
-    if (candidate_id in ("", ".", "..") or candidate_id.startswith(STORAGE_HASHED_PREFIX)
+    if (candidate_id in ("", ".", "..") or candidate_id.casefold().startswith(STORAGE_HASHED_PREFIX)
             or "/" in candidate_id or "\\" in candidate_id):
         return STORAGE_HASHED_PREFIX + hashlib.sha256(
             candidate_id.encode("utf-8", "surrogatepass")).hexdigest()
@@ -1112,7 +1114,8 @@ def candidate_dir(root, candidate_id):
     The emitter's own containment check, applied whatever the caller handed it rather than trusting
     the mapping above to have been used: the directory must be a direct child of the root by path
     semantics — never a string prefix — and a symlink already sitting at that name is refused, not
-    followed out of the root.
+    followed out of the root. A Windows junction is the same hazard; `os.path.isjunction` exists
+    from Python 3.12 and is used when it does. (Windows paths are UNTESTED here, as in the README.)
     """
     name = candidate_storage_component(candidate_id)
     if name is None:
@@ -1121,6 +1124,8 @@ def candidate_dir(root, candidate_id):
     if os.path.dirname(d) != root:
         return None
     if os.path.islink(d):
+        return None
+    if getattr(os.path, "isjunction", lambda _p: False)(d):
         return None
     return d
 

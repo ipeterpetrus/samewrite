@@ -663,7 +663,7 @@ PATH_16  emit/<candidate dir> is a symlink  CANDIDATE 10  <sandbox>/outside_targ
 * `candidate_storage_component(candidate_id)` is the ONE mapping from a logical id to a directory
   name. An id that is already a single ordinary component is its own name, byte for byte. Any id
   containing `/` or `\` (either platform's separator), equal to `.`, `..` or empty, or starting
-  with the reserved prefix `candidate-sha256-` is stored as
+  with the reserved prefix `candidate-sha256-` in any letter case is stored as
   `candidate-sha256-<sha256 of the complete logical id>`: deterministic, one component, never a dot
   segment, and two different logical ids cannot share it by construction.
 * An id holding NUL, or text the filesystem encoding cannot represent, is **not** hashed into a
@@ -722,3 +722,16 @@ None. Every row of §8.3 is pinned by `tests/test_candidate_path.py`, which also
 mutants to a copy of `tools/` — the raw id used as a path, separators left unmapped, NUL unchecked,
 the emitter's containment check removed, every unsafe id collapsed to one name, safe ids hashed,
 the digest salted per run, the symlink check removed — and requires each to turn its oracle RED.
+
+### 8.6 Added after a cross-family review of the first cut (neither a deviation nor a replacement)
+
+| case | finding | repair | pinned by |
+|---|---|---|---|
+| **PATH_17** | MEDIUM: the reserved prefix was matched case-sensitively, so a verbatim id `CANDIDATE-SHA256-<hex>` is the same directory as the hashed name of `a/b` on a case-insensitive volume | the prefix is reserved under `casefold()` | helper oracle + mutant `M_RESERVED_PREFIX_CASE_SENSITIVE` |
+| **PATH_18** | LOW: the oracles proved no FILE lands outside the root, not that nothing outside is LOOKED AT | a spy records every path handed to `os`, `os.path` and `open` while the emitter runs; each must be the root, inside it, or an ancestor of it | oracle `inspect` + mutant `M_INSPECT_RAW_PATH_BEFORE_GUARD` |
+
+The same review raised a Windows directory junction at the storage name as HIGH context
+(pre-existing, not introduced). `candidate_dir()` now also refuses one through
+`os.path.isjunction` where the interpreter has it (Python 3.12+). That line is **untested** here —
+there is no Windows runner, and the README already marks Windows paths `UNTESTED` — so on Windows
+with Python below 3.12 a junction remains a residual limit, stated rather than claimed closed.

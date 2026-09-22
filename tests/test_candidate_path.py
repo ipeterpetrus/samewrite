@@ -43,7 +43,7 @@ def check(label, got, want):
 def expected_storage(cid):
     """The frozen storage rule, written out again here: an oracle that imported the helper it
     checks would agree with any mutant of it."""
-    if cid in ("", ".", "..") or cid.startswith(HASHED) or "/" in cid or "\\" in cid:
+    if cid in ("", ".", "..") or cid.casefold().startswith(HASHED) or "/" in cid or "\\" in cid:
         return HASHED + hashlib.sha256(cid.encode("utf-8", "surrogatepass")).hexdigest()
     return cid
 
@@ -294,7 +294,8 @@ def o_helper(tools, base):
         return [("HELPER: candidate_storage_component exists", False, True)]
     safe = ["trend-bash-default-c806aa12", "noop-guard-retire-agent-a-1234abcd", "trend-bash-..-73f155b7",
             "listing-prune-team-a-0000ffff", "a\x7fb", "x" * 200]
-    unsafe = ["a/b", "a\\b", "..", ".", "", "/abs", "x/../../up", HASHED + "0" * 64, HASHED + "x"]
+    unsafe = ["a/b", "a\\b", "..", ".", "", "/abs", "x/../../up", HASHED + "0" * 64, HASHED + "x",
+              HASHED.upper() + "AB", "Candidate-Sha256-x", "candidate-\u017fha256-x"]
     out = [("HELPER: ordinary ids are their own directory name, byte for byte",
             [h(c) for c in safe], safe)]
     names = [h(c) for c in unsafe]
@@ -307,12 +308,66 @@ def o_helper(tools, base):
                 (len({h(c) for c in many}), [h(c) for c in many] == [h(c) for c in many]), (2000, True)))
     out.append(("HELPER: NUL, unencodable text and a non-string are refused, not hashed",
                 [h("a\x00b"), h("\x00"), h("a\ud800b"), h(12345)], [None, None, None, None]))
+    # A case-insensitive volume (macOS, Windows) is one directory for names equal under folding,
+    # so a verbatim id must never fold onto a hashed name. The upper-cased hashed name of `a/b` is
+    # the concrete collision the cross-family review of the first cut found.
+    probe = safe + unsafe + [expected_storage(u).upper() for u in unsafe] + [c.upper() for c in safe]
+    stored = {}
+    for c in probe:
+        stored.setdefault(h(c).casefold(), set()).add(c)
+    out.append(("HELPER: ids that differ beyond letter case never share a directory on a case-insensitive volume",
+                sorted(sorted(v) for v in stored.values() if len({x.casefold() for x in v}) > 1), []))
     return out
+
+
+def o_inspect(tools, base):
+    """Not only does no file land outside the root: no filesystem call made for a candidate even
+    LOOKS outside it. Every path handed to os/os.path/open while the emitter runs is recorded, and
+    each must be the root, inside it, or one of its ancestors (resolving the root itself)."""
+    import builtins
+    optimize = _import(tools)
+    sb = Sandbox(base)
+    root = os.path.realpath(sb.emit)
+    seen = []
+
+    def spy(fn):
+        def wrapped(*a, **k):
+            if a and isinstance(a[0], (str, bytes, os.PathLike)):
+                seen.append(os.fsdecode(a[0]))
+            return fn(*a, **k)
+        return wrapped
+
+    targets = ([(os.path, n) for n in ("exists", "lexists", "isdir", "isfile", "islink")]
+               + [(os, n) for n in ("stat", "lstat", "makedirs", "mkdir", "replace", "rename", "unlink",
+                                    "open", "listdir", "scandir")] + [(builtins, "open")])
+    fs = [optimize.finding("inspect", "CANDIDATE", "h", "e", scope=sc) for sc in ("x/../../up", "/abs/x", "a\x00b", "ok")]
+    saved = [(m, n, getattr(m, n)) for m, n in targets if hasattr(m, n)]
+    for m, n, fn in saved:
+        setattr(m, n, spy(fn))
+    try:
+        w, _e, fail = optimize.emit_candidates(fs, sb.emit, "CANDIDATE")
+    except Exception as exc:                        # noqa: BLE001 — the oracle reports, never crashes
+        w, fail = ["raised " + type(exc).__name__], []
+    finally:
+        for m, n, fn in saved:
+            setattr(m, n, fn)
+
+    def outside(p):
+        a = os.path.normpath(os.path.abspath(p))
+        common = os.path.commonpath([root, a])
+        return common != root and common != a
+    return [("INSPECT: three written, the NUL id failed",
+             (sorted(w), [c for c, _why in fail]),
+             (sorted(f["candidate_id"] for f in fs if "\x00" not in f["candidate_id"]), [fs[2]["candidate_id"]])),
+            ("INSPECT: the spy saw the files it wrote (it is not vacuous)",
+             sum(1 for p in seen if p.endswith("HYPOTHESIS.md") and not outside(p)) >= 3, True),
+            ("INSPECT: no path outside the root was stat-ed, opened, created or replaced",
+             sorted({p for p in seen if outside(p)}), [])]
 
 
 ORACLES = {"safe": o_safe, "contained": o_contained, "nul": o_nul, "dedup": o_dedup,
            "distinct": o_distinct, "preexisting": o_preexisting, "writefail": o_writefail,
-           "symlink": o_symlink, "guard": o_guard, "helper": o_helper}
+           "symlink": o_symlink, "guard": o_guard, "helper": o_helper, "inspect": o_inspect}
 
 
 # ---------------------------------------------------------------- the oracles must bite
@@ -338,6 +393,13 @@ MUTANTS = [
      '(candidate_id + str(os.getpid())).encode("utf-8", "surrogatepass")).hexdigest()'),
     ("M_PREEXISTING_SYMLINK_FOLLOWED", ["symlink"],
      '    if os.path.islink(d):\n', '    if False:\n'),
+    ("M_RESERVED_PREFIX_CASE_SENSITIVE", ["helper"],
+     'candidate_id.casefold().startswith(STORAGE_HASHED_PREFIX)',
+     'candidate_id.startswith(STORAGE_HASHED_PREFIX)'),
+    ("M_INSPECT_RAW_PATH_BEFORE_GUARD", ["inspect"],
+     '        d = candidate_dir(root, f["candidate_id"])\n',
+     '        os.path.lexists(os.path.join(outdir, f["candidate_id"], "HYPOTHESIS.md"))\n'
+     '        d = candidate_dir(root, f["candidate_id"])\n'),
 ]
 
 
