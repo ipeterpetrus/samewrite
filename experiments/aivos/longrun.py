@@ -158,12 +158,17 @@ def longrun(days, cycles, out, plateau=20):
 
         day_new = 0
         for _cycle in range(cycles):
-            recs, _rej, _lines, _ep = optimize.load_history(hist)
-            scopes = optimize.by_scope(recs)
+            recs, _rej, _lines, ep = optimize.load_history(hist)
+            # the same epoch the CLI analyses: evidence from before a loss is not combined with
+            # evidence after it, here either (cross-family review of the B1 repair)
+            current = optimize.active_records(recs, ep)
+            scopes = optimize.by_scope(current)
             for role in ROLES:
                 keep, dropped = optimize.comparable(scopes.get(role, []))
                 h = {"comparable": keep, "total": len(recs), "in_scope": len(scopes.get(role, [])),
-                     "rejected": {}, "dropped": dropped, "time_order": optimize.time_order(keep)}
+                     "in_epoch": len(scopes.get(role, [])), "rejected": dict(_rej),
+                     "dropped": dropped, "time_order": optimize.time_order(keep),
+                     "damage": optimize.damage_summary(ep)}
                 lv = live(int(30 + min(day, plateau) * (30.0 / plateau)))
                 f = optimize.analyse(lv, h, None, None, scope=role)
                 st = optimize.overall_status(f, h, lv, optimize.population(keep), False)

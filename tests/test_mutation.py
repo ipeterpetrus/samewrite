@@ -927,7 +927,7 @@ CASES = [
      """),
 
     ("M_PRE_DAMAGE_RECORD_ANCHORS: jangkar datang dari epoch yang sedang dianalisis",
-     [("optimize.py", "        anchor = (eligible_anchor(current) or eligible_anchor(recs)",
+     [("optimize.py", "        anchor = (eligible_anchor(current)",
        "        anchor = (eligible_anchor(recs) or eligible_anchor(current)")],
      """
      import subprocess
@@ -947,6 +947,53 @@ CASES = [
      j = json.loads(r.stdout)
      assert j["scope"]["analysed"] == "fresh", j["scope"]["analysed"]
      assert j["status"] == "CANDIDATE", (j["status"], j["history"]["comparable"])
+     """),
+
+
+    ("M_STALE_SCOPE_ANCHOR: populasi pra-loss tak boleh menamai kandidat pasca-loss",
+     [("optimize.py",
+       "        anchor = (eligible_anchor(current)\n"
+       "                  or (max(current, key=lambda r: r.get(\"ts\") or 0) if current else None))\n"
+       "        scope = scope_of(anchor) if anchor is not None else \"default\"",
+       "        anchor = (eligible_anchor(current) or eligible_anchor(recs)\n"
+       "                  or max(recs, key=lambda r: r.get(\"ts\") or 0))\n"
+       "        scope = scope_of(anchor)")],
+     """
+     import subprocess
+     d = tempfile.mkdtemp()
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="stale")
+             for i in range(6)]
+     h = w(os.path.join(d, "h.jsonl"), [json.dumps(r) for r in rows] + [chr(123) + '"torn":'])
+     led = os.path.join(d, "led.jsonl")
+     with open(led, "w") as fh:
+         fh.write(chr(10).join('{"event": "checked"}' for _ in range(100)) + chr(10))
+     opt = os.path.join(os.path.dirname(carry.__file__), "optimize.py")
+     r = subprocess.run([sys.executable, opt, "--history", h, "--ledger", led, "--scan", "--json"],
+                        capture_output=True, text=True, timeout=300)
+     j = json.loads(r.stdout)
+     assert j["scope"]["analysed"] == "default", j["scope"]["analysed"]
+     assert not any("stale" in c for c in j["candidate_ids"]), j["candidate_ids"]
+     """),
+
+    ("M_DEDUP_IGNORES_SCOPE: dua scope bisa punya nomor epoch yang sama",
+     [("optimize.py", '            rid = (scope_of(r), r.get(EPOCH_KEY), rid)',
+       "            rid = (r.get(EPOCH_KEY), rid)")],
+     """
+     broken_a = chr(123) + '"schema_version":2,"record_type":"carry_run","scope_id":"a","shares":' \
+                + chr(123) + '"Bash":10.0' + chr(125) + chr(125)
+     broken_b = chr(123) + '"schema_version":2,"record_type":"carry_run","scope_id":"b","shares":' \
+                + chr(123) + '"Bash":10.0' + chr(125) + chr(125)
+     rows_a = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a",
+                   run_id="shared" if i == 0 else "a%d" % i) for i in range(6)]
+     row_b = rec(100 + 9 * 604800, {"Bash": 50.0, "Read": 50.0}, scope="b", run_id="shared")
+     row_b["evidence_quality"] = "PARTIAL"
+     row_b["skipped_by_limit"] = 1
+     p = w(os.path.join(D, "twoscope.jsonl"),
+           [broken_a] + [json.dumps(r) for r in rows_a] + [broken_b, json.dumps(row_b)])
+     recs, rej, _l, ep = optimize.load_history(p)
+     cur = [r for r in optimize.active_records(recs, ep) if optimize.scope_of(r) == "a"]
+     q = optimize.history_quality(optimize.comparable(cur)[0])
+     assert q == "COMPLETE", (q, rej)
      """),
 
 ]

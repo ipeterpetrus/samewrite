@@ -589,6 +589,43 @@ def main():
           (j["history"]["quality"], j["history"]["rejected"].get("duplicate run_id (retry)"), n),
           ("DEGRADED", 2, 0))
 
+    print("\nB1_14/B1_15 - what a cross-family review of the epoch repair found")
+    # a finding that rests on the ledger alone may still promote after a loss — but nothing from
+    # before the loss may name it, because the scope travels into the candidate id
+    led_lines = ['{"event": "checked"}'] * 100
+    stale = [json.dumps(dict(rec(i, 30.0 + 3.0 * i), scope_id="stale")) for i in range(6)]
+    ld = os.path.join(tempfile.mkdtemp(dir=d), "ledger.jsonl")
+    with open(ld, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(led_lines) + "\n")
+    hd = tempfile.mkdtemp(dir=d)
+    hp = write(os.path.join(hd, "history.jsonl"), stale + [TORN])
+    out14 = os.path.join(hd, "cand")
+    pr = subprocess.run([sys.executable, OPT, "--history", hp, "--ledger", ld, "--scan",
+                         "--emit-candidate", out14, "--json", "--strict-exit"],
+                        capture_output=True, text=True, timeout=300)
+    j14 = json.loads(pr.stdout)
+    check("B1_14 a stale population cannot name a candidate raised after the loss",
+          (j14["scope"]["analysed"], j14["scope"]["records_in_epoch"],
+           any("stale" in c for c in j14["candidate_ids"])), ("default", 0, False))
+    check("B1_14 and the ledger finding itself still stands",
+          (j14["status"], [c.split("-")[0] for c in j14["candidate_ids"]]), ("CANDIDATE", ["noop"]))
+
+    # two scopes can hold the same epoch NUMBERS; identity needs the scope as well
+    broken_a = '{"schema_version":2,"record_type":"carry_run","scope_id":"a","shares":{"Bash":10.0}}'
+    broken_b = '{"schema_version":2,"record_type":"carry_run","scope_id":"b","shares":{"Bash":10.0}}'
+    rows_a = [json.dumps(dict(rec(i, 30.0 + 3.0 * i), scope_id="a",
+                              run_id="shared" if i == 0 else f"a{i}")) for i in range(6)]
+    row_b = json.dumps(dict(rec(9, 50.0, quality="PARTIAL", skipped=1), scope_id="b",
+                            run_id="shared"))
+    rc15, j15, n15 = run([broken_a] + rows_a + [broken_b, row_b], extra=["--scope-id", "a"])
+    check("B1_15 a retry in another scope is not this scope's retry",
+          (j15["history"]["quality"], j15["history"]["comparable"],
+           j15["history"]["rejected"].get("duplicate run_id (retry)")), ("COMPLETE", 6, None))
+    check("B1_15 and the loss in each scope cut only that scope",
+          (j15["history"]["damage"]["boundaries"],
+           sorted((j15["history"]["damage"]["scope_local"] or {}).items())),
+          (2, [("a", 1), ("b", 1)]))
+
     print("\nM1 - history.quality describes the evidence eligible RIGHT NOW")
     rc, j, n = run([json.dumps(rec(i, 30.0 + 3.0 * i, sessions=0, scanned=40)) for i in range(6)])
     check("nothing comparable is never reported as COMPLETE",

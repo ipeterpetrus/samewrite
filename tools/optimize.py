@@ -488,7 +488,11 @@ def load_history(path):
             # excluded copy's floor into it — would let an old gap poison a healthy epoch, which is
             # the defect this repair exists to remove. Inside one epoch nothing changes: the retry
             # is dropped, counted, and cannot launder the survivor's quality.
-            rid = (r.get(EPOCH_KEY), rid)
+            # The stamp is a pair of COUNTS, so a record of scope "a" and one of scope "b" can
+            # carry the same numbers while belonging to different epochs. Identity therefore needs
+            # the scope: without it, one scope's retry lowered another scope's record through
+            # QUALITY_FLOOR. (cross-family review of the B1 repair)
+            rid = (scope_of(r), r.get(EPOCH_KEY), rid)
             if rid in seen:
                 rejected["duplicate run_id (retry)"] += 1
                 # The retry is dropped as an OBSERVATION, never as provenance. One run_id that
@@ -1129,12 +1133,14 @@ def main(argv=None):
     elif recs:
         # Which scope gets analysed is an anchor too: taking the newest record of ANY quality let a
         # single INVALID sweep in another agent's scope send the whole run to a population that was
-        # never going to be analysable. The newest record that CAN speak, in the current epoch,
-        # chooses. The fallbacks only NAME a scope when nothing is eligible or nothing survives the
-        # newest loss — an empty run's label, with the emitter closed either way.
-        anchor = (eligible_anchor(current) or eligible_anchor(recs)
-                  or max(recs, key=lambda r: r.get("ts") or 0))
-        scope = scope_of(anchor)
+        # never going to be analysable. The newest record that CAN speak, IN THE CURRENT EPOCH,
+        # chooses; if none can, the newest record of that epoch still names it.
+        # Nothing from before the newest loss is consulted, not even as a label: the scope travels
+        # into every candidate id, so a stale population naming a ledger finding would attach a
+        # promotion to a population that no longer exists. (cross-family review of the B1 repair)
+        anchor = (eligible_anchor(current)
+                  or (max(current, key=lambda r: r.get("ts") or 0) if current else None))
+        scope = scope_of(anchor) if anchor is not None else "default"
     else:
         scope = "default"
     scoped = [r for r in current if scope_of(r) == scope]
