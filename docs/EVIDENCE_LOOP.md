@@ -80,7 +80,11 @@ A valid run exits 0, including `NO_ACTION`; `--strict-exit` maps the status to t
 scheduler. `--json` prints the same aggregates for scripting. `--emit-candidate DIR` writes one
 `HYPOTHESIS.md` per candidate: observation, hypothesis, incumbent, primary metric, correctness and
 safety gates, instruction budget, risk, benchmark required, promotion criterion. Those files are
-specifications for a human, not instructions for a model.
+specifications for a human, not instructions for a model. Each lands in its own directory directly
+under `DIR`: an ordinary candidate id is the directory name, and an id whose scope holds a path
+separator or a dot segment is stored as `candidate-sha256-<digest of the id>` — the logical id is
+still what `--json` reports and what the file itself states. A candidate that cannot be stored
+inside `DIR` is refused and reported, never written elsewhere.
 
 ## Why it must stay this shape
 

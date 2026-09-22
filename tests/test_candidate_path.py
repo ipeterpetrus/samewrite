@@ -346,7 +346,7 @@ def oracle_holds(tools, names, base):
     p = subprocess.run([sys.executable, os.path.abspath(__file__), "--tools", tools,
                         "--oracle", ",".join(names), "--tmp", base],
                        capture_output=True, text=True, timeout=600)
-    bad = [ln.strip() for ln in p.stdout.splitlines() if ln.startswith("  FAIL")]
+    bad = [ln.strip()[len("FAIL"):].strip() for ln in p.stdout.splitlines() if ln.startswith("  FAIL")]
     return p.returncode == 0 and not bad, bad or [p.stderr.strip()[-200:]]
 
 

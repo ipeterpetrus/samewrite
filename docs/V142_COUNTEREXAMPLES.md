@@ -718,4 +718,7 @@ than climb.
 
 ### 8.5 Deviations from this frozen section
 
-None yet.
+None. Every row of §8.3 is pinned by `tests/test_candidate_path.py`, which also applies eight
+mutants to a copy of `tools/` — the raw id used as a path, separators left unmapped, NUL unchecked,
+the emitter's containment check removed, every unsafe id collapsed to one name, safe ids hashed,
+the digest salted per run, the symlink check removed — and requires each to turn its oracle RED.
