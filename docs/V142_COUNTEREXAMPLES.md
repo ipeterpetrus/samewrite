@@ -573,3 +573,55 @@ a fresh boundary and recreate the fail-stuck behaviour the previous round remove
 ### 7.5 Deviations from this frozen section
 
 None.
+
+### 7.6 Frozen-decision amendments the identity law forces (§21 order: recorded before editing)
+
+Five existing cases were written under the rule this repair overturns — they use **one `run_id` for
+two different observations** and assert that the pair is a retry. Under §7.1 such a pair is a
+conflict, so each is replaced rather than quietly re-run, and each keeps the property it was
+protecting.
+
+```text
+R142_07  "a retry cannot upgrade what its own run_id saw"
+         was: run_id "dup" appears twice, the second claiming PARTIAL with skipped_by_limit=7,
+              and the survivor is lowered to PARTIAL through QUALITY_FLOOR
+              -> PARTIAL_EVIDENCE / 40 / 0 files
+         now: the two copies differ, so they are a CONFLICT: the later one cuts and nothing
+              before it can promote -> INSUFFICIENT_DATA / 20 / 0 files
+         The property is unchanged and the guarantee is STRICTER: no repeated id can upgrade what
+         it saw. It is now enforced by a boundary rather than by a floor. The case gains its
+         companion: two IDENTICAL copies are a true retry, counted, no boundary, quality untouched.
+
+B1_13b   "a retry inside one epoch still lowers the survivor"   -> same cause, same replacement.
+B1_13e   "three copies inside one epoch: the worst of them survives" -> the three copies differ,
+         so they are two conflicts; RID_15 is the frozen row for that shape.
+VD_10    "clean first, the retry reports the loss"   frozen in §6.4 on the assumption that one
+VD_11    "the loss first, the retry reports clean"   run_id means one run. That assumption is
+         exactly what this repair removes. Both pairs differ materially, so each later copy is a
+         conflict that cuts at its own position; the later population still recovers, and neither
+         copy can launder anything. VD_11 now shows two scope-local boundaries instead of one.
+```
+
+**A consequence worth stating rather than hiding:** under the new law a TRUE_RETRY has, by
+construction, the same persisted observation and therefore the same `record_quality`, so
+`QUALITY_FLOOR` can no longer change anything. It is kept as a guard, not as a live path, and the
+anti-laundering property it used to carry is now carried by the conflict boundary. No test claims to
+exercise a floor that cannot fire.
+
+### 7.7 What the machine output gains, and where it is NOT
+
+`history.run_id_conflicts` is a bounded integer beside `history.rejected`, and `output_schema_version`
+stays **2** — v2 is unreleased and this is it evolving, not a second contract.
+
+It is deliberately **not** in `history.rejected`: that map counts lines that failed to become
+records, and a conflicting record is accepted and kept. Reporting it there would be the same false
+statement as calling it a retry. It is also not a map keyed by anything the file chose — six hundred
+distinct conflicting ids produce the integer `600` and zero new keys, so a corrupt history cannot
+grow the diagnostics. The human report names the count and what it means, never a value from either
+record.
+
+`history.damage` is unchanged and its invariant still holds:
+`boundaries == file_global + sum(scope_local)`. A conflict cut is a scope-local boundary like any
+other, so a conflict that lands on a record which was ALSO degraded produces one boundary, not two —
+a boundary is a position, not a tally of reasons — while `run_id_conflicts` keeps counting the
+reasons separately.

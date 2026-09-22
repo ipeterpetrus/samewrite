@@ -47,7 +47,10 @@ OUTPUT_SCHEMA_VERSION = 2        # shape of --json; bump when a field's meaning 
                                  #   read off a line that failed validation, so its keys are always
                                  #   scopes that also appear in `scope.known` · `scope.records_in_scope`
                                  #   counts the whole scope while `scope.records_in_epoch` counts what
-                                 #   the current epoch contributes · a CANDIDATE outranks
+                                 #   the current epoch contributes · `history.run_id_conflicts`
+                                 #   counts accepted records that repeat a run_id with a DIFFERENT
+                                 #   persisted observation, an integrity event that cuts like any
+                                 #   other loss and is never reported as a retry · a CANDIDATE outranks
                                  #   PARTIAL_EVIDENCE, because each finding is gated on its own
                                  #   evidence before the run is summarised
 THRESHOLD_SCHEMA_VERSION = 1     # bump when any threshold below changes, with a reason and a test
@@ -290,6 +293,56 @@ def degrades_scope(rec):
     return _derived_record_quality(rec, schema) == "DEGRADED"
 
 
+# The reader's own annotations. They are computed while reading, never persisted, and they must
+# not take part in deciding what a record IS: otherwise the act of reading a file would make an
+# identical retry look like a different observation.
+READER_PRIVATE = (EPOCH_KEY, QUALITY_FLOOR)
+
+
+def observation_digest(rec):
+    """A deterministic digest of the PERSISTED observation -> str.
+
+    The whole record participates, not a hand-picked subset: the defect this exists to close was
+    caused by an identity that was too weak, and a fingerprint built from a chosen handful would be
+    the same mistake in a new spelling. Keys are sorted, so JSON key order and whitespace cannot
+    make two semantically identical observations differ, and a persisted field this reader does not
+    know still changes the digest — conservatively non-equivalent, which is fail-closed and
+    recoverable.
+    """
+    body = {k: v for k, v in rec.items() if k not in READER_PRIVATE}
+    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":"),
+                                     default=str).encode("utf-8")).hexdigest()
+
+
+def retry_identity(rec):
+    """The identity two accepted records must SHARE before they can be the same run -> key | None.
+
+    Scope, because two agents legitimately write at once. The FILE-GLOBAL half of the epoch,
+    because across an unattributable loss the reader cannot establish continuity at all and both
+    copies stand. Not the scope-local half: a trusted boundary leaves the file intact, so identity
+    survives it. A record without a run_id cannot be shown to be anyone's retry and is always its
+    own observation.
+    """
+    rid = rec.get("run_id")
+    if not (isinstance(rid, str) and rid):
+        return None
+    return (scope_of(rec), rec.get(EPOCH_KEY, (0, 0))[0], rid)
+
+
+# `run_id` is an identity CLAIM, not proof of semantic equality. Two records are the same run only
+# when their identity AND their persisted observation match; a same-identity pair whose observations
+# differ is an integrity event, not bookkeeping. ONE classification, so the boundary, the
+# deduplication, the quality floor and the diagnostics can never disagree about the same pair.
+TRUE_RETRY, RUN_ID_CONFLICT, FIRST_SIGHTING = "retry", "conflict", "first"
+
+
+def classify_repeat(prior_digest, digest):
+    """-> TRUE_RETRY | RUN_ID_CONFLICT | FIRST_SIGHTING"""
+    if prior_digest is None:
+        return FIRST_SIGHTING
+    return TRUE_RETRY if prior_digest == digest else RUN_ID_CONFLICT
+
+
 def active_epoch_key(scope, epochs):
     """The epoch a record of `scope` must carry to be part of the CURRENT analysis."""
     e = epochs or {}
@@ -493,9 +546,9 @@ def load_history(path):
     and is kept as it is."""
     recs, rejected = [], collections.Counter()
     cuts_file, cuts_scope = 0, collections.Counter()
-    opened = set()
+    conflicts, under = 0, {}
     if not path or not os.path.exists(path):
-        return recs, rejected, 0, {"file_global": 0, "scope_local": {}}
+        return recs, rejected, 0, {"file_global": 0, "scope_local": {}, "run_id_conflicts": 0}
     lines = 0
     try:
         # BYTES, decoded strictly per physical line. `errors="replace"` destroyed the evidence that
@@ -508,7 +561,7 @@ def load_history(path):
         rejected[f"history unreadable: {safe_err(e)}"] += 1
         # A file that would not open is a loss nobody can attribute: every scope starts a new epoch
         # with no records in it, which is the fail-closed answer.
-        return recs, rejected, 0, {"file_global": 1, "scope_local": {}}
+        return recs, rejected, 0, {"file_global": 1, "scope_local": {}, "run_id_conflicts": 0}
     with fh:
         for raw in fh:
             raw = raw.strip()
@@ -535,26 +588,45 @@ def load_history(path):
                 # never a timestamp, because the clock is exactly what a damaged history cannot
                 # be trusted about.
                 o[EPOCH_KEY] = (cuts_file, cuts_scope[scope_of(o)])
+                # ONE classification for the pair, read here and nowhere else. The boundary, the
+                # deduplication, the quality floor and the diagnostics all consume this verdict:
+                # the defect that produced it was a boundary layer and a dedup layer holding two
+                # notions of identity, one of them too coarse.
+                ident = retry_identity(o)
+                prior = under.get(ident) if ident is not None else None
+                digest = observation_digest(o) if ident is not None else None
+                verdict = classify_repeat(prior["digest"] if prior else None, digest)
+                if verdict == TRUE_RETRY:
+                    # The same run reporting the SAME observation again. Dropped as an observation,
+                    # counted, and its quality still travels to the copy that survives — a retry
+                    # cannot launder a bounded or lossy sweep into a complete one. It opens no
+                    # boundary: a repeated copy of one loss is one loss, and letting a late copy
+                    # cut again let `6 healthy records + one more copy of X` erase a recovered
+                    # epoch, on repeat, forever.
+                    rejected["duplicate run_id (retry)"] += 1
+                    kept = prior["rec"]
+                    worse = worst_quality([record_quality(kept), record_quality(o)])
+                    if worse != record_quality(kept):
+                        kept[QUALITY_FLOOR] = worse
+                    continue
                 recs.append(o)
-                if degrades_scope(o):
-                    # The record belongs to the epoch it closes, never to the one it opens: it is
-                    # stamped first and the counter moves after it. A population that recovers is
-                    # not founded on the observation that reported the loss.
-                    # ONE boundary per logical run, though. A retry reports the SAME loss its twin
-                    # already reported, and this reader's own rule calls a deduplicated retry
-                    # bookkeeping rather than a loss; letting a late copy open a second boundary
-                    # let `6 healthy records + one more copy of X` erase a recovered epoch, on
-                    # repeat, forever — the fail-stuck shape this repair exists to remove, rebuilt
-                    # out of its own recovery mechanism. (cross-family review of the trust repair)
-                    # A record with no run_id cannot be shown to be a retry and stays its own
-                    # observation; across a file-global loss the identity differs, because there
-                    # the reader cannot tell whether a repeated id is the same run at all.
-                    rid = o.get("run_id")
-                    ident = ((scope_of(o), cuts_file, rid) if isinstance(rid, str) and rid
-                             else None)
-                    if ident is None or ident not in opened:
-                        opened.add(ident)
-                        cuts_scope[scope_of(o)] += 1
+                if ident is not None:
+                    # The NEWEST observation is what this identity currently says, so a later exact
+                    # copy is that one's retry rather than the original's conflict.
+                    under[ident] = {"rec": o, "digest": digest}
+                if verdict == RUN_ID_CONFLICT:
+                    # Not bookkeeping. The file states two different things under one identity and
+                    # the reader cannot tell which one the population it is about to compare
+                    # belongs to. Counted as a CONFLICT — reporting it as a retry would be a false
+                    # statement — and cut at this record's own physical position, so evidence from
+                    # before it is never combined with evidence after it. Recoverable like every
+                    # other boundary here: enough clean later evidence promotes normally.
+                    conflicts += 1
+                if verdict == RUN_ID_CONFLICT or degrades_scope(o):
+                    # The record belongs to the epoch it CLOSES: stamped first, counter moved
+                    # after it. A population that recovers is not founded on the observation that
+                    # reported the loss, nor on the one that contradicted its own identity.
+                    cuts_scope[scope_of(o)] += 1
                 continue
             rejected[why] += 1
             # EVERY loss a rejected line represents is file-global. A record that failed validation
@@ -565,40 +637,11 @@ def load_history(path):
             # because epochs recover; a crossing of a real loss is not.
             if rejection_is_loss(why):
                 cuts_file += 1
-    seen, uniq = {}, []
-    for r in recs:
-        rid = r.get("run_id")
-        if isinstance(rid, str) and rid:
-            # Deduplication is per EPOCH. Two epochs are two populations: the same id appearing
-            # after a loss is that population's own observation, and dropping it — or carrying the
-            # excluded copy's floor into it — would let an old gap poison a healthy epoch, which is
-            # the defect this repair exists to remove. Inside one epoch nothing changes: the retry
-            # is dropped, counted, and cannot launder the survivor's quality.
-            # The stamp is a pair of COUNTS, so a record of scope "a" and one of scope "b" can
-            # carry the same numbers while belonging to different epochs. Identity therefore needs
-            # the scope: without it, one scope's retry lowered another scope's record through
-            # QUALITY_FLOOR. (cross-family review of the B1 repair)
-            # ...and only the FILE-GLOBAL half of the stamp. Across a file-global loss the reader
-            # cannot tell whether a repeated id is the same run, so both copies stand. Across a
-            # TRUSTED scope-local boundary the file is intact and the reader knows exactly what
-            # happened: the repeat is the same logical run retrying, and letting its cleaner copy
-            # into the recovered epoch would launder the loss its own twin reported.
-            rid = (scope_of(r), r.get(EPOCH_KEY, (0, 0))[0], rid)
-            if rid in seen:
-                rejected["duplicate run_id (retry)"] += 1
-                # The retry is dropped as an OBSERVATION, never as provenance. One run_id that
-                # says COMPLETE once and PARTIAL once cannot be resolved in favour of the better
-                # claim: the sweep that reported less is part of what this id actually saw, and
-                # keeping the better one would let a retry launder a bounded sweep into a
-                # complete one. The floor travels with the record the law already reads.
-                kept = seen[rid]
-                worse = worst_quality([record_quality(kept), record_quality(r)])
-                if worse != record_quality(kept):
-                    kept[QUALITY_FLOOR] = worse
-                continue
-            seen[rid] = r
-        uniq.append(r)
-    return uniq, rejected, lines, {"file_global": cuts_file, "scope_local": dict(cuts_scope)}
+    # Deduplication already happened, in the read pass, in physical order, from the SAME verdict
+    # the boundary used. A second pass with its own notion of identity is exactly how the two
+    # layers came to disagree about one pair.
+    return recs, rejected, lines, {"file_global": cuts_file, "scope_local": dict(cuts_scope),
+                                   "run_id_conflicts": conflicts}
 
 
 def by_scope(recs):
@@ -1139,6 +1182,10 @@ def render(live, hist, ledger, cold, pop, findings, sources, status, scope, scop
                  f"({dmg.get('file_global', 0)} unattributable, "
                  f"{sum((dmg.get('scope_local') or {}).values())} scope-local) — evidence from "
                  f"before the newest one is not combined with evidence after it")
+    if hist.get("run_id_conflicts"):
+        L.append(f"  identity  : {hist['run_id_conflicts']} record(s) repeat a run id with a "
+                 f"different observation — an identity contradiction, counted as a conflict and "
+                 f"cut where it appears, never reported as a retry")
     L.append("")
     if live and live["sessions"]:
         C = sum(live["carry"].values()) or 1
@@ -1239,7 +1286,8 @@ def main(argv=None):
     damage = damage_summary(epochs)
     hist = {"total": len(recs), "in_scope": len(scopes.get(scope, [])), "in_epoch": len(scoped),
             "comparable": keep, "dropped": dropped, "rejected": rejected, "lines": lines,
-            "time_order": time_order(keep), "damage": damage}
+            "time_order": time_order(keep), "damage": damage,
+            "run_id_conflicts": (epochs or {}).get("run_id_conflicts", 0)}
     ledger = load_ledger(a.ledger)
 
     live = cold = None
@@ -1310,6 +1358,12 @@ def main(argv=None):
                         # ...and what the file holds regardless: a historical gap stays true while
                         # the evidence after it is independently complete
                         "damage": damage,
+                        # An observable identity contradiction: two accepted records under one
+                        # run_id whose persisted observations differ. A bounded COUNT, never a map
+                        # keyed by anything a corrupt file chose — and separate from `rejected`,
+                        # because a conflicting record is ACCEPTED and kept, not a line that failed
+                        # to become one.
+                        "run_id_conflicts": (epochs or {}).get("run_id_conflicts", 0),
                         "rejected": dict(rejected), "time_order": hist["time_order"]},
             "ledger": ledger,
             "live": ({"sessions": live["sessions"], "turns": live["turns"], "scanned": live["scanned"],

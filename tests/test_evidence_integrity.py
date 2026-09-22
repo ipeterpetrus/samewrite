@@ -379,15 +379,21 @@ def trusted_boundaries():
     print("\nVD_10/VD_11 - a retry may neither launder a loss nor poison the epoch after it")
     clean_x = json.dumps(dict(rec(5, 45.0, scope="a"), run_id="X"))
     deg_x = json.dumps(dict(rec(6, 48.0, scope="a", unreadable=2), run_id="X"))
-    for label, rows in (("VD_10 clean first, the retry reports the loss",
-                         ser(5, 0, "a") + [clean_x, deg_x] + ser(6, 20, "a", base=48.0)),
-                        ("VD_11 the loss first, the retry reports clean",
-                         ser(5, 0, "a") + [deg_x, clean_x] + ser(6, 20, "a", base=48.0))):
+    # Frozen-decision amendment (docs/V142_COUNTEREXAMPLES.md §7.6): both pairs differ materially,
+    # so under the identity law each later copy is a CONFLICT, not a retry. The population after it
+    # still recovers and neither copy can launder anything — the guarantee these rows exist for.
+    for label, rows, loc in (("VD_10 clean first, then something else under the same id",
+                              ser(5, 0, "a") + [clean_x, deg_x] + ser(6, 20, "a", base=48.0),
+                              {"a": 1}),
+                             ("VD_11 the loss first, then something else under the same id",
+                              ser(5, 0, "a") + [deg_x, clean_x] + ser(6, 20, "a", base=48.0),
+                              {"a": 2})):
         rc, j, n = run(rows)
         check(label, (j["status"], rc, n, j["scope"]["records_in_epoch"],
                       j["history"].get("quality"),
-                      j["history"]["rejected"].get("duplicate run_id (retry)")) + dmg(j),
-              ("CANDIDATE", 10, 1, 6, "COMPLETE", 1, 0, {"a": 1}))
+                      (j["history"]["rejected"] or {}).get("duplicate run_id (retry)", 0),
+                      j["history"]["run_id_conflicts"]) + dmg(j),
+              ("CANDIDATE", 10, 1, 6, "COMPLETE", 0, 1, 0, loc))
 
     # VD_12/VD_13: what a cross-family review of THIS repair found. A retry reports the same loss
     # its twin already reported, and a deduplicated retry is bookkeeping by this reader's own rule.
@@ -696,22 +702,35 @@ def main():
 
     # ---------------------------------------------------------------- a retry cannot launder
     print("\nR142_07 - a retry cannot upgrade what its own run_id saw")
+    # Frozen-decision amendment (docs/V142_COUNTEREXAMPLES.md §7.6): the two copies below differ,
+    # so under the identity law they are a CONFLICT rather than a retry. The property is the same
+    # and the guarantee is stricter — no repeated id can upgrade what it saw — but it is now
+    # enforced by a boundary instead of by a quality floor.
+    same = [rec(i, 30.0 + 3.0 * i) for i in range(5)]
+    twice = dict(rec(5, 45.0), run_id="dup")
+    same += [dict(twice), dict(twice)]
+    hist_path = write(os.path.join(d, "same.jsonl"), same)
+    recs, rejected, _lines, ep = optimize.load_history(hist_path)
+    check("an identical copy is dropped as an observation", len(recs), 6)
+    check("and counted as a retry", rejected["duplicate run_id (retry)"], 1)
+    check("and it opens no boundary", optimize.damage_summary(ep)["boundaries"], 0)
     dup = [rec(i, 30.0 + 3.0 * i) for i in range(5)]
-    dup.append(rec(5, 45.0))
-    dup[-1]["run_id"] = "dup"
+    dup.append(dict(twice))
     worse = rec(5, 45.0, quality="PARTIAL", skipped=7)
     worse["run_id"] = "dup"
     dup.append(worse)
     hist_path = write(os.path.join(d, "dup.jsonl"), dup)
-    recs, rejected, _lines, _ep = optimize.load_history(hist_path)
-    check("the retry is dropped as an observation", len(recs), 6)
-    check("and counted", rejected["duplicate run_id (retry)"], 1)
-    keep, _dropped = optimize.comparable(recs)
-    check("but its quality travels with the record that survived",
-          optimize.history_quality(keep), "PARTIAL")
-    case("R142_07", dup, "PARTIAL_EVIDENCE", 40, 0, history_quality="PARTIAL")
-    case("R142_07 (--accept-partial adopts the bound)", dup, "CANDIDATE", 10, 1,
-         extra=["--accept-partial"])
+    recs, rejected, _lines, ep = optimize.load_history(hist_path)
+    check("a copy that says something else is kept, not merged", len(recs), 7)
+    check("and it is NEVER called a retry",
+          rejected.get("duplicate run_id (retry)", 0), 0)
+    check("it is counted as an identity conflict", ep["run_id_conflicts"], 1)
+    check("and it cuts where it appears", optimize.damage_summary(ep)["boundaries"], 1)
+    check("so nothing before it can promote",
+          len(optimize.active_records(recs, ep)), 0)
+    case("R142_07", dup, "INSUFFICIENT_DATA", 20, 0, history_quality="EMPTY")
+    case("R142_07 (--accept-partial is not an identity override)", dup,
+         "INSUFFICIENT_DATA", 20, 0, extra=["--accept-partial"])
     check("a schema_version this reader cannot name is not a newer one",
           optimize.record_quality(dict(rec(0, 40.0), schema_version="2")), "UNKNOWN")
     check("nor is a float one",
@@ -1004,8 +1023,11 @@ def main():
                               json.dumps(dict(json.loads(series(1, 6)[0]), run_id="twin",
                                               evidence_quality="PARTIAL", skipped_by_limit=9))]
     rc, j, n = run(same_epoch)
-    check("B1_13b a retry inside one epoch still lowers the survivor",
-          (j["history"]["quality"], j["status"], n), ("PARTIAL", "PARTIAL_EVIDENCE", 0))
+    # Frozen-decision amendment (§7.6): the twins differ, so they are an identity conflict.
+    check("B1_13b a copy that says something else cuts instead of lowering",
+          (j["history"]["quality"], j["status"], n, j["history"]["run_id_conflicts"],
+           (j["history"]["rejected"] or {}).get("duplicate run_id (retry)", 0)),
+          ("EMPTY", "INSUFFICIENT_DATA", 0, 1, 0))
     # both line orders, because which copy comes first is exactly what a crash decides
     clean_then_worse = (series(5) + [json.dumps(dict(rec(5, 45.0), run_id="X"))] + [TORN]
                         + [json.dumps(dict(rec(6, 45.0), run_id="X", evidence_quality="PARTIAL",
@@ -1030,9 +1052,12 @@ def main():
                                                 evidence_quality="PARTIAL", skipped_by_limit=4)),
                                 json.dumps(dict(rec(6, 48.0), run_id="S"))]
     rc, j, n = run(three_in_one)
-    check("B1_13e three copies inside one epoch: the worst of them survives",
-          (j["history"]["quality"], j["history"]["rejected"].get("duplicate run_id (retry)"), n),
-          ("PARTIAL", 2, 0))
+    # Frozen-decision amendment (§7.6): three DIFFERENT copies under one id are two conflicts.
+    # RID_15 is the frozen row for the same shape with a population after it.
+    check("B1_13e three different copies under one id are two conflicts",
+          (j["history"]["quality"], j["history"]["run_id_conflicts"],
+           (j["history"]["rejected"] or {}).get("duplicate run_id (retry)", 0), n),
+          ("EMPTY", 2, 0, 0))
 
     print("\nB1_14/B1_15 - what a cross-family review of the epoch repair found")
     # a finding that rests on the ledger alone may still promote after a loss — but nothing from

@@ -80,12 +80,27 @@ def main():
     check("baris tak terparse dihitung", rejected["unparseable line"], 1)
     check("run_id sama di SISI LAIN potongan bukan retry", rejected["duplicate run_id (retry)"], 0)
     check("hanya epoch terbaru yang aktif", len(optimize.active_records(recs, epochs)), 1)
+    # Amandemen keputusan-beku (docs/V142_COUNTEREXAMPLES.md §7.6): run_id adalah KLAIM identitas,
+    # bukan bukti kesamaan. Salinan yang PERSIS sama = retry; salinan yang berbeda (di sini `ts`)
+    # = konflik identitas yang memotong di posisinya sendiri, dan tak pernah disebut retry.
     p_same = write(os.path.join(d, "same_epoch.jsonl"),
                    [rec(100, {"Bash": 50.0, "Read": 50.0}, run_id="d" * 32),
-                    rec(101, {"Bash": 50.0, "Read": 50.0}, run_id="d" * 32)])
-    recs_same, rej_same, _l, _e = optimize.load_history(p_same)
-    check("run_id sama DI DALAM satu epoch tetap dihitung sekali",
+                    rec(100, {"Bash": 50.0, "Read": 50.0}, run_id="d" * 32)])
+    recs_same, rej_same, _l, ep_same = optimize.load_history(p_same)
+    check("salinan PERSIS SAMA di dalam satu epoch dihitung sekali",
           (len(recs_same), rej_same["duplicate run_id (retry)"]), (1, 1))
+    check("dan salinan persis sama tidak memotong apa pun",
+          optimize.damage_summary(ep_same)["boundaries"], 0)
+    p_conf = write(os.path.join(d, "conflict_epoch.jsonl"),
+                   [rec(100, {"Bash": 50.0, "Read": 50.0}, run_id="d" * 32),
+                    rec(101, {"Bash": 50.0, "Read": 50.0}, run_id="d" * 32)])
+    recs_c, rej_c, _l, ep_c = optimize.load_history(p_conf)
+    check("salinan BERBEDA di bawah satu run_id adalah konflik, bukan retry",
+          (len(recs_c), rej_c.get("duplicate run_id (retry)", 0), ep_c["run_id_conflicts"]),
+          (2, 0, 1))
+    check("dan konflik itu memotong di posisinya sendiri",
+          (optimize.damage_summary(ep_c)["boundaries"], len(optimize.active_records(recs_c, ep_c))),
+          (1, 0))
     # Dua AGEN boleh menghasilkan metrik identik. Tanpa run_id itu dua pengamatan, bukan duplikat:
     # membuang salah satunya akan mengecilkan populasi yang sedang diukur.
     p2 = write(os.path.join(d, "twin.jsonl"),

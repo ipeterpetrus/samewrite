@@ -118,12 +118,16 @@ CASES = [
      """),
 
     ("identitas run: dua agen dgn metrik identik = dua pengamatan",
-     [("optimize.py", 'rid = r.get("run_id")', 'rid = json.dumps(r.get("shares"), sort_keys=True)')],
+     [("optimize.py", '    rid = rec.get("run_id")\n    if not (isinstance(rid, str) and rid):\n        return None',
+       '    rid = json.dumps(rec.get("shares"), sort_keys=True)')],
      """
      p = w(os.path.join(D, "h.jsonl"), [rec(100, {"Bash": 50.0, "Read": 50.0}),
                                         rec(100, {"Bash": 50.0, "Read": 50.0})])
-     recs, rej, _, _ = optimize.load_history(p)
+     recs, rej, _l, ep = optimize.load_history(p)
      assert len(recs) == 2, "populasi menyusut: dua agen dihitung satu"
+     # ...dan identitas yang dikarang dari metrik juga tak boleh melahirkan konflik identitas
+     assert ep["run_id_conflicts"] == 0, ep
+     assert optimize.damage_summary(ep)["boundaries"] == 0, optimize.damage_summary(ep)
      """),
 
     ("fail-closed: bukti PARTIAL tak boleh melahirkan kandidat",
@@ -673,12 +677,8 @@ CASES = [
 
 
     ("M_DEDUP_LAUNDERS: retry dgn run_id sama tak boleh menaikkan kualitas yang bertahan",
-     [("optimize.py", """                kept = seen[rid]
-                worse = worst_quality([record_quality(kept), record_quality(r)])
-                if worse != record_quality(kept):
-                    kept[QUALITY_FLOOR] = worse
-                continue""",
-       "                continue")],
+     [("optimize.py", "    return TRUE_RETRY if prior_digest == digest else RUN_ID_CONFLICT",
+       "    return TRUE_RETRY")],
      """
      rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="d")
              for i in range(5)]
@@ -687,10 +687,12 @@ CASES = [
      bad["evidence_quality"] = "PARTIAL"
      bad["skipped_by_limit"] = 7
      p = w(os.path.join(D, "dup.jsonl"), rows + [good, bad])
-     recs, rej, _, _ = optimize.load_history(p)
-     keep, _d = optimize.comparable(recs)
-     q = optimize.history_quality(keep)
-     assert q == "PARTIAL", q
+     recs, rej, _l, ep = optimize.load_history(p)
+     # salinan yang MENGAKU sesuatu yang lain bukan retry: ia konflik identitas, dan ia memotong.
+     assert ep["run_id_conflicts"] == 1, ep
+     assert rej.get("duplicate run_id (retry)", 0) == 0, dict(rej)
+     assert optimize.damage_summary(ep)["boundaries"] == 1, optimize.damage_summary(ep)
+     assert len(optimize.active_records(recs, ep)) == 0, "populasi pra-konflik masih dipakai"
      """),
 
 
@@ -880,7 +882,8 @@ CASES = [
      """),
 
     ("M_SCOPE_DAMAGE_GLOBALIZED: kerusakan milik satu scope tak memotong scope lain",
-     [("optimize.py", "                    cuts_scope[scope_of(o)] += 1", "                    cuts_file += 1")],
+     [("optimize.py", '    return (e.get("file_global", 0), (e.get("scope_local") or {}).get(scope, 0))',
+       '    return (e.get("file_global", 0) + sum((e.get("scope_local") or {}).values()), 0)')],
      """
      good_a = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a")
                for i in range(6)]
@@ -979,8 +982,8 @@ CASES = [
      """),
 
     ("M_DEDUP_IGNORES_SCOPE: dua scope bisa punya nomor epoch yang sama",
-     [("optimize.py", '            rid = (scope_of(r), r.get(EPOCH_KEY, (0, 0))[0], rid)',
-       "            rid = (r.get(EPOCH_KEY, (0, 0))[0], rid)")],
+     [("optimize.py", '    return (scope_of(rec), rec.get(EPOCH_KEY, (0, 0))[0], rid)',
+       '    return (rec.get(EPOCH_KEY, (0, 0))[0], rid)')],
      """
      def degraded(scope):
          x = rec(100, {"Bash": 20.0, "Read": 80.0}, scope=scope)
@@ -999,6 +1002,9 @@ CASES = [
      cur = [r for r in optimize.active_records(recs, ep) if optimize.scope_of(r) == "a"]
      q = optimize.history_quality(optimize.comparable(cur)[0])
      assert q == "COMPLETE", (q, rej)
+     # run_id yang sama di scope LAIN bukan pengamatan yang sama: bukan retry, bukan konflik
+     assert ep["run_id_conflicts"] == 0, ep
+     assert rej.get("duplicate run_id (retry)", 0) == 0, dict(rej)
      """),
 
     # --------------------------- the trusted damage boundary (adversarial-review blocker B-UTF8)
@@ -1168,7 +1174,8 @@ CASES = [
      """),
 
     ("M_VALID_DEGRADED_POISONS_SCOPE_FOREVER: record sah yang kehilangan bukti membuka epoch",
-     [("optimize.py", "                if degrades_scope(o):", "                if False:")],
+     [("optimize.py", "                if verdict == RUN_ID_CONFLICT or degrades_scope(o):",
+       "                if verdict == RUN_ID_CONFLICT:")],
      """
      rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a")
              for i in range(6)]
@@ -1203,14 +1210,9 @@ CASES = [
 
     ("M_DEGRADED_RECORD_INCLUDED_POST_BOUNDARY: record yang melaporkan kehilangan ada di epoch LAMA",
      [("optimize.py",
-       "                o[EPOCH_KEY] = (cuts_file, cuts_scope[scope_of(o)])\n"
-       "                recs.append(o)\n"
-       "                if degrades_scope(o):",
-       "                if degrades_scope(o):\n"
-       "                    cuts_scope[scope_of(o)] += 1\n"
-       "                o[EPOCH_KEY] = (cuts_file, cuts_scope[scope_of(o)])\n"
-       "                recs.append(o)\n"
-       "                if False:")],
+       "                o[EPOCH_KEY] = (cuts_file, cuts_scope[scope_of(o)])",
+       "                o[EPOCH_KEY] = (cuts_file, cuts_scope[scope_of(o)]\n"
+       "                                + (1 if degrades_scope(o) else 0))")],
      """
      rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a")
              for i in range(6)]
@@ -1227,8 +1229,7 @@ CASES = [
      """),
 
     ("M_DEGRADED_RETRY_CUTS_TWICE: satu boundary per run logis, bukan per salinan",
-     [("optimize.py", "                    if ident is None or ident not in opened:",
-       "                    if True:")],
+     [("optimize.py", "                if verdict == TRUE_RETRY:", "                if False:")],
      """
      def deg(seq, bash, run_id):
          r = rec(100 + seq * 604800, {"Bash": bash, "Read": 100.0 - bash}, scope="a",
@@ -1251,8 +1252,8 @@ CASES = [
      """),
 
     ("M_DEGRADED_RETRY_NO_RECOVERY: retry tak boleh mencuci kehilangan yang dilaporkan kembarannya",
-     [("optimize.py", '            rid = (scope_of(r), r.get(EPOCH_KEY, (0, 0))[0], rid)',
-       "            rid = (scope_of(r), r.get(EPOCH_KEY), rid)")],
+     [("optimize.py", '    return (scope_of(rec), rec.get(EPOCH_KEY, (0, 0))[0], rid)',
+       '    return (scope_of(rec), rec.get(EPOCH_KEY), rid)')],
      """
      rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a")
              for i in range(5)]
@@ -1265,11 +1266,159 @@ CASES = [
            [json.dumps(r) for r in rows] + [json.dumps(deg), json.dumps(clean_retry)]
            + [json.dumps(r) for r in later])
      recs, rej, _l, ep = optimize.load_history(p)
-     assert rej.get("duplicate run_id (retry)") == 1, dict(rej)
+     # amandemen §7.6: kedua salinan BERBEDA, jadi yang belakangan adalah konflik identitas,
+     # bukan retry. Yang dijaga tetap sama: salinan bersih itu tak boleh jadi bukti epoch pulih.
+     assert ep["run_id_conflicts"] == 1, dict(rej)
+     assert rej.get("duplicate run_id (retry)", 0) == 0, dict(rej)
      cur = optimize.active_records(recs, ep)
      assert len(cur) == 6, ("salinan bersih dari run yang sama ikut jadi bukti", len(cur))
+     assert all(r.get("run_id") != "X" for r in cur), "salinan konflik masuk epoch pulih"
      """),
 
+
+    # ------------------------------- run-id conflict (author-adversarial review of 71016ee)
+    ("M_RUNID_CONFLICT_TREATED_AS_RETRY: run_id sama bukan bukti pengamatan sama",
+     [("optimize.py", "    return TRUE_RETRY if prior_digest == digest else RUN_ID_CONFLICT",
+       "    return TRUE_RETRY")],
+     """
+     def obs(seq, bash, run_id, unreadable=0, scanned=100):
+         r = rec(100 + seq * 604800, {"Bash": bash, "Read": 100.0 - bash}, scope="a",
+                 run_id=run_id)
+         r["unreadable"] = unreadable
+         r["scanned"] = scanned
+         return json.dumps(r)
+     mid = [json.dumps(rec(100 + (10 + i) * 604800,
+                           {"Bash": 36.0 + i * 3, "Read": 64.0 - i * 3}, scope="a"))
+            for i in range(6)]
+     tail = [json.dumps(rec(100 + (50 + i) * 604800,
+                            {"Bash": 72.0 + i * 3, "Read": 28.0 - i * 3}, scope="a"))
+             for i in range(6)]
+     p = w(os.path.join(D, "conflict.jsonl"),
+           [obs(0, 30.0, "X", unreadable=2)] + mid
+           + [obs(40, 66.0, "X", unreadable=9, scanned=150)] + tail)
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert ep["run_id_conflicts"] == 1, dict(rej)
+     assert rej.get("duplicate run_id (retry)", 0) == 0, dict(rej)
+     assert optimize.damage_summary(ep)["scope_local"] == {"a": 2}, optimize.damage_summary(ep)
+     assert len(optimize.active_records(recs, ep)) == 6, "bukti menyeberangi konflik identitas"
+     """),
+
+    ("M_RUNID_CONFLICT_SECOND_LOSS_SUPPRESSED: konflik identitas memotong di posisinya sendiri",
+     [("optimize.py", "                if verdict == RUN_ID_CONFLICT or degrades_scope(o):",
+       "                if degrades_scope(o) and verdict != RUN_ID_CONFLICT:")],
+     """
+     def obs(seq, bash, run_id, unreadable=0):
+         r = rec(100 + seq * 604800, {"Bash": bash, "Read": 100.0 - bash}, scope="a",
+                 run_id=run_id)
+         r["unreadable"] = unreadable
+         return json.dumps(r)
+     mid = [json.dumps(rec(100 + (10 + i) * 604800,
+                           {"Bash": 36.0 + i * 3, "Read": 64.0 - i * 3}, scope="a"))
+            for i in range(6)]
+     tail = [json.dumps(rec(100 + (50 + i) * 604800,
+                            {"Bash": 72.0 + i * 3, "Read": 28.0 - i * 3}, scope="a"))
+             for i in range(6)]
+     p = w(os.path.join(D, "second.jsonl"),
+           [obs(0, 30.0, "X", unreadable=2)] + mid + [obs(40, 66.0, "X", unreadable=9)] + tail)
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert len(optimize.active_records(recs, ep)) == 6, "kehilangan kedua tak dipotong"
+     """),
+
+    ("M_EXACT_RETRY_OPENS_SECOND_BOUNDARY: salinan PERSIS SAMA tetap satu kehilangan",
+     [("optimize.py", "    return TRUE_RETRY if prior_digest == digest else RUN_ID_CONFLICT",
+       "    return RUN_ID_CONFLICT")],
+     """
+     deg = rec(100, {"Bash": 30.0, "Read": 70.0}, scope="a", run_id="X")
+     deg["unreadable"] = 2
+     mid = [json.dumps(rec(100 + (10 + i) * 604800,
+                           {"Bash": 36.0 + i * 3, "Read": 64.0 - i * 3}, scope="a"))
+            for i in range(6)]
+     p = w(os.path.join(D, "exact.jsonl"), [json.dumps(deg)] + mid + [json.dumps(deg)])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert rej.get("duplicate run_id (retry)") == 1, dict(rej)
+     assert ep["run_id_conflicts"] == 0, dict(rej)
+     assert optimize.damage_summary(ep)["scope_local"] == {"a": 1}, optimize.damage_summary(ep)
+     assert len(optimize.active_records(recs, ep)) == 6, "epoch pulih terhapus retry persis"
+     """),
+
+    ("M_RUNID_CONFLICT_CROSSES_EPOCH: record yang mengontradiksi identitasnya ada di epoch LAMA",
+     [("optimize.py", "                o[EPOCH_KEY] = (cuts_file, cuts_scope[scope_of(o)])",
+       "                o[EPOCH_KEY] = (cuts_file, cuts_scope[scope_of(o)]\n"
+       "                                + (1 if retry_identity(o) in under else 0))")],
+     """
+     def obs(seq, bash, run_id, unreadable=0):
+         r = rec(100 + seq * 604800, {"Bash": bash, "Read": 100.0 - bash}, scope="a",
+                 run_id=run_id)
+         r["unreadable"] = unreadable
+         return json.dumps(r)
+     tail = [json.dumps(rec(100 + (50 + i) * 604800,
+                            {"Bash": 72.0 + i * 3, "Read": 28.0 - i * 3}, scope="a"))
+             for i in range(6)]
+     p = w(os.path.join(D, "crosses.jsonl"),
+           [obs(0, 30.0, "X"), obs(40, 66.0, "X", unreadable=9)] + tail)
+     recs, rej, _l, ep = optimize.load_history(p)
+     cur = optimize.active_records(recs, ep)
+     assert all(r.get("run_id") != "X" for r in cur), "record konflik masuk epoch yang ia buka"
+     assert len(cur) == 6, len(cur)
+     """),
+
+    ("M_RUNID_CONFLICT_CROSS_SCOPE_COLLIDES: run_id sama di scope lain bukan pengamatan yang sama",
+     [("optimize.py", '    return (scope_of(rec), rec.get(EPOCH_KEY, (0, 0))[0], rid)',
+       '    return (rec.get(EPOCH_KEY, (0, 0))[0], rid)')],
+     """
+     a = rec(100, {"Bash": 30.0, "Read": 70.0}, scope="a", run_id="X")
+     b = rec(200, {"Bash": 50.0, "Read": 50.0}, scope="b", run_id="X")
+     p = w(os.path.join(D, "xscope.jsonl"), [json.dumps(a), json.dumps(b)])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert ep["run_id_conflicts"] == 0, dict(rej)
+     assert optimize.damage_summary(ep)["boundaries"] == 0, optimize.damage_summary(ep)
+     assert len(recs) == 2, len(recs)
+     """),
+
+    ("M_RUNID_CONFLICT_GLOBAL_EPOCH_COLLIDES: kehilangan global memutus kontinuitas identitas",
+     [("optimize.py", '    return (scope_of(rec), rec.get(EPOCH_KEY, (0, 0))[0], rid)',
+       '    return (scope_of(rec), 0, rid)')],
+     """
+     a = rec(100, {"Bash": 30.0, "Read": 70.0}, scope="a", run_id="X")
+     b = rec(200, {"Bash": 50.0, "Read": 50.0}, scope="a", run_id="X")
+     p = w(os.path.join(D, "xglobal.jsonl"),
+           [json.dumps(a), chr(123) + '"torn":', json.dumps(b)])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert ep["run_id_conflicts"] == 0, dict(rej)
+     assert optimize.damage_summary(ep)["scope_local"] == {}, optimize.damage_summary(ep)
+     assert len(recs) == 2, len(recs)
+     """),
+
+    ("M_CLEAN_RUNID_CONFLICT_IGNORED: kontradiksi identitas tanpa kehilangan tetap integritas",
+     [("optimize.py", "                if verdict == RUN_ID_CONFLICT or degrades_scope(o):",
+       "                if degrades_scope(o):")],
+     """
+     a = rec(100, {"Bash": 30.0, "Read": 70.0}, scope="a", run_id="X")
+     b = rec(200, {"Bash": 50.0, "Read": 50.0}, scope="a", run_id="X")
+     tail = [json.dumps(rec(100 + (50 + i) * 604800,
+                            {"Bash": 72.0 + i * 3, "Read": 28.0 - i * 3}, scope="a"))
+             for i in range(6)]
+     p = w(os.path.join(D, "cleanconf.jsonl"), [json.dumps(a), json.dumps(b)] + tail)
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert ep["run_id_conflicts"] == 1, dict(rej)
+     assert optimize.damage_summary(ep)["scope_local"] == {"a": 1}, optimize.damage_summary(ep)
+     assert len(optimize.active_records(recs, ep)) == 6, "bukti menyeberangi kontradiksi identitas"
+     """),
+
+    ("M_PRIVATE_ANNOTATION_IN_FINGERPRINT: anotasi pembaca bukan bagian dari observasi",
+     [("optimize.py", "    body = {k: v for k, v in rec.items() if k not in READER_PRIVATE}",
+       "    body = dict(rec)")],
+     """
+     deg = rec(100, {"Bash": 30.0, "Read": 70.0}, scope="a", run_id="X")
+     deg["unreadable"] = 2
+     mid = [json.dumps(rec(100 + (10 + i) * 604800,
+                           {"Bash": 36.0 + i * 3, "Read": 64.0 - i * 3}, scope="a"))
+            for i in range(6)]
+     p = w(os.path.join(D, "private.jsonl"), [json.dumps(deg)] + mid + [json.dumps(deg)])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert rej.get("duplicate run_id (retry)") == 1, dict(rej)
+     assert ep["run_id_conflicts"] == 0, dict(rej)
+     """),
 ]
 
 
