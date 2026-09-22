@@ -16,13 +16,15 @@ noise, editing and retry work, without trading away correctness.
 | **Hermes Agent** | `hermes skills install https://raw.githubusercontent.com/ipeterpetrus/samewrite/v1.4.2/adapters/hermes/samewrite/SKILL.md --yes` | `/samewrite` |
 | **OpenClaw** | `(d=$(mktemp -d) && trap 'rm -rf "$d"' EXIT && curl -fsSL https://github.com/ipeterpetrus/samewrite/archive/refs/tags/v1.4.2.tar.gz \| tar -xz -C "$d" && openclaw skills install "$d"/samewrite-*/skills/samewrite)` | `$samewrite` or `/skill samewrite` |
 
-Every command above was executed against the real host in an isolated home or state directory, and
-is reported only because it worked there. The OpenClaw line additionally runs its download, extract
-and install steps inside a subshell with an `EXIT` trap: a failed download, a corrupt archive or a
-refused install all clean up after themselves, and your own shell traps are untouched
-(`bash tests/test_oneliner_cleanup.sh` forces each of those failures offline). The two raw-URL
-routes are **pinned to a release tag**, not to `main`, so what you install today is what you
-inspected. Claude Code and Codex use their own package managers, with their own update semantics.
+Each install mechanism above has been exercised against its real host, in an isolated home or
+state directory. The OpenClaw line additionally runs its download, extract and install steps inside
+a subshell with an `EXIT` trap: a failed download, a corrupt archive or a refused install all clean
+up after themselves, and your own shell traps are untouched (`bash tests/test_oneliner_cleanup.sh`
+forces each of those failures offline). The two raw-URL routes are **pinned to a release tag**, not
+to `main`, so what you install is the release you inspected. A release's pinned commands are
+checked offline for version and path consistency before it is published, and run against the
+published tag during release acceptance — which can only happen once that tag exists. Claude Code
+and Codex use their own package managers, with their own update semantics.
 
 The pinned URLs name **the same version as this README**: read this file at tag `v1.4.2` and the
 commands install `v1.4.2`. That is the whole point of pinning — nobody should end up installing a
