@@ -625,3 +625,97 @@ record.
 other, so a conflict that lands on a record which was ALSO degraded produces one boundary, not two —
 a boundary is a position, not a tally of reasons — while `run_id_conflicts` keeps counting the
 reasons separately.
+
+## 8. Candidate path containment — issue #15 (frozen before the repair)
+
+`finding()` builds a **logical** identity, `f"{cid}-{scope}-{digest[:8]}"`, with the analysed scope
+in it verbatim, and `emit_candidates()` used that identity directly as a **pathname**:
+`os.path.join(outdir, candidate_id)`. A scope is an opaque label, never validated as a path, so a
+scope such as `x/../../up` put `HYPOTHESIS.md` outside the operator's `--emit-candidate` root.
+
+Root cause: *logical candidate identity* and *filesystem storage name* were one value. The repair
+separates them; it does not sanitise the scope, and it does not change `candidate_id`.
+
+### 8.1 Reproduced on `main` 2ee3cb2 before anything was designed
+
+Emit root `<sandbox>/root/lvl1/…/lvl11/emit` (twelve levels deep, so no case can leave the
+sandbox). Resolved on disk with `os.path.realpath`, not inferred from the identifier:
+
+```text
+PATH_01  history scope default              CANDIDATE 10  emit/trend-bash-default-c806aa12/          inside
+PATH_03  --scope-id x/../../up              CANDIDATE 10  lvl11/up-3f8801fe/     (1 level above)     OUTSIDE
+PATH_04  --scope-id x/../../../../up4       CANDIDATE 10  lvl9/up4-…/            (3 levels above)    OUTSIDE
+PATH_05  --scope-id a/b/c/ + 12 × ../       CANDIDATE 10  lvl3/deep-…/           (9 levels above)    OUTSIDE
+PATH_06  history scope team/a               CANDIDATE 10  emit/trend-bash-team/a-…/  (nested dirs)   inside
+PATH_09  history scope x/../../../hist      CANDIDATE 10  lvl10/hist-…/          (2 levels above)    OUTSIDE
+PATH_10  --scope-id x/../../../cli          CANDIDATE 10  lvl10/cli-…/           (2 levels above)    OUTSIDE
+PATH_11  history scope a<NUL>b              rc 1, ValueError traceback from os.makedirs, no --json at all
+PATH_16  emit/<candidate dir> is a symlink  CANDIDATE 10  <sandbox>/outside_target/HYPOTHESIS.md     OUTSIDE
+```
+
+`BASE_PATH_CONTAINMENT=ESCAPES` · `BASE_NUL_BEHAVIOR=TRACEBACK` · `BASE_SYMLINK=FOLLOWED`.
+
+### 8.2 The rule this section freezes
+
+> A candidate emission requested under OUTDIR never creates, replaces or inspects a candidate
+> artifact outside OUTDIR because of candidate-controlled identity or path components.
+
+* `candidate_storage_component(candidate_id)` is the ONE mapping from a logical id to a directory
+  name. An id that is already a single ordinary component is its own name, byte for byte. Any id
+  containing `/` or `\` (either platform's separator), equal to `.`, `..` or empty, or starting
+  with the reserved prefix `candidate-sha256-` is stored as
+  `candidate-sha256-<sha256 of the complete logical id>`: deterministic, one component, never a dot
+  segment, and two different logical ids cannot share it by construction.
+* An id holding NUL, or text the filesystem encoding cannot represent, is **not** hashed into a
+  name. It is refused: listed in `candidates_failed`, `INTERNAL_ERROR` / 50 when nothing else was
+  written, a static diagnostic, no traceback, no file, no temporary file, no lock left behind.
+* The emitter enforces containment itself, whatever the caller hands it: the candidate directory
+  must be a direct child of the resolved output root (path semantics — `normpath`, `dirname` —
+  never a string prefix), and a pre-existing symbolic link at that name is refused, not followed.
+* `candidate_ids`, `candidates_written`, `candidates_existing`, `candidates_failed` keep meaning
+  LOGICAL ids. `HYPOTHESIS.md` keeps stating the logical `candidate_id` and `scope_id`. No output
+  field is added and `output_schema_version` stays 2.
+
+### 8.3 The frozen matrix
+
+`hashed` = `candidate-sha256-<sha256(candidate_id)>`. Every row: no traceback, no `.tmp-*` file
+anywhere in the sandbox, no `.optimize.lock` left, every `HYPOTHESIS.md` inside the emit root.
+
+| case | input | status | exit | written / existing / failed | directory |
+|---|---|---|---|---|---|
+| **PATH_01** | history scope `default` | `CANDIDATE` | 10 | 1 / 0 / 0 | the logical id itself (unchanged from `main`) |
+| **PATH_02** | history scope `agent-a` | `CANDIDATE` | 10 | 1 / 0 / 0 | the logical id itself (unchanged from `main`) |
+| **PATH_03** | `--scope-id x/../../up` | `CANDIDATE` | 10 | 1 / 0 / 0 | hashed |
+| **PATH_04** | `--scope-id x/../../../../up4` | `CANDIDATE` | 10 | 1 / 0 / 0 | hashed |
+| **PATH_05** | `--scope-id a/b/c/` + 12 × `../` + `deep` | `CANDIDATE` | 10 | 1 / 0 / 0 | hashed |
+| **PATH_06** | history scope `team/a` (and `a\..\..\b`) | `CANDIDATE` | 10 | 1 / 0 / 0 | hashed |
+| **PATH_07** | history scope `..`, `.` | `CANDIDATE` | 10 | 1 / 0 / 0 | the logical id itself: `trend-bash-..-…` is one ordinary component |
+| **PATH_08** | history scope `/abs/x` | `CANDIDATE` | 10 | 1 / 0 / 0 | hashed |
+| **PATH_09** | history scope `x/../../../hist` | `CANDIDATE` | 10 | 1 / 0 / 0 | hashed |
+| **PATH_10** | `--scope-id x/../../../cli` | `CANDIDATE` | 10 | 1 / 0 / 0 | hashed |
+| **PATH_11** | history scope `a<NUL>b` | `INTERNAL_ERROR` | 50 | 0 / 0 / 1 | none — refused, `--json` still printed |
+| **PATH_12** | PATH_09 run twice into one root | `CANDIDATE` both | 10 | run 2: 0 / 1 / 0 | one hashed directory, file not rewritten |
+| **PATH_13** | two different unsafe scopes, one root | `CANDIDATE` both | 10 | 1 / 0 / 0 each | two different hashed directories |
+| **PATH_14** | the storage directory already holds `HYPOTHESIS.md` (safe and unsafe id) | `CANDIDATE` | 10 | 0 / 1 / 0 | untouched |
+| **PATH_15** | a regular file sits where the storage directory goes (safe and unsafe id) | `INTERNAL_ERROR` | 50 | 0 / 0 / 1 | none; no temporary file |
+| **PATH_16** | the storage name is a symlink to a sandbox sibling outside the root | `INTERNAL_ERROR` | 50 | 0 / 0 / 1 | none; the sibling stays empty |
+
+Plus one row the CLI cannot reach: `emit_candidates()` handed an id whose storage mapping has been
+replaced by the identity function (a future caller that skips the helper) must refuse it rather
+than climb.
+
+### 8.4 What this section does not cover
+
+* Issue #14 (a non-string `run_id` breaking the rendered specification) is a different root and is
+  untouched.
+* A scope holding a lone UTF-16 surrogate crashes earlier, inside `finding()`'s own digest, before
+  any path exists; that is identity hashing, not path handling, and is left for its own issue.
+* The containment check and the directory creation are two system calls. An adversary who can
+  already write inside OUTDIR could swap in a symlink between them; closing that race needs
+  `dir_fd`/`O_NOFOLLOW` creation throughout, which is a different design. Likewise a symlink
+  planted at `HYPOTHESIS.md` inside a real candidate directory is not candidate-controlled identity
+  and is not addressed here.
+
+### 8.5 Deviations from this frozen section
+
+None yet.
