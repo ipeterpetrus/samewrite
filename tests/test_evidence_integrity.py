@@ -438,6 +438,131 @@ def main():
     check("and the bound is still reported against the whole population",
           swept["skipped_by_limit"], 1)
 
+    # ============================================================ B1: the history epoch
+    # An unattributable loss cuts the promotion history at that physical position. Evidence before
+    # the cut never joins evidence after it; the loss stays reported; the newest epoch is, by
+    # construction, free of damage. docs/V142_COUNTEREXAMPLES.md §5 froze every row below.
+    print("\nB1 - a damaged history recovers, and the loss is still reported")
+    TORN = '{"schema_version": 2, "record_type": "carry_run", "ts": 1750000000, "sessions": 5'
+    FOREIGN = json.dumps({"note": "another tool's line in a shared file"})
+    ENVELOPE = json.dumps({"envelope": {"schema_version": 4, "run_id": "x"}, "payload": {},
+                           "certificate": {}})
+
+    def series(n, first=0, scope="default", per_week=3.0, base=30.0):
+        return [json.dumps(rec(first + i, base + per_week * i, scope=scope)) for i in range(n)]
+
+    def b1(label, rows, status, code, files, comparable, epoch, quality, boundaries, extra=()):
+        rc, j, n = run(rows, extra=extra)
+        got = (j["status"], rc, n, j["history"]["comparable"],
+               j["scope"].get("records_in_epoch"), j["history"].get("quality"),
+               (j["history"].get("damage") or {}).get("boundaries"))
+        check(label, got, (status, code, files, comparable, epoch, quality, boundaries))
+
+    b1("B1_01 loss at the tail leaves no epoch to promote from",
+       series(6) + [TORN], "INSUFFICIENT_DATA", 20, 0, 0, 0, "EMPTY", 1)
+    b1("B1_02 an epoch too small to carry a trend",
+       series(6) + [TORN] + series(2, 20), "INSUFFICIENT_DATA", 20, 0, 2, 2, "COMPLETE", 1)
+    b1("B1_03 a sufficient post-loss epoch promotes on its own",
+       series(6) + [TORN] + series(6, 20), "CANDIDATE", 10, 1, 6, 6, "COMPLETE", 1)
+    b1("B1_04 and it still promotes sixty records later",
+       series(6) + [TORN] + series(60, 20, per_week=1.0, base=20.0),
+       "CANDIDATE", 10, 1, 60, 60, "COMPLETE", 1)
+    b1("B1_05 an unattributable loss cuts every scope (analysing the recovered one)",
+       series(6, scope="agent-a") + [TORN] + series(6, 20, scope="agent-b"),
+       "CANDIDATE", 10, 1, 6, 6, "COMPLETE", 1)
+    b1("B1_05b ...and the scope with nothing after the loss says so",
+       series(6, scope="agent-a") + [TORN] + series(6, 20, scope="agent-b"),
+       "INSUFFICIENT_DATA", 20, 0, 0, 0, "EMPTY", 1, extra=["--scope-id", "agent-a"])
+    b1("B1_06 two boundaries: only the newest epoch is analysed",
+       series(6) + [TORN] + series(6, 20) + [TORN] + series(6, 40),
+       "CANDIDATE", 10, 1, 6, 6, "COMPLETE", 2)
+    b1("B1_07 a loss before any record does not stop the file",
+       [TORN] + series(6), "CANDIDATE", 10, 1, 6, 6, "COMPLETE", 1)
+    b1("B1_09 a foreign line is not a loss",
+       series(6) + [FOREIGN], "CANDIDATE", 10, 1, 6, 6, "COMPLETE", 0)
+    b1("B1_10 current-generation evidence refused by design is not a loss",
+       series(6) + [ENVELOPE], "CANDIDATE", 10, 1, 6, 6, "COMPLETE", 0)
+    b1("B1_12 records the law calls INVALID are refused, not a loss",
+       [json.dumps(rec(i, 30.0 + 3.0 * i, sessions=0, scanned=40)) for i in range(6)],
+       "PARTIAL_EVIDENCE", 40, 0, 0, 6, "EMPTY", 0)
+
+    # B1_08: a truncated final line, written the way a crash leaves one
+    trunc_dir = tempfile.mkdtemp(dir=d)
+    trunc = os.path.join(trunc_dir, "history.jsonl")
+    with open(trunc, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(series(6)) + "\n")
+        fh.write('{"schema_version": 2, "record_type": "carry_run", "ts": 17500000')
+    out_dir = os.path.join(trunc_dir, "cand")
+    proc = subprocess.run([sys.executable, OPT, "--history", trunc, "--ledger",
+                           os.path.join(trunc_dir, "none.jsonl"), "--scan", "--emit-candidate",
+                           out_dir, "--json", "--strict-exit"], capture_output=True, text=True,
+                          timeout=300)
+    jt = json.loads(proc.stdout)
+    # the emit directory itself is created by the LOCK, before any status is known; what the
+    # matrix froze is the candidate-FILE count
+    spec_files = [f for _b, _dd, fs in os.walk(out_dir) for f in fs if f != ".optimize.lock"]
+    check("B1_08 a truncated final line is the same loss",
+          (jt["status"], proc.returncode, len(spec_files),
+           (jt["history"].get("damage") or {}).get("boundaries")),
+          ("INSUFFICIENT_DATA", 20, 0, 1))
+
+    print("\nB1_11 / M2 - a zero-carry sweep is readable evidence, not corruption")
+    zero_carry = dict(rec(9, 0.0), shares={}, bpt={}, carry_bytes=0)
+    ok, why = optimize.valid_record(zero_carry)
+    check("the reader accepts the shape the producer writes", (ok, why), (True, ""))
+    check("and the quality law calls it EMPTY, not INVALID",
+          optimize.record_quality(zero_carry), "EMPTY")
+    b1("B1_11 one zero-carry record does not stop a healthy population",
+       series(6) + [json.dumps(zero_carry)], "CANDIDATE", 10, 1, 6, 7, "COMPLETE", 0)
+    b1("B1_11b a history of nothing but zero-carry records is not damage",
+       [json.dumps(dict(rec(i, 0.0), shares={}, bpt={}, carry_bytes=0)) for i in range(6)],
+       "INSUFFICIENT_DATA", 20, 0, 0, 6, "EMPTY", 0)
+    check("carry with no shares is still a contradiction",
+          optimize.record_quality(dict(rec(9, 40.0), carry_bytes=0)), "INVALID")
+    check("shares with no carry is still a contradiction",
+          optimize.record_quality(dict(rec(9, 40.0), shares={}, bpt={})), "INVALID")
+    # the producer's own words, executed: a session whose items all land on its last turn
+    zt = os.path.join(d, "zero_carry.jsonl")
+    with open(zt, "w", encoding="utf-8") as fh:
+        for i in range(5):
+            fh.write(json.dumps({"type": "assistant", "message": {
+                "id": f"t{i}", "usage": {"output_tokens": 3}, "content": []}}) + "\n")
+        fh.write(json.dumps({"type": "assistant", "message": {
+            "id": "last", "usage": {"output_tokens": 3},
+            "content": [{"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}]}}) + "\n")
+    zsweep = carry.accumulate([zt], min_turns=1)
+    check("the producer really can measure zero carry",
+          (zsweep["sessions"] > 0, sum(zsweep["carry"].values())), (True, 0))
+
+    print("\nB1_13 - one run_id on both sides of a boundary")
+    dup_before = series(5) + [json.dumps(dict(json.loads(series(1, 5)[0]), run_id="carried"))]
+    dup_after = [json.dumps(dict(json.loads(r), run_id="carried" if i == 0 else None))
+                 for i, r in enumerate(series(6, 20))]
+    dup_after = [json.dumps({k: v for k, v in json.loads(r).items() if v is not None})
+                 for r in dup_after]
+    b1("B1_13 the post-loss epoch keeps its own copy",
+       dup_before + [TORN] + dup_after, "CANDIDATE", 10, 1, 6, 6, "COMPLETE", 1)
+    same_epoch = series(5) + [json.dumps(dict(json.loads(series(1, 5)[0]), run_id="twin")),
+                              json.dumps(dict(json.loads(series(1, 6)[0]), run_id="twin",
+                                              evidence_quality="PARTIAL", skipped_by_limit=9))]
+    rc, j, n = run(same_epoch)
+    check("B1_13b a retry inside one epoch still lowers the survivor",
+          (j["history"]["quality"], j["status"], n), ("PARTIAL", "PARTIAL_EVIDENCE", 0))
+
+    print("\nM1 - history.quality describes the evidence eligible RIGHT NOW")
+    rc, j, n = run([json.dumps(rec(i, 30.0 + 3.0 * i, sessions=0, scanned=40)) for i in range(6)])
+    check("nothing comparable is never reported as COMPLETE",
+          (j["history"]["comparable"], j["history"]["quality"]), (0, "EMPTY"))
+
+    print("\nthe damage is reported even while the current epoch is clean")
+    rc, j, n = run(series(6) + [TORN] + series(6, 20))
+    check("the rejection is still counted", j["history"]["rejected"].get("unparseable line"), 1)
+    check("and the file's historical damage is named",
+          ((j["history"].get("damage") or {}).get("boundaries"),
+           (j["history"].get("damage") or {}).get("file_global")), (1, 1))
+    check("while the analysed epoch is clean and promotes",
+          (j["history"]["quality"], j["status"]), ("COMPLETE", "CANDIDATE"))
+
     # ---------------------------------------------------------------- positive controls
     print("\npositive controls - a gate that refuses everything is not a gate")
     good = good_rows

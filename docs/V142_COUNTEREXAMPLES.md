@@ -88,3 +88,76 @@ Confirmation round, attacking the repair again:
 | **R142_15b** | a record carrying `malformed`, `malformed_lines`, `identity_changed`, `conflicted_sources` or `records_rejected` | `DEGRADED` — a loss must be honoured wherever the reader can see it, not only in the two counters the first cut looked at |
 | **R142_16** | history + one record from an unsupported schema 3, and one whose shares sum to 10 | `PARTIAL_EVIDENCE` / exit 40 / 0 files — a rejected line is damage unless it is a refusal by design, a deduplicated retry, or a line that was never a carry record (control: a foreign line still promotes) |
 | **R142_17** | ledger of 100 `checked` lines plus one `{"event": "garbage"}` | the unaccountable line counts as rejected and the guard only observes |
+
+## 5. B1 — the blocker an independent acceptance review found, and the epoch matrix
+
+The first head of this branch closed the six original defects (§1–§4) and introduced one of its own.
+An **independent acceptance review of PR #13 BLOCKED it**: container damage was permanent. One torn
+line — the crash fragment `docs/MULTI_AGENT.md` §Concurrency calls an expected event, the one the
+reader is designed to "reject exactly that line and count it" — set the whole file to `DEGRADED`
+forever. Nothing in the product expires, rotates or repairs a history (`docs/MULTI_AGENT.md`: "The
+optimizer does not schedule, expire or rotate"), and `--accept-partial` cannot adopt `DEGRADED` by
+design, so a single crash permanently disabled promotion for **every scope** sharing
+`~/logs/carry_history.jsonl`.
+
+Measured on that head before the repair (every row: zero candidate files, exit 40, forever):
+
+```text
+6 good + torn                         PARTIAL_EVIDENCE  exit 40  comparable 6   hq DEGRADED
+6 good + torn + 2 good                PARTIAL_EVIDENCE  exit 40  comparable 8   hq DEGRADED
+6 good + torn + 6 good                PARTIAL_EVIDENCE  exit 40  comparable 12  hq DEGRADED
+6 good + torn + 60 good               PARTIAL_EVIDENCE  exit 40  comparable 66  hq DEGRADED
+scope-a good + torn + scope-b good    PARTIAL_EVIDENCE  exit 40  comparable 6   hq DEGRADED
+torn first + 6 good                   PARTIAL_EVIDENCE  exit 40  comparable 6   hq DEGRADED
+zero-carry record (shares {})         PARTIAL_EVIDENCE  exit 40  comparable 6   hq DEGRADED
+6 good + torn + 60 good, --accept-partial               exit 40  (no flag can adopt a loss)
+```
+
+### The replacement: a history EPOCH, cut at the physical position of the loss
+
+An unattributable loss cuts the promotion history **at that line's position in the file**. Evidence
+before the cut and evidence after it are never combined for a promotion; the loss stays reported;
+the newest epoch is, by construction, free of damage. No time window, no expiry, no ratio, no new
+override flag — and `--accept-partial` still adopts only a caller's chosen bound, never a loss.
+
+| case | fixture (physical order) | status | exit | files | comparable | active epoch | history.quality | boundaries |
+|---|---|---|---|---|---|---|---|---|
+| **B1_01** | 6 good, torn | `INSUFFICIENT_DATA` | 20 | 0 | 0 | 0 | `EMPTY` | 1 |
+| **B1_02** | 6 good, torn, 2 good | `INSUFFICIENT_DATA` | 20 | 0 | 2 | 2 | `COMPLETE` | 1 |
+| **B1_03** | 6 good, torn, 6 good | `CANDIDATE` | 10 | 1 | 6 | 6 | `COMPLETE` | 1 |
+| **B1_04** | 6 good, torn, 60 good | `CANDIDATE` | 10 | 1 | 60 | 60 | `COMPLETE` | 1 |
+| **B1_05** | scope-a 6 good, torn, scope-b 6 good | `CANDIDATE` (scope b) · `INSUFFICIENT_DATA` with `--scope-id a` | 10 · 20 | 1 · 0 | 6 · 0 | 6 · 0 | `COMPLETE` · `EMPTY` | 1 |
+| **B1_06** | 6 good, torn, 6 good, torn, 6 good | `CANDIDATE` | 10 | 1 | 6 | 6 | `COMPLETE` | 2 |
+| **B1_07** | torn, 6 good | `CANDIDATE` | 10 | 1 | 6 | 6 | `COMPLETE` | 1 |
+| **B1_08** | 6 good, truncated final line | `INSUFFICIENT_DATA` | 20 | 0 | 0 | 0 | `EMPTY` | 1 |
+| **B1_09** | 6 good, foreign JSON line | `CANDIDATE` | 10 | 1 | 6 | 6 | `COMPLETE` | 0 |
+| **B1_10** | 6 good, schema-4 envelope line | `CANDIDATE` | 10 | 1 | 6 | 6 | `COMPLETE` | 0 |
+| **B1_11** | 6 good, zero-carry record (`shares {}`, `carry_bytes 0`) | `CANDIDATE` | 10 | 1 | 6 | 7 | `COMPLETE` | 0 |
+| **B1_12** | 6 records the law calls INVALID | `PARTIAL_EVIDENCE` | 40 | 0 | 0 | 6 | `EMPTY` | 0 |
+| **B1_13** | 5 good, `run_id=X` good, torn, `run_id=X` good ×6 | `CANDIDATE` | 10 | 1 | 6 | 6 | `COMPLETE` | 1 |
+
+Rules the matrix encodes:
+
+* **Unattributable loss → file-global boundary.** An unparseable line, an oversized line or an
+  unreadable file cannot name a scope, so the cut applies to every scope.
+* **Parseable rejection carrying a readable `scope_id` → scope-local boundary.** Only that scope's
+  continuity is cut; a sibling agent is not punished for a neighbour's corrupted record. Attribution
+  trusts the record's own `scope_id` (a string of 1–64 characters, no control bytes) and falls back
+  to file-global whenever it cannot be read.
+* **Not damage, so not a boundary:** a well-formed foreign JSON line, current-generation (schema-4)
+  evidence refused by design, and a deduplicated retry.
+* **The damage is still reported** — `history.rejected` counts it and `history.damage` says how many
+  boundaries the file holds — while `history.quality` describes only the evidence eligible for the
+  CURRENT analysis. A historical gap stays true while the post-gap evidence is independently
+  complete.
+* **`history.quality` with nothing comparable is `EMPTY`, never `COMPLETE`** (the acceptance
+  review's MEDIUM M1).
+* **A zero-carry sweep is readable evidence, not corruption** (MEDIUM M2). `carry.py` says it in its
+  own report — "A session whose every item lands on its final turn carries nothing" — the 1.3 writer
+  emits `shares: {}` for it and the current writer guards `if C else {}`. Measured on this branch:
+  `carry.accumulate()` on such a transcript returns `sessions=1 turns=6 carry_total=0`. The record
+  is `EMPTY` for the quality law: nothing to compare, and nothing wrong with the file.
+
+### 5.1 Deviations from this frozen matrix
+
+None.
