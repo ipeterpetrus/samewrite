@@ -262,7 +262,7 @@ def main():
     worse["run_id"] = "dup"
     dup.append(worse)
     hist_path = write(os.path.join(d, "dup.jsonl"), dup)
-    recs, rejected, _lines = optimize.load_history(hist_path)
+    recs, rejected, _lines, _ep = optimize.load_history(hist_path)
     check("the retry is dropped as an observation", len(recs), 6)
     check("and counted", rejected["duplicate run_id (retry)"], 1)
     keep, _dropped = optimize.comparable(recs)
@@ -315,11 +315,20 @@ def main():
          "PARTIAL_EVIDENCE", 40, 0, comparable=0)
 
     print("\nR142_11 - a torn line in the history file is lost evidence, not a footnote")
+    # Expectation updated by the B1 repair (docs/V142_COUNTEREXAMPLES.md §5.1): the loss still
+    # refuses the records it followed — nothing is promoted and nothing is written — but it is a
+    # BOUNDARY, not a verdict on the file, so the status is "no epoch to analyse" rather than a
+    # permanent PARTIAL_EVIDENCE that no later evidence could ever clear.
     torn_hist = [json.dumps(r) for r in good_rows] + ['{"torn":']
-    j = case("R142_11", torn_hist, "PARTIAL_EVIDENCE", 40, 0, history_quality="DEGRADED")
+    j = case("R142_11", torn_hist, "INSUFFICIENT_DATA", 20, 0, history_quality="EMPTY")
     check("the torn line is still counted", j["history"]["rejected"].get("unparseable line"), 1)
+    check("and the file's loss is named", (j["history"].get("damage") or {}).get("boundaries"), 1)
     case("R142_11 (--accept-partial does not adopt a loss)", torn_hist,
-         "PARTIAL_EVIDENCE", 40, 0, extra=["--accept-partial"])
+         "INSUFFICIENT_DATA", 20, 0, extra=["--accept-partial"])
+    check("the records BEFORE the loss cannot support a promotion after it",
+          run([json.dumps(r) for r in good_rows] + ['{"torn":']
+              + [json.dumps(rec(i, 30.0 + 3.0 * i)) for i in range(20, 22)])[1]["history"]["comparable"],
+          2)
     envelope_line = json.dumps({"envelope": {"schema_version": 4, "run_id": "x"},
                                 "payload": {}, "certificate": {}})
     foreign = json.dumps({"note": "another tool's line in a shared file"})
@@ -379,15 +388,20 @@ def main():
     print("\nR142_15 - a rejected line is damage unless it is one of the named exceptions")
     for line, label, status, quality in (
             ('{"schema_version":3,"record_type":"carry_run","shares":{"Bash":60.0,"Read":40.0}}',
-             "a record from a schema this reader does not know", "PARTIAL_EVIDENCE", "DEGRADED"),
+             "a record from a schema this reader does not know", "INSUFFICIENT_DATA", "EMPTY"),
             ('{"schema_version":2,"record_type":"carry_run","shares":{"Bash":10.0}}',
-             "a carry record whose shares do not sum to a population", "PARTIAL_EVIDENCE",
-             "DEGRADED"),
+             "a carry record whose shares do not sum to a population", "INSUFFICIENT_DATA",
+             "EMPTY"),
             ('{"note": "another tool\'s line in a shared file"}',
              "a line that was never a carry record", "CANDIDATE", "COMPLETE")):
+        code = {"INSUFFICIENT_DATA": 20, "PARTIAL_EVIDENCE": 40, "CANDIDATE": 10}[status]
         case(f"R142_15: {label}", [json.dumps(r) for r in good_rows] + [line],
-             status, 40 if status == "PARTIAL_EVIDENCE" else 10,
-             0 if status == "PARTIAL_EVIDENCE" else 1, history_quality=quality)
+             status, code, 1 if status == "CANDIDATE" else 0, history_quality=quality)
+        if status != "CANDIDATE":
+            # the same rejected line BEFORE a healthy population: the loss cuts, it does not kill
+            case(f"R142_15: {label} — and a population after it still stands",
+                 [line] + [json.dumps(r) for r in good_rows], "CANDIDATE", 10, 1,
+                 comparable=6, history_quality="COMPLETE")
 
     print("\nR142_16 - a ledger line that is neither a write nor a denial is a line lost")
     led_dir = tempfile.mkdtemp(dir=d)
@@ -410,9 +424,12 @@ def main():
           optimize.sweep_quality(dict(live_impossible, turns=2000)), "COMPLETE")
     claims_ours = json.dumps({"schema_version": 2, "record_type": "carry_run", "ts": TS0,
                               "sessions": 40, "turns": 1000, "carry_bytes": 10 ** 7})
-    case("R142_18: a carry record with no shares is damage",
+    case("R142_18: a carry record with no shares key at all is a loss",
          [json.dumps(r) for r in good_rows] + [claims_ours],
-         "PARTIAL_EVIDENCE", 40, 0, history_quality="DEGRADED")
+         "INSUFFICIENT_DATA", 20, 0, history_quality="EMPTY")
+    case("R142_18: ...and a population after that loss still stands",
+         [claims_ours] + [json.dumps(r) for r in good_rows], "CANDIDATE", 10, 1,
+         comparable=6, history_quality="COMPLETE")
     tmp_dir = tempfile.mkdtemp(dir=d)
     blocked_id = [f["candidate_id"] for f in optimize.analyse(
         None, {"comparable": good_rows, "total": 6, "in_scope": 6, "rejected": {}, "dropped": [],

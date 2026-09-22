@@ -71,10 +71,21 @@ def main():
     p = write(os.path.join(d, "corrupt.jsonl"),
               [rec(100, {"Bash": 50.0, "Read": 50.0}, run_id="a" * 32), "{tidak lengkap", "", "null",
                rec(100, {"Bash": 50.0, "Read": 50.0}, run_id="a" * 32)])     # penulisan ULANG run yang sama
-    recs, rejected, lines = optimize.load_history(p)
-    check("JSONL rusak: satu record sah bertahan", len(recs), 1)
+    recs, rejected, lines, epochs = optimize.load_history(p)
+    # Sejak perbaikan B1: baris robek MEMOTONG riwayat di posisi fisiknya. Record sesudah potongan
+    # adalah pengamatan milik epoch BARU — termasuk bila run_id-nya sama — jadi keduanya bertahan
+    # dan tak ada yang dihitung sebagai retry. Yang dijaga: record SEBELUM potongan tidak ikut
+    # dianalisis, dan duplikat DI DALAM satu epoch tetap dibuang + menurunkan kualitas survivor.
+    check("JSONL rusak: record sebelum & sesudah potongan sama-sama terbaca", len(recs), 2)
     check("baris tak terparse dihitung", rejected["unparseable line"], 1)
-    check("run_id sama (retry) dihitung sekali", rejected["duplicate run_id (retry)"], 1)
+    check("run_id sama di SISI LAIN potongan bukan retry", rejected["duplicate run_id (retry)"], 0)
+    check("hanya epoch terbaru yang aktif", len(optimize.active_records(recs, epochs)), 1)
+    p_same = write(os.path.join(d, "same_epoch.jsonl"),
+                   [rec(100, {"Bash": 50.0, "Read": 50.0}, run_id="d" * 32),
+                    rec(101, {"Bash": 50.0, "Read": 50.0}, run_id="d" * 32)])
+    recs_same, rej_same, _l, _e = optimize.load_history(p_same)
+    check("run_id sama DI DALAM satu epoch tetap dihitung sekali",
+          (len(recs_same), rej_same["duplicate run_id (retry)"]), (1, 1))
     # Dua AGEN boleh menghasilkan metrik identik. Tanpa run_id itu dua pengamatan, bukan duplikat:
     # membuang salah satunya akan mengecilkan populasi yang sedang diukur.
     p2 = write(os.path.join(d, "twin.jsonl"),
@@ -87,7 +98,7 @@ def main():
     p = write(os.path.join(d, "shrink.jsonl"),
               [rec(100, {"Bash": 40.0, "Read": 60.0}, turns=10000),
                rec(200, {"Bash": 60.0, "Read": 40.0}, turns=1000)])
-    recs, _, _ = optimize.load_history(p)
+    recs, _, _, _ = optimize.load_history(p)
     keep, dropped = optimize.comparable(recs)
     check("korpus menyusut 10x -> record lama TIDAK dibandingkan", (len(keep), len(dropped)), (1, 1))
     check("jam mundur terdeteksi",

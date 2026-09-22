@@ -161,3 +161,26 @@ Rules the matrix encodes:
 ### 5.1 Deviations from this frozen matrix
 
 None.
+
+### 5.2 Expectations the epoch model supersedes
+
+Three rows written for the first head's permanent-damage model are now wrong, and are replaced
+rather than quietly re-run. In each, the damaged line sits at the END of the file, so there is no
+post-loss epoch: the outcome is still **no promotion and no candidate file**, and what changes is
+only the word for it and whether later evidence can ever clear it.
+
+```text
+R142_11  torn line in the history        PARTIAL_EVIDENCE / DEGRADED  ->  INSUFFICIENT_DATA / EMPTY
+R142_15  unsupported schema, bad shares  PARTIAL_EVIDENCE / DEGRADED  ->  INSUFFICIENT_DATA / EMPTY
+R142_18  carry record with no shares KEY PARTIAL_EVIDENCE / DEGRADED  ->  INSUFFICIENT_DATA / EMPTY
+```
+
+Each keeps its protection and gains a companion case: the same rejected line placed BEFORE a healthy
+population, where the population after the loss must stand on its own. The records before the loss
+are never counted with the records after it — `R142_11` pins that as `comparable == 2` for
+`6 good + torn + 2 good`.
+
+Dedup across a boundary is also new, and is stated rather than inherited: deduplication is
+**per epoch**. The same `run_id` on the far side of a loss is that population's own observation and
+is kept; inside one epoch the retry is still dropped, still counted, and still cannot launder the
+survivor's quality (`tests/test_optimize.py` pins both).

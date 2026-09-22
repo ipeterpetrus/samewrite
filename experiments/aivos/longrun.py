@@ -158,7 +158,7 @@ def longrun(days, cycles, out, plateau=20):
 
         day_new = 0
         for _cycle in range(cycles):
-            recs, _rej, _lines = optimize.load_history(hist)
+            recs, _rej, _lines, _ep = optimize.load_history(hist)
             scopes = optimize.by_scope(recs)
             for role in ROLES:
                 keep, dropped = optimize.comparable(scopes.get(role, []))

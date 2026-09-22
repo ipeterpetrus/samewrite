@@ -37,8 +37,15 @@ import skills as skills_tool  # noqa: E402  (listing usage — reused)
 
 OPTIMIZER_VERSION = "1.0"
 OUTPUT_SCHEMA_VERSION = 2        # shape of --json; bump when a field's meaning changes
-                                 # 2 = `evidence_quality` is DERIVED (may read DEGRADED/UNKNOWN),
-                                 #     and `history.quality` reports the eligible history's worst
+                                 # 2 (unreleased) = `evidence_quality` is DERIVED and may read
+                                 #   DEGRADED/UNKNOWN · `history.quality` is the worst quality of
+                                 #   the evidence ELIGIBLE FOR THIS ANALYSIS, and is EMPTY when
+                                 #   nothing is comparable · `history.damage` counts the loss
+                                 #   boundaries the file holds · `scope.records_in_scope` counts the
+                                 #   whole scope while `scope.records_in_epoch` counts what the
+                                 #   current epoch contributes · a CANDIDATE outranks
+                                 #   PARTIAL_EVIDENCE, because each finding is gated on its own
+                                 #   evidence before the run is summarised
 THRESHOLD_SCHEMA_VERSION = 1     # bump when any threshold below changes, with a reason and a test
 
 # ---------------------------------------------------------------- frozen thresholds
@@ -126,10 +133,20 @@ def _derived_record_quality(rec, schema):
         # the producer's own terms: a sweep that looked and found nothing usable is INVALID; one
         # that had nothing to look at is EMPTY
         return "INVALID" if nums.get("scanned", 0) > 0 else "EMPTY"
-    if "sessions" in nums and (nums.get("turns", 1) == 0 or nums.get("carry_bytes", 1) == 0):
-        # Sessions were counted, so turns were counted and carry was measured. A record reporting
-        # sessions with neither is not a quiet sweep, it is an impossible one.
+    if "sessions" in nums and nums.get("turns", 1) == 0:
+        # Sessions were counted, so turns were counted. A record reporting sessions without them is
+        # not a quiet sweep, it is an impossible one.
         return "INVALID"
+    shares = rec.get("shares")
+    if isinstance(shares, dict) and "carry_bytes" in nums:
+        # Zero carry is a REAL outcome, not a corrupt record: "A session whose every item lands on
+        # its final turn carries nothing" (tools/carry.py's own report). The 1.3 writer emits
+        # `shares: {}` for it and the current writer guards `if C else {}`. What cannot both be
+        # true is a share vector with no carry behind it, or carry with nothing to distribute.
+        if nums["carry_bytes"] == 0:
+            return "EMPTY" if not shares else "INVALID"
+        if not shares:
+            return "INVALID"
     if "scanned" in nums and nums["scanned"] < nums.get("sessions", 0):
         # A session is a transcript that was scanned AND cleared the turn floor, so the producer
         # can never report more sessions than it scanned. Forty sessions out of one scanned file
@@ -217,33 +234,76 @@ def sweep_quality(live):
     return worst_quality([claimed, derived])
 
 
-# A rejected line is DAMAGE by default: the history held something that could not be read as a
+# A rejected line is a LOSS by default: the history held something that could not be read as a
 # record, and a trend built from the survivors is built over a gap. The exceptions are named, and
 # they are the only two things a rejection can be that are not a loss, plus the one shape that was
 # never our record to begin with:
 #   * a refusal by design — current-generation evidence this optimizer does not read — which is a
-#     contract, not a loss, and would otherwise block every history in the middle of a migration;
+#     contract, not a loss, and would otherwise cut every history in the middle of a migration;
 #   * a deduplicated retry, which is bookkeeping (its quality already travels via QUALITY_FLOOR);
 #   * a well-formed JSON line that is not a carry record at all. In a shared file that is another
-#     tool's entry, and treating it as lost evidence would let one stray append block a real
-#     population forever.
-# Listed this way round on purpose: a reason added to valid_record() later defaults to DAMAGE
-# rather than slipping through an allowlist nobody updated. (cross-family review, confirmation round)
-NOT_CONTAINER_DAMAGE = ("current-generation", "duplicate run_id", "not an object", "no shares")
+#     tool's entry, and treating it as lost evidence would cut a history nothing happened to.
+# Listed this way round on purpose: a reason added to valid_record() later defaults to LOSS rather
+# than slipping through an allowlist nobody updated. (cross-family review, confirmation round)
+NOT_A_LOSS = ("current-generation", "duplicate run_id", "not an object", "no shares")
+
+# The epoch a record belongs to: (file-global losses seen before it, losses seen before it that were
+# attributed to ITS scope). A private, in-memory annotation; nothing writes it back to a file.
+EPOCH_KEY = "_history_epoch"
 
 
-def container_quality(rejected):
-    """What the history FILE itself can attest, separately from the records inside it.
+def damage_boundary(reason, rec=None):
+    """Where a rejected line cuts the promotion history -> None | ("file", None) | ("scope", id).
 
-    A torn line in the history is a record that was written and cannot be read — a loss, not a
-    bound, so no flag adopts it. It used to appear only as a line in `history.rejected` while the
-    trend built from the surviving records was promoted as if nothing had been lost.
-    (cross-family review, round 1)
+    The first repair made damage permanent: one torn line set the whole file DEGRADED, and since
+    nothing in this product expires, rotates or repairs a history — and no flag adopts a loss — a
+    single crash fragment disabled promotion for every scope, forever. An independent acceptance
+    review blocked that, correctly.
+
+    A loss is not a verdict on the file. It is a BOUNDARY at that line's physical position: the
+    records before it and the records after it are two populations, and only the newest one may
+    support a promotion. The gap stays visible in `history.rejected` and `history.damage`.
+
+    Attribution: a line that parses and carries a readable `scope_id` says which population lost a
+    record, so it cuts that scope only. A line that cannot say — unparseable, oversized, a file
+    that would not open — cuts every scope, because guessing would be the fail-open half of this.
     """
-    for reason, count in (rejected or {}).items():
-        if count and not any(x in str(reason) for x in NOT_CONTAINER_DAMAGE):
-            return "DEGRADED"
-    return "COMPLETE"
+    if any(x in str(reason) for x in NOT_A_LOSS):
+        return None
+    if isinstance(rec, dict):
+        sid = rec.get("scope_id")
+        if isinstance(sid, str) and 0 < len(sid) <= 64 and not carry.SAFE_LABEL.search(sid):
+            return ("scope", sid)
+    return ("file", None)
+
+
+def active_epoch_key(scope, epochs):
+    """The epoch a record of `scope` must carry to be part of the CURRENT analysis."""
+    e = epochs or {}
+    return (e.get("file_global", 0), (e.get("scope_local") or {}).get(scope, 0))
+
+
+def active_records(recs, epochs):
+    """The records after the newest loss that applies to their own scope.
+
+    A record built in memory rather than read from a file carries no epoch annotation; it belongs
+    to the current epoch, because no loss was observed around it.
+    """
+    out = []
+    for r in (recs or []):
+        key = active_epoch_key(scope_of(r), epochs)
+        if r.get(EPOCH_KEY, key) == key:
+            out.append(r)
+    return out
+
+
+def damage_summary(epochs):
+    """What the FILE holds, as diagnostics — never a gate. A historical gap can stay true while the
+    evidence after it is independently complete."""
+    e = epochs or {}
+    local = dict(e.get("scope_local") or {})
+    return {"boundaries": e.get("file_global", 0) + sum(local.values()),
+            "file_global": e.get("file_global", 0), "scope_local": local}
 
 
 def history_quality(records):
@@ -255,7 +315,14 @@ def history_quality(records):
     half matters as much as the fail-closed half: a gate that blocks on evidence a finding never
     used is not correct, it is merely stuck.
     """
-    return worst_quality([record_quality(r) for r in (records or [])])
+    if not records:
+        # M1 (acceptance review): a machine consumer must never read COMPLETE and conclude that
+        # usable history exists. Nothing eligible is EMPTY — the producer's own word for "there was
+        # nothing to look at" — and it is refused by the promotion gate like every other non-
+        # COMPLETE value. worst_quality([]) keeps meaning COMPLETE: a FINDING that rests on no
+        # sampled evidence is not degraded by sampling it never used.
+        return "EMPTY"
+    return worst_quality([record_quality(r) for r in records])
 
 # machine-readable outcome. The CLI exits 0 for every VALID run by default (a scheduler must not
 # treat "nothing to do" as breakage); --strict-exit maps the status to the exit code instead.
@@ -323,20 +390,28 @@ def valid_record(o):
     if not isinstance(sv, int) or isinstance(sv, bool) or sv not in SCHEMA_SUPPORTED:
         return False, f"unsupported schema_version {sv!r}"
     sh = o.get("shares")
-    if not isinstance(sh, dict) or not sh:
-        # Two different lines, and the container quality depends on which one this is: a line that
-        # claims to be one of OUR records is a corrupted record (damage), a line that claims
+    claims_ours = (o.get("record_type") == "carry_run" or "schema_version" in o
+                   or "run_id" in o or "carry_bytes" in o)
+    if not isinstance(sh, dict):
+        # Two different lines, and the damage classification depends on which one this is: a line
+        # that claims to be one of OUR records is a corrupted record (a loss), a line that claims
         # nothing is another tool's entry in a shared file (not ours to lose).
-        claims_ours = (o.get("record_type") == "carry_run" or "schema_version" in o
-                       or "run_id" in o or "carry_bytes" in o)
         return False, ("carry record without shares" if claims_ours else "no shares")
+    if not sh:
+        # An EMPTY share map is what the producer writes for a sweep that measured no carry. It is
+        # readable evidence with nothing to compare — record_quality() calls it EMPTY and
+        # comparable() leaves it out — and reading it as corruption would cut a history that is
+        # perfectly intact. A bare `{"shares": {}}` with no sign of being ours is still foreign.
+        if not claims_ours:
+            return False, "no shares"
+        sh = {}
     for k, v in sh.items():
         if not isinstance(k, str) or not isinstance(v, (int, float)) or isinstance(v, bool):
             return False, "non-numeric share"
         if v < 0 or v > 100.5:
             return False, "share out of range"
     tot = sum(sh.values())
-    if not (95.0 <= tot <= 105.0):
+    if sh and not (95.0 <= tot <= 105.0):
         return False, f"shares sum to {tot:.1f}, not ~100"
     for k in ("ts", "turns", "sessions", "carry_bytes"):
         v = o.get(k)
@@ -355,39 +430,65 @@ def scope_of(r):
 
 
 def load_history(path):
-    """-> (records, rejected counter, lines). Deduplication is by run_id ONLY: two agents can
+    """-> (records, rejected counter, lines, epochs). Deduplication is by run_id within one epoch: two agents can
     legitimately produce the same timestamp, turn count and shares, and discarding one of them
     would undercount the population. A record without a run_id (schema 0/1) cannot be deduplicated
     and is kept as it is."""
     recs, rejected = [], collections.Counter()
+    cuts_file, cuts_scope = 0, collections.Counter()
     if not path or not os.path.exists(path):
-        return recs, rejected, 0
+        return recs, rejected, 0, {"file_global": 0, "scope_local": {}}
     lines = 0
     try:
         fh = open(path, encoding="utf-8", errors="replace")
     except OSError as e:
         rejected[f"history unreadable: {safe_err(e)}"] += 1
-        return recs, rejected, 0
+        # A file that would not open is a loss nobody can attribute: every scope starts a new epoch
+        # with no records in it, which is the fail-closed answer.
+        return recs, rejected, 0, {"file_global": 1, "scope_local": {}}
     with fh:
         for line in fh:
             line = line.strip()
             if not line:
                 continue
             lines += 1
+            o, ok, why = None, False, ""
             if len(line) > carry.MAX_RECORD:
-                rejected["record above the size cap"] += 1
+                why = "record above the size cap"
+            else:
+                try:
+                    o = json.loads(line)
+                except Exception:
+                    why = "unparseable line"          # a torn line cannot say whose record it was
+                else:
+                    ok, why = valid_record(o)
+            if ok:
+                # Stamped at READ time, in physical order: the epoch is a position in the file,
+                # never a timestamp, because the clock is exactly what a damaged history cannot
+                # be trusted about.
+                o[EPOCH_KEY] = (cuts_file, cuts_scope[scope_of(o)])
+                recs.append(o)
                 continue
-            try:
-                o = json.loads(line)
-            except Exception:
-                rejected["unparseable line"] += 1
+            rejected[why] += 1
+            # ONE classifier for every rejection, including the ones that never became an object:
+            # a reason plus whatever the line could show about itself.
+            cut = damage_boundary(why, o)
+            if cut is None:
                 continue
-            ok, why = valid_record(o)
-            (recs.append(o) if ok else rejected.__setitem__(why, rejected[why] + 1))
+            if cut[0] == "scope":
+                cuts_scope[cut[1]] += 1
+            else:
+                cuts_file += 1
     seen, uniq = {}, []
     for r in recs:
         rid = r.get("run_id")
         if isinstance(rid, str) and rid:
+            # Deduplication is per EPOCH. Two epochs are two populations: the same id appearing
+            # after a loss is that population's own observation, and dropping it — or carrying the
+            # excluded copy's floor into it — would let an old gap poison a healthy epoch, which is
+            # the defect this repair exists to remove. Inside one epoch nothing changes: the retry
+            # is dropped, counted, and cannot launder the survivor's quality.
+            rid = (r.get(EPOCH_KEY), rid)
             if rid in seen:
                 rejected["duplicate run_id (retry)"] += 1
                 # The retry is dropped as an OBSERVATION, never as provenance. One run_id that
@@ -402,7 +503,7 @@ def load_history(path):
                 continue
             seen[rid] = r
         uniq.append(r)
-    return uniq, rejected, lines
+    return uniq, rejected, lines, {"file_global": cuts_file, "scope_local": dict(cuts_scope)}
 
 
 def by_scope(recs):
@@ -578,8 +679,7 @@ def analyse(live, hist, ledger, cold, scope="default", accept_partial=False):
     # partial history it never read, and a finding drawing on history is not waved through because
     # today's sweep happened to be clean.
     quality = sweep_quality(live) if live else "COMPLETE"
-    hist_q = worst_quality([history_quality(hist.get("comparable", [])),
-                            container_quality(hist.get("rejected"))])
+    hist_q = history_quality(hist.get("comparable", []))
     usable = may_promote(quality, accept_partial)            # findings that rest on the live sweep
     hist_usable = may_promote(hist_q, accept_partial)        # findings that rest on the history
     run_ids = [r.get("run_id") for r in hist.get("comparable", []) if r.get("run_id")]
@@ -745,13 +845,13 @@ def overall_status(findings, hist, live, pop, accept_partial):
     if live:
         refused.append(sweep_quality(live))
     comp = hist.get("comparable", [])
-    damage = container_quality(hist.get("rejected"))
     if comp:
-        refused.append(worst_quality([history_quality(comp), damage]))
-    elif any(record_quality(r) in ("INVALID", "EMPTY") for r, _why in hist.get("dropped", [])):
+        refused.append(history_quality(comp))
+    elif any(record_quality(r) == "INVALID" for r, _why in hist.get("dropped", [])):
+        # Evidence that exists and is refused. EMPTY is NOT one of these: a record that measured
+        # nothing is missing evidence, not bad evidence, and "keep collecting" is the honest word
+        # for it. A loss does not appear here at all any more — it moved the epoch instead.
         refused.append("INVALID")
-    elif damage != "COMPLETE":
-        refused.append(damage)
     if any(not may_promote(q, accept_partial) for q in refused):
         return "PARTIAL_EVIDENCE"
     if not live and len(comp) < MIN_HISTORY_FOR_TREND:
@@ -936,6 +1036,12 @@ def render(live, hist, ledger, cold, pop, findings, sources, status, scope, scop
     if hist["comparable"]:
         L.append(f"  history   : {history_quality(hist['comparable'])} "
                  f"(worst of {len(hist['comparable'])} eligible records)")
+    dmg = hist.get("damage") or {}
+    if dmg.get("boundaries"):
+        L.append(f"  damage    : {dmg['boundaries']} loss boundary/ies in this file "
+                 f"({dmg.get('file_global', 0)} unattributable, "
+                 f"{sum((dmg.get('scope_local') or {}).values())} scope-local) — evidence from "
+                 f"before the newest one is not combined with evidence after it")
     L.append("")
     if live and live["sessions"]:
         C = sum(live["carry"].values()) or 1
@@ -1009,27 +1115,32 @@ def main(argv=None):
                          "governed repository: the optimizer has no authority to change code.")
     a = ap.parse_args(argv)
 
-    recs, rejected, lines = load_history(a.history)
+    recs, rejected, lines, epochs = load_history(a.history)
     scopes = by_scope(recs)
     scopes_seen = sorted(scopes) or ["default"]
+    # The epoch is selected BEFORE anything is anchored: a record from before the newest loss must
+    # not choose the scope, the workload class, the corpus size or the trend for the population
+    # that came after it.
+    current = active_records(recs, epochs)
     if a.scope_id:
-        scope, scoped = a.scope_id, scopes.get(a.scope_id, [])
+        scope = a.scope_id
     elif recs:
         # Which scope gets analysed is an anchor too: taking the newest record of ANY quality let a
         # single INVALID sweep in another agent's scope send the whole run to a population that was
-        # never going to be analysable. The newest record that CAN speak chooses.
-        # The fallback names a scope only when NOTHING in the file is eligible — and then there is
-        # no population to strand and nothing that can be promoted: the status is PARTIAL_EVIDENCE
-        # and the emitter is closed. Both halves are pinned by tests (a reviewer read the fallback
-        # as a way back in; it is a label on an empty run, verified by execution).
-        anchor = eligible_anchor(recs) or max(recs, key=lambda r: r.get("ts") or 0)
+        # never going to be analysable. The newest record that CAN speak, in the current epoch,
+        # chooses. The fallbacks only NAME a scope when nothing is eligible or nothing survives the
+        # newest loss — an empty run's label, with the emitter closed either way.
+        anchor = (eligible_anchor(current) or eligible_anchor(recs)
+                  or max(recs, key=lambda r: r.get("ts") or 0))
         scope = scope_of(anchor)
-        scoped = scopes[scope]
     else:
-        scope, scoped = "default", []
+        scope = "default"
+    scoped = [r for r in current if scope_of(r) == scope]
     keep, dropped = comparable(scoped)
-    hist = {"total": len(recs), "in_scope": len(scoped), "comparable": keep, "dropped": dropped,
-            "rejected": rejected, "lines": lines, "time_order": time_order(keep)}
+    damage = damage_summary(epochs)
+    hist = {"total": len(recs), "in_scope": len(scopes.get(scope, [])), "in_epoch": len(scoped),
+            "comparable": keep, "dropped": dropped, "rejected": rejected, "lines": lines,
+            "time_order": time_order(keep), "damage": damage}
     ledger = load_ledger(a.ledger)
 
     live = cold = None
@@ -1088,14 +1199,18 @@ def main(argv=None):
             "history_schema_supported": list(SCHEMA_SUPPORTED),
             "generated": int(time.time()),
             "status": status, "status_code": STATUS.get(status, STATUS["INTERNAL_ERROR"]),
-            "scope": {"analysed": scope, "known": scopes_seen, "records_in_scope": len(scoped),
-                      "comparable": len(keep)},
+            "scope": {"analysed": scope, "known": scopes_seen,
+                      "records_in_scope": len(scopes.get(scope, [])),
+                      "records_in_epoch": len(scoped), "comparable": len(keep)},
             # DERIVED, not the producer's summary word: a sweep that lost records reads DEGRADED
             # here even though the 1.3 label for it is PARTIAL (output_schema_version 2).
             "evidence_quality": sweep_quality(live) if live else "NO_SCAN",
             "history": {"records": len(recs), "comparable": len(keep),
-                        "quality": worst_quality([history_quality(keep),
-                                                  container_quality(rejected)]),
+                        # the evidence eligible for THIS analysis, not a verdict on the file
+                        "quality": history_quality(keep),
+                        # ...and what the file holds regardless: a historical gap stays true while
+                        # the evidence after it is independently complete
+                        "damage": damage,
                         "rejected": dict(rejected), "time_order": hist["time_order"]},
             "ledger": ledger,
             "live": ({"sessions": live["sessions"], "turns": live["turns"], "scanned": live["scanned"],

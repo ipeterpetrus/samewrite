@@ -334,7 +334,7 @@ def main():
     # ---------------------------------------------------------------- OPTIMIZER ISOLATION
     p = os.path.join(d, "iso.jsonl")
     carry.history(p, facts(14), 100, scope_id="s")
-    records, rejected, _lines = optimize.load_history(p)
+    records, rejected, _lines, _ep = optimize.load_history(p)
     check("optimizer 1.3 tak menerima satu pun record generasi ini", len(records), 0)
     check("penolakannya terhitung, bukan senyap", sum(rejected.values()), 1)
     check("penolakannya menyebut skema",
