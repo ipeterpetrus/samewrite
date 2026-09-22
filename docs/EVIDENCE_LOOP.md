@@ -81,10 +81,10 @@ scheduler. `--json` prints the same aggregates for scripting. `--emit-candidate 
 `HYPOTHESIS.md` per candidate: observation, hypothesis, incumbent, primary metric, correctness and
 safety gates, instruction budget, risk, benchmark required, promotion criterion. Those files are
 specifications for a human, not instructions for a model. Each lands in its own directory directly
-under `DIR`: an ordinary candidate id is the directory name, and an id whose scope holds a path
-separator or a dot segment is stored as `candidate-sha256-<digest of the id>` — the logical id is
-still what `--json` reports and what the file itself states. A candidate that cannot be stored
-inside `DIR` is refused and reported, never written elsewhere.
+under `DIR`: an ordinary candidate id is the directory name, and an id that holds a path separator
+(`/` or `\`) — or is itself `.`, `..` or empty — is stored as `candidate-sha256-<digest of the id>`.
+The logical id is still what `--json` reports and what the file itself states. A candidate that
+cannot be stored inside `DIR` is refused and reported, never written elsewhere.
 
 ## Why it must stay this shape
 
