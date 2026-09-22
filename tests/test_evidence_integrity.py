@@ -440,6 +440,128 @@ def trusted_boundaries():
               (status, code, files, epoch, 1, {}))
 
 
+def run_id_conflicts():
+    """docs/V142_COUNTEREXAMPLES.md §7 — run_id is an identity CLAIM, not proof of equality.
+
+    Two materially different valid observations sharing one run_id were collapsed into a single
+    retry on 71016ee, so the second loss never opened a boundary and a candidate was written whose
+    evidence spanned it. Every row below was frozen before the repair existed and is RED on that
+    head."""
+    d = tempfile.mkdtemp(prefix="sw-142-rid-")
+
+    def A(n, first, base, scope="s1", **kw):
+        return [json.dumps(rec(first + i, base + 3.0 * i, scope=scope, **kw)) for i in range(n)]
+
+    def X(run_id="SHARED", **kw):
+        """One persisted observation under a chosen identity."""
+        return dict(rec(0, 30.0, scope="s1", **kw), run_id=run_id)
+
+    TORN = '{"schema_version": 2, "record_type": "carry_run", "ts": 1750000000, "sessions": 4'
+    MID, TAIL = A(6, 10, 36.0), A(6, 50, 72.0)
+    X1 = X(unreadable=2)
+    X2 = dict(X(unreadable=9), ts=TS0 + 40 * 604800, sessions=91, turns=2400,
+              carry_bytes=3 * 10 ** 7, scanned=150,
+              shares={"Bash": 66.0, "Read": 34.0})
+    X3 = dict(X2, ts=TS0 + 41 * 604800, unreadable=4, sessions=55,
+              shares={"Bash": 70.0, "Read": 30.0})
+
+    def rid(label, rows, status, code, files, epoch, comparable, scope_local, file_global,
+            retries, conflicts, quality, extra=(), post_only=None):
+        rc, j, n = run(rows, extra=extra)
+        h, sc = j["history"], j["scope"]
+        dm = h["damage"]
+        got = (j["status"], rc, n, sc["records_in_epoch"], h["comparable"],
+               sum(dm["scope_local"].values()), dm["file_global"],
+               (h["rejected"] or {}).get("duplicate run_id (retry)", 0),
+               h.get("run_id_conflicts", 0), h["quality"])
+        check(label, got, (status, code, files, epoch, comparable, scope_local, file_global,
+                           retries, conflicts, quality))
+
+    rid("RID_01 an exact duplicate is one retry and one boundary",
+        [json.dumps(X1)] + MID + [json.dumps(dict(X1))] + TAIL,
+        "CANDIDATE", 10, 1, 12, 12, 1, 0, 1, 0, "COMPLETE")
+    rid("RID_02 a materially different copy under one id is a conflict",
+        [json.dumps(X1)] + MID + [json.dumps(X2)],
+        "INSUFFICIENT_DATA", 20, 0, 0, 0, 2, 0, 0, 1, "EMPTY")
+    rid("RID_03 ...and the population after it recovers on its own",
+        [json.dumps(X1)] + MID + [json.dumps(X2)] + TAIL,
+        "CANDIDATE", 10, 1, 6, 6, 2, 0, 0, 1, "COMPLETE")
+    rid("RID_04 a clean record and a degraded one under one id conflict",
+        [json.dumps(X(unreadable=0))] + MID + [json.dumps(X2)] + TAIL,
+        "CANDIDATE", 10, 1, 6, 6, 1, 0, 0, 1, "COMPLETE")
+    rid("RID_05 ...and so do a degraded one and a clean one",
+        [json.dumps(X1)] + MID + [json.dumps(dict(X2, unreadable=0, oversize=0))] + TAIL,
+        "CANDIDATE", 10, 1, 6, 6, 2, 0, 0, 1, "COMPLETE")
+    rid("RID_06 two different COMPLETE records under one id still contradict",
+        [json.dumps(X(unreadable=0))] + MID
+        + [json.dumps(dict(X2, unreadable=0, oversize=0))] + TAIL,
+        "CANDIDATE", 10, 1, 6, 6, 1, 0, 0, 1, "COMPLETE")
+    partial_a = json.dumps(X(quality="PARTIAL", skipped=4))
+    partial_b = json.dumps(dict(X2, unreadable=0, evidence_quality="PARTIAL", skipped_by_limit=9))
+    for flag in ((), ("--accept-partial",)):
+        rid(f"RID_07 a bounded pair under one id conflicts too {list(flag)}",
+            [partial_a] + MID + [partial_b] + TAIL,
+            "CANDIDATE", 10, 1, 6, 6, 1, 0, 0, 1, "COMPLETE", extra=flag)
+    rid("RID_08 the same id in another scope is another observation",
+        [json.dumps(dict(X1, scope_id="a")), json.dumps(dict(X1, scope_id="b"))]
+        + A(6, 20, 48.0, scope="a") + A(6, 20, 48.0, scope="b"),
+        "CANDIDATE", 10, 1, 6, 6, 2, 0, 0, 0, "COMPLETE", extra=["--scope-id", "a"])
+    rid("RID_09 a file-global loss makes the later copy a fresh identity",
+        [json.dumps(X1)] + MID + [TORN, json.dumps(dict(X1))] + TAIL,
+        "CANDIDATE", 10, 1, 6, 6, 2, 1, 0, 0, "COMPLETE")
+    rid("RID_10 key order alone is not a different observation",
+        [json.dumps(X1)] + MID
+        + [json.dumps({k: X1[k] for k in reversed(list(X1))})] + TAIL,
+        "CANDIDATE", 10, 1, 12, 12, 1, 0, 1, 0, "COMPLETE")
+    rid("RID_11 whitespace alone is not a different observation",
+        [json.dumps(X1)] + MID + [json.dumps(X1, separators=(" , ", " : "))] + TAIL,
+        "CANDIDATE", 10, 1, 12, 12, 1, 0, 1, 0, "COMPLETE")
+    for label, other in (("RID_12 another workload class", dict(X1, workload_class="other")),
+                         ("RID_13 other shares", dict(X1, shares={"Bash": 31.0, "Read": 69.0})),
+                         ("RID_14 another loss counter", dict(X1, unreadable=5))):
+        rid(label + " is a conflict", [json.dumps(X1)] + MID + [json.dumps(other)] + TAIL,
+            "CANDIDATE", 10, 1, 6, 6, 2, 0, 0, 1, "COMPLETE")
+    rid("RID_15 three different copies under one id are three boundaries",
+        [json.dumps(X1)] + A(3, 10, 36.0) + [json.dumps(X2)] + A(3, 20, 48.0)
+        + [json.dumps(X3)] + TAIL,
+        "CANDIDATE", 10, 1, 6, 6, 3, 0, 0, 2, "COMPLETE")
+
+    # the candidate may rest only on the population after the last boundary
+    for label, rows in (("RID_03", [json.dumps(X1)] + MID + [json.dumps(X2)] + TAIL),
+                        ("RID_06", [json.dumps(X(unreadable=0))] + MID
+                         + [json.dumps(dict(X2, unreadable=0, oversize=0))] + TAIL),
+                        ("RID_15", [json.dumps(X1)] + A(3, 10, 36.0) + [json.dumps(X2)]
+                         + A(3, 20, 48.0) + [json.dumps(X3)] + TAIL)):
+        dd = tempfile.mkdtemp(dir=d)
+        hist = write(os.path.join(dd, "history.jsonl"), rows)
+        out = os.path.join(dd, "cand")
+        subprocess.run([sys.executable, OPT, "--history", hist, "--ledger",
+                        os.path.join(dd, "none.jsonl"), "--emit-candidate", out, "--json",
+                        "--strict-exit", "--scan"], capture_output=True, text=True, timeout=300)
+        body = "".join(open(os.path.join(b, f), encoding="utf-8").read()
+                       for b, _s, fs in os.walk(out) for f in fs if f != ".optimize.lock")
+        names = sorted(x.strip() for line in body.splitlines()
+                       if line.startswith("evidence_run_ids:")
+                       for x in line.split(":", 1)[1].split(","))
+        check(f"{label} the candidate names only the recovered population",
+              names, sorted("rs1%d" % i for i in range(50, 56)))
+
+    # §18: a reader annotation may never change what a record IS
+    a = dict(X1)
+    b = dict(X1)
+    a[optimize.EPOCH_KEY] = (3, 7)
+    b[optimize.QUALITY_FLOOR] = "DEGRADED"
+    check("a private annotation does not change the observation",
+          (optimize.observation_digest(a), optimize.observation_digest(b)),
+          (optimize.observation_digest(dict(X1)), optimize.observation_digest(dict(X1))))
+    check("but a persisted field does",
+          optimize.observation_digest(dict(X1, ts=X1["ts"] + 1))
+          != optimize.observation_digest(X1), True)
+    check("an extra persisted field this reader does not know makes them differ",
+          optimize.observation_digest(dict(X1, future_field=1))
+          != optimize.observation_digest(X1), True)
+
+
 def main():
     d = tempfile.mkdtemp(prefix="sw-142-fx-")
     good_rows = [rec(i, 30.0 + 3.0 * i) for i in range(6)]
@@ -954,6 +1076,7 @@ def main():
           (2, [("a", 1), ("b", 1)]))
 
     trusted_boundaries()
+    run_id_conflicts()
 
     print("\nM1 - history.quality describes the evidence eligible RIGHT NOW")
     rc, j, n = run([json.dumps(rec(i, 30.0 + 3.0 * i, sessions=0, scanned=40)) for i in range(6)])
