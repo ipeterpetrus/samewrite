@@ -465,6 +465,20 @@ def valid_record(o):
     q = o.get("evidence_quality")
     if q is not None and q not in ("COMPLETE", "PARTIAL", "INVALID", "EMPTY"):
         return False, "unknown evidence_quality"
+    sid = o.get("scope_id")
+    if sid is not None and (not isinstance(sid, str) or len(sid) > 64):
+        # `scope_id` is an ATTRIBUTION AUTHORITY: a validated record's own scope decides which
+        # population a loss cut applies to, so the field has to be checked before the record is
+        # accepted rather than after. The producer writes exactly one shape —
+        # `str(scope_id or "default")[:64]` (tools/carry.py) — so another type or another length
+        # was not written by it. Accepting one let `["rev"]` become the scope `"['rev']"`: the cut
+        # landed on a population nobody has and the real `rev` records kept crossing the loss,
+        # which is the blocked defect rebuilt through the one door this repair opened.
+        # (cross-family author review of the trust repair, round 2)
+        # The reason is STATIC on purpose: it is a rejected line's own content and must not be
+        # echoed. A control character inside a label the PRODUCER wrote is still accepted — it is
+        # already published through `scope.known` and calling it corruption would invent damage.
+        return False, "scope_id is not a label this producer writes"
     return True, ""
 
 

@@ -226,6 +226,30 @@ def trusted_boundaries():
           shape(rc, j, n) + (j["history"]["records"], j["scope"]["known"]),
           ("CANDIDATE", 10, 1, 6, 6, 1, {}, 12, ["rev"]))
 
+    # TSCOPE_08: `scope_id` is an ATTRIBUTION AUTHORITY, so it is checked before a record is
+    # accepted. The producer writes exactly one shape — `str(scope_id or "default")[:64]` — and a
+    # value of another type let `["rev"]` become the scope `"['rev']"`: the cut landed on a
+    # population nobody has while the real `rev` records kept crossing the loss. (docs §6.11)
+    print("\nTSCOPE_08 - a scope label the producer could not have written")
+    for label, sid in (("a list", ["rev"]), ("an integer", 5), ("an object", {"s": 1}),
+                       ("a label longer than the producer's own cap", "x" * 200)):
+        forged = dict(rec(6, 48.0, scope="rev", unreadable=2), run_id="LOSS-X")
+        forged["scope_id"] = sid
+        rc, j, n = run(ser(6) + [json.dumps(forged)] + later())
+        check(f"TSCOPE_08 {label} is a loss nobody can attribute",
+              shape(rc, j, n) + (j["scope"]["known"],),
+              ("CANDIDATE", 10, 1, 6, 6, 1, {}, ["rev"]))
+    for label, sid in (("absent", None), ("a plain label", "rev"), ("the empty string", ""),
+                       ("exactly 64 characters", "y" * 64),
+                       ("a control byte the producer can write", "a\u0001b")):
+        ok = dict(rec(6, 48.0, scope="rev"), run_id="OK-X")
+        if sid is None:
+            ok.pop("scope_id")
+        else:
+            ok["scope_id"] = sid
+        check(f"TSCOPE_08 control: {label} is still a record",
+              optimize.valid_record(ok), (True, ""))
+
     # ---------------------------------------------------------------- privacy (§35)
     print("\nTPRIV - a rejected line's own content is never echoed into public output")
     secret = "sk-synthetic-NOTAREALKEY-0123456789"

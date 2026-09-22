@@ -1039,6 +1039,33 @@ CASES = [
      assert optimize.damage_summary(ep2)["file_global"] == 1, optimize.damage_summary(ep2)
      """),
 
+    ("M_SCOPE_LABEL_UNCHECKED: scope_id adalah otoritas atribusi, jadi diperiksa sebelum diterima",
+     [("optimize.py",
+       "    if sid is not None and (not isinstance(sid, str) or len(sid) > 64):",
+       "    if False:")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
+             for i in range(6)]
+     forged = rec(100 + 6 * 604800, {"Bash": 48.0, "Read": 52.0}, run_id="LOSS-X")
+     forged["unreadable"] = 2
+     forged["scope_id"] = ["rev"]
+     later = [rec(100 + (20 + i) * 604800, {"Bash": 48.0 + i * 3, "Read": 52.0 - i * 3},
+                  scope="rev") for i in range(6)]
+     p = w(os.path.join(D, "forged_scope.jsonl"),
+           [json.dumps(r) for r in rows] + [json.dumps(forged)]
+           + [json.dumps(r) for r in later])
+     recs, rej, _l, ep = optimize.load_history(p)
+     d = optimize.damage_summary(ep)
+     assert d["file_global"] == 1, d
+     assert d["scope_local"] == {}, d
+     cur = optimize.active_records(recs, ep)
+     assert len(cur) == 6, ("populasi rev menyeberangi loss", len(cur))
+     assert sorted({optimize.scope_of(r) for r in recs}) == ["rev"], "scope hantu terbit"
+     # kontrol: label yang MEMANG ditulis produser tetap diterima
+     fine = rec(100, {"Bash": 50.0, "Read": 50.0}, scope="y" * 64)
+     assert optimize.valid_record(fine) == (True, ""), optimize.valid_record(fine)
+     """),
+
     ("M_REJECTED_VALUE_ECHOED: isi baris yang ditolak tak boleh masuk output publik",
      [("optimize.py", '    if v is None or (isinstance(v, (int, float)) and not isinstance(v, bool)):\n'
        '        return repr(v)\n    return "of type " + type(v).__name__',

@@ -432,3 +432,42 @@ recovery mechanism.** A boundary is now opened at most once per `(scope, file-gl
 A record with no `run_id` cannot be shown to be a retry and stays its own observation; across a
 file-global loss the identity differs, because there the reader cannot tell whether a repeated id is
 the same run at all.
+
+### 6.11 The second finding of that review: `scope_id` was made an authority without a contract
+
+Round 2 returned `NEEDS-FIX` with a HIGH that goes to the root of §6.2's own rationale. The trust
+model says a scope-local boundary is safe because "the record passed structural validation and its
+`scope_id` is the same field every accepted record publishes". The first half was true; the second
+was an assumption. `valid_record()` never checked `scope_id` at all, and `scope_of()` is
+`str(r.get("scope_id") or "default")` — so a record that passes validation with
+`scope_id = ["rev"]` becomes the scope `"['rev']"`.
+
+Reproduced before it was believed, on `189db57`:
+
+```text
+6 clean rev · one valid DEGRADED record with scope_id = ["rev"] · 6 clean rev
+  status CANDIDATE, exit 10, one candidate file
+  records_in_epoch=12, comparable=12
+  damage {"file_global": 0, "scope_local": {"['rev']": 1}}
+  candidate names rid-rev-0..5 AND rid-rev-20..25 — both sides of the loss
+```
+
+That is the blocked B-UTF8 defect rebuilt through the one door this repair opened: attribution taken
+from a field nobody had checked, a cut landing on a population that does not exist, and the real
+population crossing the loss.
+
+**The fix is the producer's own contract, not a new invention.** `tools/carry.py` writes exactly one
+shape: `"scope_id": str(scope_id or "default")[:64]`. So a value that is not a string, or a string
+longer than 64 characters, was not written by it — the record is corrupt and is refused with a
+STATIC reason (its content must never be echoed), which makes it a file-global loss like any other
+unattributable one.
+
+| case | `scope_id` | expectation |
+|---|---|---|
+| **TSCOPE_08** | `["rev"]` · `5` · `{"s": 1}` · a 200-character string | file-global ×1, `scope_local == {}`, active epoch 6, `scope.known == ["rev"]`, candidate names only the post-loss run ids |
+| **TSCOPE_08 controls** | absent · `"rev"` · `""` · exactly 64 characters · a label holding a control byte | still a record — the producer can write all of these |
+
+The control byte stays accepted deliberately: the producer's cap truncates length but does not strip
+control characters, such a label is already published through `scope.known` on every head of this
+branch, and calling it corruption would invent damage where the file is intact. That is the residual
+this repair states rather than hides.
