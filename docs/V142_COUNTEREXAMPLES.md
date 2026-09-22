@@ -79,3 +79,12 @@ original defect. They are listed separately so the frozen matrix stays readable 
 | **R142_07b** | `schema_version` of `"2"` (string) or `2.0` (float) | `UNKNOWN` — a version this reader cannot name is not a newer generation to trust |
 | **R142_08** | schema-2 record with zeroed counters and no `sessions` / `turns` / `carry_bytes` at all | `UNKNOWN` — zero counters say nothing went wrong, not that a sweep happened (cross-family review, round 1) |
 | **R142_09** | `--max-files 2` where one of three sources cannot be dated | the datable sources still order by mtime; one unreadable mtime no longer sends the whole selection back to a discovery-order slice (cross-family review, round 1) |
+
+Confirmation round, attacking the repair again:
+
+| case | fixture | expectation |
+|---|---|---|
+| **R142_15** | a `PARTIAL` claim with every counter at zero | `UNKNOWN` — a bound shows up in `skipped_by_limit` and a loss in a loss counter; a claim no counter can explain is not a bound `--accept-partial` may adopt |
+| **R142_15b** | a record carrying `malformed`, `malformed_lines`, `identity_changed`, `conflicted_sources` or `records_rejected` | `DEGRADED` — a loss must be honoured wherever the reader can see it, not only in the two counters the first cut looked at |
+| **R142_16** | history + one record from an unsupported schema 3, and one whose shares sum to 10 | `PARTIAL_EVIDENCE` / exit 40 / 0 files — a rejected line is damage unless it is a refusal by design, a deduplicated retry, or a line that was never a carry record (control: a foreign line still promotes) |
+| **R142_17** | ledger of 100 `checked` lines plus one `{"event": "garbage"}` | the unaccountable line counts as rejected and the guard only observes |
