@@ -53,6 +53,10 @@ jobs:
         # Ambiguous, incomplete, invalid, non-comparable or host-shifted evidence must not produce
         # a candidate specification unless the bounded-evidence exception was explicitly asked for.
         run: python3 tests/test_evidence_integrity.py
+      - name: candidate path containment - issue 15 matrix plus its own mutants
+        # A candidate id carries the scope verbatim; the directory it is stored under must never
+        # leave the --emit-candidate root, whatever the scope says.
+        run: python3 tests/test_candidate_path.py
       - name: the 1.4.0 release ships shadow evaluation and nothing that writes
         # Sebuah rilis paling mudah "menyalakan" sesuatu tanpa sengaja saat versinya dinaikkan.
         # Suite ini yang membuat kalimat "promotion/persistence tidak aktif" bisa diperiksa.
