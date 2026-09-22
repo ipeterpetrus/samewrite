@@ -565,6 +565,29 @@ def main():
     rc, j, n = run(same_epoch)
     check("B1_13b a retry inside one epoch still lowers the survivor",
           (j["history"]["quality"], j["status"], n), ("PARTIAL", "PARTIAL_EVIDENCE", 0))
+    # both line orders, because which copy comes first is exactly what a crash decides
+    clean_then_worse = (series(5) + [json.dumps(dict(rec(5, 45.0), run_id="X"))] + [TORN]
+                        + [json.dumps(dict(rec(6, 45.0), run_id="X", evidence_quality="PARTIAL",
+                                           skipped_by_limit=9))]
+                        + series(5, 21))
+    rc, j, n = run(clean_then_worse)
+    check("B1_13c the post-loss copy is judged on its OWN evidence",
+          j["history"]["quality"], "PARTIAL")
+    worse_then_clean = (series(5)
+                        + [json.dumps(dict(rec(5, 45.0), run_id="X", evidence_quality="PARTIAL",
+                                           skipped_by_limit=9))] + [TORN]
+                        + [json.dumps(dict(rec(6, 45.0), run_id="X"))] + series(5, 21))
+    rc, j, n = run(worse_then_clean)
+    check("B1_13d and an excluded pre-loss copy does not poison it",
+          (j["history"]["quality"], j["status"] == "PARTIAL_EVIDENCE"), ("COMPLETE", False))
+    three_in_one = series(4) + [json.dumps(dict(rec(4, 42.0), run_id="S")),
+                                json.dumps(dict(rec(5, 45.0), run_id="S", unreadable=1)),
+                                json.dumps(dict(rec(6, 48.0), run_id="S",
+                                                evidence_quality="PARTIAL", skipped_by_limit=4))]
+    rc, j, n = run(three_in_one)
+    check("B1_13e three copies inside one epoch: the worst of them survives",
+          (j["history"]["quality"], j["history"]["rejected"].get("duplicate run_id (retry)"), n),
+          ("DEGRADED", 2, 0))
 
     print("\nM1 - history.quality describes the evidence eligible RIGHT NOW")
     rc, j, n = run([json.dumps(rec(i, 30.0 + 3.0 * i, sessions=0, scanned=40)) for i in range(6)])
