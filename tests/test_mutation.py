@@ -614,9 +614,8 @@ CASES = [
      """),
 
     ("M_BOUND_SAMPLE_DIVERGES: sapuan dan pindaian listing memakai sampel terbatas yang SAMA",
-     [("optimize.py",
-       "listing, uses, sess = skills_tool.scan(carry.bounded_paths(paths, a.max_files))",
-       "listing, uses, sess = skills_tool.scan(paths[:a.max_files] if a.max_files else paths)")],
+     [("optimize.py", "            listing, uses, sess = skills_tool.scan(selected)",
+       "            listing, uses, sess = skills_tool.scan(paths[:a.max_files] if a.max_files else paths)")],
      """
      import subprocess
      d = tempfile.mkdtemp()

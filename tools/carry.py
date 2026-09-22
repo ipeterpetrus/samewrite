@@ -282,7 +282,7 @@ def sweep_label(facts):
     return "COMPLETE"
 
 
-def accumulate(paths, min_turns=50, max_files=0):
+def accumulate(paths, min_turns=50, max_files=0, selected=None):
     carry, size, usage = collections.Counter(), collections.Counter(), collections.Counter()
     runtimes, models = collections.Counter(), collections.Counter()
     turns = sessions = 0
@@ -303,7 +303,10 @@ def accumulate(paths, min_turns=50, max_files=0):
     usage_conflicted_transcripts = identity_conflicted_transcripts = 0
     usage_exact_measurement_excluded = identity_exact_measurement_excluded = 0
     conflicted_sources = records_rejected = 0
-    paths = bounded_paths(paths, max_files)
+    # `selected` lets a caller that must hand the SAME sample to another consumer choose once and
+    # pass it in; without it the sweep selects for itself. `total_paths` above is still what
+    # discovery found, so the bound is reported against the whole population either way.
+    paths = list(selected) if selected is not None else bounded_paths(paths, max_files)
     for p in paths:
         scanned += 1
         try:

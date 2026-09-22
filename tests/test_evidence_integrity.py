@@ -400,6 +400,44 @@ def main():
     check("and the guard only observes",
           [f["state"] for f in optimize.analyse(None, dict(EMPTY_HIST), led, None)], ["OBSERVED"])
 
+    print("\nR142_18 - round-4 findings: the live sweep, the shares reason, the temp file")
+    live_impossible = {"sessions": 40, "turns": 0, "scanned": 40, "unreadable": 0, "oversize": 0,
+                       "skipped_by_limit": 0, "malformed": 0, "identity_changed": 0,
+                       "conflicted_sources": 0, "quality": "COMPLETE"}
+    check("a live sweep with sessions and no turns is impossible too",
+          optimize.sweep_quality(live_impossible), "INVALID")
+    check("control: the same sweep with turns is COMPLETE",
+          optimize.sweep_quality(dict(live_impossible, turns=2000)), "COMPLETE")
+    claims_ours = json.dumps({"schema_version": 2, "record_type": "carry_run", "ts": TS0,
+                              "sessions": 40, "turns": 1000, "carry_bytes": 10 ** 7})
+    case("R142_18: a carry record with no shares is damage",
+         [json.dumps(r) for r in good_rows] + [claims_ours],
+         "PARTIAL_EVIDENCE", 40, 0, history_quality="DEGRADED")
+    tmp_dir = tempfile.mkdtemp(dir=d)
+    blocked_id = [f["candidate_id"] for f in optimize.analyse(
+        None, {"comparable": good_rows, "total": 6, "in_scope": 6, "rejected": {}, "dropped": [],
+               "time_order": "ok"}, None, None) if f["state"] == "CANDIDATE"][0]
+    open(os.path.join(tmp_dir, blocked_id), "w").write("a file where a directory must go")
+    hist2 = write(os.path.join(tmp_dir, "h.jsonl"), good_rows)
+    subprocess.run([sys.executable, OPT, "--history", hist2, "--ledger",
+                    os.path.join(tmp_dir, "none.jsonl"), "--scan", "--emit-candidate", tmp_dir,
+                    "--json", "--strict-exit"], capture_output=True, text=True, timeout=300)
+    check("a failed write leaves no half-written file behind",
+          [f for _b, _dd, fs in os.walk(tmp_dir) for f in fs if ".tmp-" in f], [])
+    bound_dir = tempfile.mkdtemp(dir=d)
+    trio = []
+    for n, name in enumerate(("p.jsonl", "q.jsonl", "r.jsonl")):
+        q = transcript(os.path.join(bound_dir, name), turns=30)
+        os.utime(q, (TS0 + n * 1000, TS0 + n * 1000))
+        trio.append(q)
+    once = carry.bounded_paths(trio, 2)
+    swept = carry.accumulate(trio, min_turns=1, max_files=2, selected=once)
+    check("a caller can hand the sweep the selection it already made",
+          sorted(os.path.basename(x) for x in swept["parsed"]),
+          sorted(os.path.basename(x) for x in once))
+    check("and the bound is still reported against the whole population",
+          swept["skipped_by_limit"], 1)
+
     # ---------------------------------------------------------------- positive controls
     print("\npositive controls - a gate that refuses everything is not a gate")
     good = good_rows

@@ -203,6 +203,12 @@ def sweep_quality(live):
         claimed = "COMPLETE"
     if not live.get("sessions"):
         return "INVALID" if live.get("scanned") else "EMPTY"
+    if not live.get("turns") or not live.get("carry_bytes", 1):
+        # The same impossibility the record law refuses: sessions were counted, so turns were
+        # counted. A live dict that says otherwise is not a quiet sweep. `carry_bytes` is absent
+        # from the sweep dict itself (the caller sums it), so its absence is not the claim.
+        # (cross-family review, round 4)
+        return "INVALID"
     derived = "COMPLETE"
     if any(live.get(k) for k in carry.LOSS_FIELDS):
         derived = "DEGRADED"
@@ -318,7 +324,12 @@ def valid_record(o):
         return False, f"unsupported schema_version {sv!r}"
     sh = o.get("shares")
     if not isinstance(sh, dict) or not sh:
-        return False, "no shares"
+        # Two different lines, and the container quality depends on which one this is: a line that
+        # claims to be one of OUR records is a corrupted record (damage), a line that claims
+        # nothing is another tool's entry in a shared file (not ours to lose).
+        claims_ours = (o.get("record_type") == "carry_run" or "schema_version" in o
+                       or "run_id" in o or "carry_bytes" in o)
+        return False, ("carry record without shares" if claims_ours else "no shares")
     for k, v in sh.items():
         if not isinstance(k, str) or not isinstance(v, (int, float)) or isinstance(v, bool):
             return False, "non-numeric share"
@@ -850,11 +861,20 @@ def emit_candidates(findings, outdir, status):
         try:
             os.makedirs(d, exist_ok=True)
             tmp = p + ".tmp-%d" % os.getpid()
-            with open(tmp, "w", encoding="utf-8") as fh:
-                fh.write(spec_text(f))
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.replace(tmp, p)                 # a crash leaves the old file or the new one, never half
+            try:
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    fh.write(spec_text(f))
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                os.replace(tmp, p)             # a crash leaves the old file or the new one, never half
+            except OSError:
+                # A write that failed mid-way must not leave its half behind: the next reader of
+                # this directory would find a file nobody promised. (cross-family review, round 4)
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
             written.append(f["candidate_id"])
         except OSError as e:
             failed.append((f["candidate_id"], safe_err(e)))
@@ -1021,11 +1041,14 @@ def main(argv=None):
         except Exception:
             paths = []
     if paths:
-        live = carry.accumulate(paths, min_turns=a.min_turns, max_files=a.max_files)
+        # Selected ONCE, then handed to both consumers. Calling bounded_paths() twice is two
+        # selections, and an mtime that becomes unreadable between them is two different samples
+        # again — the defect this function exists to close. (cross-family review, round 4)
+        selected = carry.bounded_paths(paths, a.max_files)
+        live = carry.accumulate(paths, min_turns=a.min_turns, max_files=a.max_files,
+                                selected=selected)
         try:
-            # The SAME bounded sample the sweep used. Two selections of "the newest N" is two
-            # populations reported as one.
-            listing, uses, sess = skills_tool.scan(carry.bounded_paths(paths, a.max_files))
+            listing, uses, sess = skills_tool.scan(selected)
             if listing:
                 ent = skills_tool.parse_listing(listing)
                 rows = skills_tool.tally(ent, uses, sess)
