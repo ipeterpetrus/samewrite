@@ -57,9 +57,13 @@ def rec(i, share, quality="COMPLETE", schema=2, counters=True, sessions=40, turn
 
 
 def write(path, rows):
-    with open(path, "w", encoding="utf-8") as fh:
+    """Rows may be bytes: a history holding a line that is not valid UTF-8 is exactly the input
+    the decode rule has to be tested against, and it cannot be written through a text handle."""
+    with open(path, "wb") as fh:
         for r in rows:
-            fh.write((r if isinstance(r, str) else json.dumps(r)) + "\n")
+            if not isinstance(r, bytes):
+                r = (r if isinstance(r, str) else json.dumps(r)).encode("utf-8")
+            fh.write(r + b"\n")
     return path
 
 
@@ -119,6 +123,236 @@ def transcript(path, turns=80, listing=False, torn=False):
 
 EMPTY_HIST = {"comparable": [], "total": 0, "in_scope": 0, "rejected": {}, "dropped": [],
               "time_order": "ok"}
+
+
+
+def trusted_boundaries():
+    """docs/V142_COUNTEREXAMPLES.md §6 — a line that failed validation is not an authority.
+
+    The epoch model's attribution came from the very line that had just been rejected: invalid
+    UTF-8 in `scope_id` survived `errors="replace"` as U+FFFD, read as a "readable" label, and cut
+    a scope that does not exist while the real population kept crossing the loss. Every case below
+    was frozen before this repair existed and is RED on e6c1f4f.
+    """
+    d = tempfile.mkdtemp(prefix="sw-142-tb-")
+
+    def ser(n, first=0, scope="rev", per_week=3.0, base=30.0):
+        return [json.dumps(rec(first + i, base + per_week * i, scope=scope)) for i in range(n)]
+
+    def later(n=6, scope="rev"):
+        """The population AFTER the boundary: its own climb, so it can promote on its own."""
+        return ser(n, 20, scope=scope, base=48.0)
+
+    def bad_utf8(field, scope="ghost"):
+        """A SameWrite-shaped line holding invalid UTF-8, which also fails validation on its own."""
+        r = dict(rec(99, 50.0, scope=scope), shares={"Bash": 10.0, "Read": 10.0})
+        if field == "shares":
+            r["shares"] = {"Bash": 10.0, "@@M@@": 10.0}
+        else:
+            r[field] = "@@M@@"
+        return json.dumps(r).encode().replace(b"@@M@@", b"\xff\xfe\x80")
+
+    def rejected_rec(scope="ghost", **over):
+        r = dict(rec(99, 50.0, scope=scope), shares={"Bash": 10.0, "Read": 10.0})
+        r.update(over)
+        return json.dumps(r)
+
+    def dmg(j):
+        x = j["history"].get("damage") or {}
+        return x.get("file_global"), x.get("scope_local")
+
+    def shape(rc, j, n):
+        return ((j["status"], rc, n, j["scope"]["records_in_epoch"], j["history"]["comparable"])
+                + dmg(j))
+
+    def run_paths(rows, extra=()):
+        dd = tempfile.mkdtemp(dir=d)
+        hist = write(os.path.join(dd, "history.jsonl"), rows)
+        out = os.path.join(dd, "cand")
+        p = subprocess.run([sys.executable, OPT, "--history", hist, "--ledger",
+                            os.path.join(dd, "none.jsonl"), "--emit-candidate", out, "--json",
+                            "--strict-exit", "--scan"] + list(extra),
+                           capture_output=True, text=True, timeout=300)
+        files = [os.path.join(b, f) for b, _sub, fs in os.walk(out) for f in fs
+                 if f != ".optimize.lock"]
+        return p.returncode, json.loads(p.stdout), files
+
+    # ---------------------------------------------------------------- TUTF (§6.1)
+    print("\nTUTF - a line that cannot be decoded cannot name a scope")
+    for name, field in (("TUTF_01", "scope_id"), ("TUTF_02", "shares"),
+                        ("TUTF_03", "run_id"), ("TUTF_04", "workload_class")):
+        rc, j, n = run(ser(6) + [bad_utf8(field)] + later())
+        check(f"{name} invalid UTF-8 in {field} is an unattributable loss",
+              shape(rc, j, n), ("CANDIDATE", 10, 1, 6, 6, 1, {}))
+        check(f"{name} the decode failure is counted by name",
+              j["history"]["rejected"].get("line is not valid UTF-8"), 1)
+        check(f"{name} nothing from the rejected line reaches the report",
+              ("�" in json.dumps(j, ensure_ascii=False), "ghost" in j["scope"]["known"]),
+              (False, False))
+
+    rc, j, n = run([bad_utf8("scope_id")] + ser(6))
+    check("TUTF_05 an undecodable line before every record",
+          shape(rc, j, n), ("CANDIDATE", 10, 1, 6, 6, 1, {}))
+    rc, j, n = run(ser(6) + [bad_utf8("scope_id")])
+    check("TUTF_06 an undecodable line at EOF leaves no epoch",
+          shape(rc, j, n), ("INSUFFICIENT_DATA", 20, 0, 0, 0, 1, {}))
+    rc, j, n = run(ser(6) + [bad_utf8("scope_id")] + ser(6, 20, base=48.0)
+                   + [bad_utf8("run_id")] + ser(6, 40, base=66.0))
+    check("TUTF_07 two undecodable lines are two boundaries",
+          shape(rc, j, n), ("CANDIDATE", 10, 1, 6, 6, 2, {}))
+    between = ser(6, 0, "a") + [bad_utf8("scope_id")] + later(6, "b")
+    rc, j, n = run(between)
+    check("TUTF_08 an undecodable line between two scopes cuts both",
+          shape(rc, j, n) + (j["scope"]["analysed"],),
+          ("CANDIDATE", 10, 1, 6, 6, 1, {}, "b"))
+    rc, j, n = run(between, extra=["--scope-id", "a"])
+    check("TUTF_08 ...and the scope before it has no epoch left",
+          shape(rc, j, n), ("INSUFFICIENT_DATA", 20, 0, 0, 0, 1, {}))
+
+    rc, j, files = run_paths(ser(6) + [bad_utf8("scope_id")] + later())
+    body = open(files[0], encoding="utf-8").read() if files else ""
+    ids = sorted(x.strip() for line in body.splitlines() if line.startswith("evidence_run_ids:")
+                 for x in line.split(":", 1)[1].split(","))
+    check("TUTF_01 the candidate rests only on the recovered epoch",
+          ids, sorted("rrev%d" % i for i in range(20, 26)))
+
+    # ---------------------------------------------------------------- TSCOPE (§6.2)
+    print("\nTSCOPE - a rejected record does not authenticate its own scope_id")
+    for label, bad in (
+            ("TSCOPE_01 shares that do not sum to a population", rejected_rec()),
+            ("TSCOPE_02 a non-numeric share",
+             rejected_rec(shares={"Bash": "lots", "Read": 50.0})),
+            ("TSCOPE_03 an impossible session count", rejected_rec(sessions=-1)),
+            ("TSCOPE_04 a quality word outside the vocabulary",
+             rejected_rec(evidence_quality="SPLENDID")),
+            ("TSCOPE_05 a legacy schema this reader cannot name", rejected_rec(schema_version=3)),
+            ("TSCOPE_06 a carry record with no shares key",
+             json.dumps({k: v for k, v in rec(99, 50.0, scope="ghost").items()
+                         if k != "shares"})),
+            ("TSCOPE_07 a record_type this reader does not know",
+             rejected_rec(record_type="carry_note"))):
+        rc, j, n = run(ser(6) + [bad] + later())
+        check(label, shape(rc, j, n), ("CANDIDATE", 10, 1, 6, 6, 1, {}))
+        check(label + " — and no ghost scope is published", "ghost" in j["scope"]["known"], False)
+
+    for label, line in (("a foreign JSON line", json.dumps({"note": "another tool's entry"})),
+                        ("a bare object that never claimed to be ours",
+                         json.dumps({"note": "x", "shares": None})),
+                        ("current-generation evidence refused by design",
+                         json.dumps({"envelope": {"schema_version": 4, "run_id": "x"},
+                                     "payload": {}, "certificate": {}}))):
+        rc, j, n = run(ser(6) + [line] + later())
+        check("TSCOPE control: " + label + " is not damage",
+              shape(rc, j, n), ("CANDIDATE", 10, 1, 12, 12, 0, {}))
+
+    print("\nTSCOPE canaries - no rejected label may become a public map key")
+    for canary in ("/etc/passwd.d/synthetic", "agent-b", "rev", "x" * 63, "y" * 64,
+                   "ctl\x01label", "shares: 100"):
+        rc, j, n = run(ser(6, scope="real") + [rejected_rec(scope=canary)]
+                       + later(6, "real"))
+        check("TSCOPE canary %r stays out of the public report" % canary[:18],
+              (dmg(j), canary in j["scope"]["known"]), ((1, {}), False))
+
+    flood = [rejected_rec(scope="s%04d" % i) for i in range(2000)]
+    rc, j, n = run(flood + later())
+    check("TSCOPE cardinality: 2000 rejected labels add no public key",
+          (dmg(j), j["scope"]["known"], len(json.dumps(j["history"]["damage"])) < 200),
+          ((2000, {}), ["rev"], True))
+
+    # ---------------------------------------------------------------- VD (§6.3)
+    print("\nVD - a VALID record whose own counters prove a loss cuts its own scope")
+    deg = json.dumps(rec(6, 48.0, scope="a", unreadable=3))
+    check("the fail-stuck hypothesis names a real quality",
+          optimize.record_quality(json.loads(deg)), "DEGRADED")
+    for label, tail, epoch, status, code, files, quality in (
+            ("VD_01 an epoch too small to carry a trend", ser(2, 20, "a", base=48.0), 2,
+             "INSUFFICIENT_DATA", 20, 0, "COMPLETE"),
+            ("VD_02 a sufficient epoch promotes on its own", ser(6, 20, "a", base=48.0), 6,
+             "CANDIDATE", 10, 1, "COMPLETE"),
+            ("VD_03 and it still promotes sixty records later",
+             ser(60, 20, "a", per_week=1.0, base=20.0), 60, "CANDIDATE", 10, 1, "COMPLETE")):
+        rc, j, n = run(ser(6, 0, "a") + [deg] + tail)
+        check(label, (j["status"], rc, n, j["scope"]["records_in_epoch"],
+                      j["history"].get("quality")) + dmg(j),
+              (status, code, files, epoch, quality, 0, {"a": 1}))
+
+    rc, j, files = run_paths(ser(6, 0, "a") + [deg] + ser(6, 20, "a", base=48.0))
+    body = open(files[0], encoding="utf-8").read() if files else ""
+    ids = sorted(x.strip() for line in body.splitlines() if line.startswith("evidence_run_ids:")
+                 for x in line.split(":", 1)[1].split(","))
+    check("VD_04 the degraded record is not evidence in the epoch it opened",
+          ids, sorted("ra%d" % i for i in range(20, 26)))
+
+    rc, j, n = run(ser(6, 0, "a") + [deg])
+    check("VD_05 a degradation at EOF leaves no epoch to promote from",
+          (j["status"], rc, n, j["scope"]["records_in_epoch"], j["history"].get("quality"))
+          + dmg(j), ("INSUFFICIENT_DATA", 20, 0, 0, "EMPTY", 0, {"a": 1}))
+
+    both = (ser(6, 0, "a") + ser(6, 0, "b") + [deg] + ser(6, 20, "a", base=48.0)
+            + ser(6, 20, "b", base=48.0))
+    rc, j, n = run(both, extra=["--scope-id", "a"])
+    check("VD_06 the degraded scope starts again after its own loss",
+          (j["status"], j["scope"]["records_in_epoch"]) + dmg(j), ("CANDIDATE", 6, 0, {"a": 1}))
+    rc, j, n = run(both, extra=["--scope-id", "b"])
+    check("VD_06 ...and the neighbour keeps every record it ever had",
+          (j["status"], j["scope"]["records_in_epoch"]) + dmg(j), ("CANDIDATE", 12, 0, {"a": 1}))
+
+    bounded = json.dumps(rec(6, 48.0, scope="a", quality="PARTIAL", skipped=3))
+    rows = ser(6, 0, "a") + [bounded] + ser(6, 20, "a", base=48.0)
+    rc, j, n = run(rows)
+    check("VD_07 an intentional bound is not damage",
+          (j["status"], j["scope"]["records_in_epoch"], j["history"].get("quality")) + dmg(j),
+          ("PARTIAL_EVIDENCE", 13, "PARTIAL", 0, {}))
+    rc, j, n = run(rows, extra=["--accept-partial"])
+    check("VD_07 ...and the flag still adopts it", (j["status"], n), ("CANDIDATE", 1))
+
+    rc, j, n = run(ser(6, 0, "a") + [json.dumps(rec(6, 48.0, scope="a", schema=1))]
+                   + ser(6, 20, "a", base=48.0))
+    check("VD_08 a schema that cannot attest completeness is not a loss",
+          (j["status"], j["scope"]["records_in_epoch"], j["history"].get("quality")) + dmg(j),
+          ("PARTIAL_EVIDENCE", 13, "UNKNOWN", 0, {}))
+
+    rc, j, n = run(ser(6, 0, "a")
+                   + [json.dumps(rec(6, 48.0, scope="a", sessions=0, scanned=40)),
+                      json.dumps(dict(rec(7, 48.0, scope="a"), shares={}, bpt={}, carry_bytes=0))]
+                   + ser(6, 20, "a", base=48.0))
+    check("VD_09 an ineligible record is not a damaged one",
+          (j["status"], j["scope"]["records_in_epoch"], j["history"]["comparable"]) + dmg(j),
+          ("CANDIDATE", 14, 12, 0, {}))
+
+    # ---------------------------------------------------------------- retry (§6.4)
+    print("\nVD_10/VD_11 - a retry may neither launder a loss nor poison the epoch after it")
+    clean_x = json.dumps(dict(rec(5, 45.0, scope="a"), run_id="X"))
+    deg_x = json.dumps(dict(rec(6, 48.0, scope="a", unreadable=2), run_id="X"))
+    for label, rows in (("VD_10 clean first, the retry reports the loss",
+                         ser(5, 0, "a") + [clean_x, deg_x] + ser(6, 20, "a", base=48.0)),
+                        ("VD_11 the loss first, the retry reports clean",
+                         ser(5, 0, "a") + [deg_x, clean_x] + ser(6, 20, "a", base=48.0))):
+        rc, j, n = run(rows)
+        check(label, (j["status"], rc, n, j["scope"]["records_in_epoch"],
+                      j["history"].get("quality"),
+                      j["history"]["rejected"].get("duplicate run_id (retry)")) + dmg(j),
+              ("CANDIDATE", 10, 1, 6, "COMPLETE", 1, 0, {"a": 1}))
+
+    # ---------------------------------------------------------------- file-global (§6.5)
+    print("\nMSG - a file-global cut applies to every scope at that position, and only there")
+    TORN = '{"schema_version": 2, "record_type": "carry_run", "ts": 1750000000, "sessions": 5'
+    msg1 = (ser(6, 0, "a") + ser(6, 0, "b") + [TORN] + ser(6, 20, "a", base=48.0)
+            + ser(2, 20, "b", base=48.0))
+    for scope, status, code, files, epoch in (("a", "CANDIDATE", 10, 1, 6),
+                                              ("b", "INSUFFICIENT_DATA", 20, 0, 2)):
+        rc, j, n = run(msg1, extra=["--scope-id", scope])
+        check(f"MSG_01 scope {scope} after an unattributable loss",
+              (j["status"], rc, n, j["scope"]["records_in_epoch"]) + dmg(j),
+              (status, code, files, epoch, 1, {}))
+    msg2 = (ser(6, 0, "a") + ser(6, 0, "b") + [TORN] + ser(2, 20, "a", base=48.0)
+            + ser(6, 20, "b", base=48.0))
+    for scope, status, code, files, epoch in (("a", "INSUFFICIENT_DATA", 20, 0, 2),
+                                              ("b", "CANDIDATE", 10, 1, 6)):
+        rc, j, n = run(msg2, extra=["--scope-id", scope])
+        check(f"MSG_02 scope {scope} when the sufficiencies are reversed",
+              (j["status"], rc, n, j["scope"]["records_in_epoch"]) + dmg(j),
+              (status, code, files, epoch, 1, {}))
 
 
 def main():
@@ -625,6 +859,8 @@ def main():
           (j15["history"]["damage"]["boundaries"],
            sorted((j15["history"]["damage"]["scope_local"] or {}).items())),
           (2, [("a", 1), ("b", 1)]))
+
+    trusted_boundaries()
 
     print("\nM1 - history.quality describes the evidence eligible RIGHT NOW")
     rc, j, n = run([json.dumps(rec(i, 30.0 + 3.0 * i, sessions=0, scanned=40)) for i in range(6)])
