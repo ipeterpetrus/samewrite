@@ -184,3 +184,16 @@ Dedup across a boundary is also new, and is stated rather than inherited: dedupl
 **per epoch**. The same `run_id` on the far side of a loss is that population's own observation and
 is kept; inside one epoch the retry is still dropped, still counted, and still cannot launder the
 survivor's quality (`tests/test_optimize.py` pins both).
+
+### 5.3 What a cross-family lane found in the epoch repair itself
+
+Two more places where the repair still consulted the population it had just cut, both reproduced
+before they were believed and both now pinned by a case and a mutant:
+
+| case | fixture | expectation |
+|---|---|---|
+| **B1_14** | six `stale` records, a torn line, and a ledger of 100 writes | the ledger finding may still promote — its evidence is the ledger — but the scope, and therefore the candidate id, comes from the current epoch or from nothing: `default`, never `stale` |
+| **B1_15** | scope-local loss in `a`, six clean `a` records, scope-local loss in `b`, one `b` record sharing a `run_id` with `a` | the epoch stamp is a pair of counts, so two scopes can hold the same numbers; deduplication identity carries the scope, and `a` stays `COMPLETE` instead of inheriting `b`'s `PARTIAL` through the retry floor |
+
+The long-run simulator was discarding the epoch it was handed, so it could combine records across a
+loss; it now analyses `active_records()` like the CLI.
