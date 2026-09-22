@@ -41,14 +41,19 @@ def oracle(toolsdir, body):
                     "unreadable": 0, "oversize": 0, "skipped_by_limit": 0, "quality": quality,
                     "carry": collections.Counter(carry_map or {{"Bash": 90, "Read": 10}})}}
         def rec(ts, shares, scope="default", turns=1000, run_id=None):
+            # acquisition counters included: since 1.4.2 a record claiming COMPLETE without the
+            # counters its writer always wrote is UNKNOWN, and UNKNOWN cannot promote
             return {{"schema_version": 2, "record_type": "carry_run", "ts": ts, "sessions": 40,
                     "turns": turns, "carry_bytes": 10**7, "scope_id": scope, "workload_class": "",
                     "evidence_quality": "COMPLETE", "run_id": run_id or carry.new_run_id(),
+                    "scanned": 100, "unreadable": 0, "oversize": 0, "skipped_by_limit": 0,
                     "shares": shares, "bpt": {{k: 1.0 for k in shares}}}}
         def w(path, rows):
-            with open(path, "w", encoding="utf-8") as fh:
+            with open(path, "wb") as fh:
                 for r in rows:
-                    fh.write((r if isinstance(r, str) else json.dumps(r)) + chr(10))
+                    if not isinstance(r, bytes):
+                        r = (r if isinstance(r, str) else json.dumps(r)).encode()
+                    fh.write(r + chr(10).encode())
             return path
         import evidence_acquire, evidence_history
         from evidence.absence import Absence
@@ -113,16 +118,20 @@ CASES = [
      """),
 
     ("identitas run: dua agen dgn metrik identik = dua pengamatan",
-     [("optimize.py", 'rid = r.get("run_id")', 'rid = json.dumps(r.get("shares"), sort_keys=True)')],
+     [("optimize.py", '    rid = rec.get("run_id")\n    if not (isinstance(rid, str) and rid):\n        return None',
+       '    rid = json.dumps(rec.get("shares"), sort_keys=True)')],
      """
      p = w(os.path.join(D, "h.jsonl"), [rec(100, {"Bash": 50.0, "Read": 50.0}),
                                         rec(100, {"Bash": 50.0, "Read": 50.0})])
-     recs, rej, _ = optimize.load_history(p)
+     recs, rej, _l, ep = optimize.load_history(p)
      assert len(recs) == 2, "populasi menyusut: dua agen dihitung satu"
+     # ...dan identitas yang dikarang dari metrik juga tak boleh melahirkan konflik identitas
+     assert ep["run_id_conflicts"] == 0, ep
+     assert optimize.damage_summary(ep)["boundaries"] == 0, optimize.damage_summary(ep)
      """),
 
     ("fail-closed: bukti PARTIAL tak boleh melahirkan kandidat",
-     [("optimize.py", 'usable = accept_partial or quality == "COMPLETE"', "usable = True")],
+     [("optimize.py", "usable = may_promote(quality, accept_partial)", "usable = True")],
      """
      f = optimize.analyse(acc(quality="PARTIAL"), EMPTY_HIST, None, None, scope="s")
      assert [x["state"] for x in f] == ["OBSERVED"], "kandidat lahir dari sapuan setengah jadi"
@@ -148,8 +157,8 @@ CASES = [
      """
      f = optimize.analyse(acc(), EMPTY_HIST, None, None, scope="x")[0]
      out = os.path.join(D, "c")
-     optimize.emit_candidates([f], out)
-     w2, e2, _ = optimize.emit_candidates([f], out)
+     optimize.emit_candidates([f], out, "CANDIDATE")
+     w2, e2, _ = optimize.emit_candidates([f], out, "CANDIDATE")
      assert (len(w2), len(e2)) == (0, 1), "penjadwal menulis ulang usulan yang sama tiap siklus"
      """),
 
@@ -347,7 +356,7 @@ CASES = [
      """
      p = os.path.join(D, "h.jsonl")
      carry.history(p, facts(1), 100, scope_id="s")
-     recs, rej, _ = optimize.load_history(p)
+     recs, rej, _, _ = optimize.load_history(p)
      assert (len(recs), sum(rej.values())) == (0, 1), (len(recs), dict(rej))
      """),
 
@@ -375,8 +384,8 @@ CASES = [
      """),
 
     ("identitas tren stabil: jendela membesar bukan usulan baru",
-     [("optimize.py", "                                   bucket=1 if per_month > 0 else -1,",
-       "                                   bucket=bucket_of(abs(per_month)),")],
+     [("optimize.py", "            direction = 1 if per_month > 0 else -1",
+       "            direction = bucket_of(abs(per_month))")],
      """
      # Deret harus NAIK lalu MENDATAR. Deret linier sempurna punya kemiringan yang sama di
      # jendela mana pun, jadi ia tak bisa membedakan identitas-dari-arah dari
@@ -537,6 +546,878 @@ CASES = [
      assert evidence_history.read_views(p) == [], evidence_history.read_views(p)
      c = evidence_history.read_container(p)
      assert c.lines_rejected == 1, c.lines_rejected
+     """),
+
+    # ------------------------------------ v1.4.2: the legacy optimizer's evidence-integrity gate
+    ("M_PARTIAL_PROMOTES: riwayat PARTIAL tak boleh dipromosikan tanpa izin eksplisit",
+     [("optimize.py",
+       'return quality == "COMPLETE" or (quality == "PARTIAL" and bool(accept_partial))',
+       "return True")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="p")
+             for i in range(6)]
+     for r in rows:
+         r["evidence_quality"] = "PARTIAL"
+         r["skipped_by_limit"] = 5
+     keep, dropped = optimize.comparable(rows)
+     h = {"comparable": keep, "total": 6, "in_scope": 6, "rejected": {}, "dropped": dropped,
+          "time_order": "ok"}
+     f = optimize.analyse(None, h, None, None, scope="p")
+     assert [x["state"] for x in f] == ["OBSERVED"], [x["state"] for x in f]
+     st = optimize.overall_status(f, h, None, optimize.population(keep), False)
+     assert st == "PARTIAL_EVIDENCE", st
+     """),
+
+    ("M_INVALID_ANCHOR: jangkar komparabilitas hanya dari rekaman yang lolos filternya sendiri",
+     [("optimize.py",
+       'usable = [r for r in recs if record_quality(r) not in ("INVALID", "EMPTY")]',
+       "usable = list(recs)")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a")
+             for i in range(6)]
+     bad = rec(100 + 9 * 604800, {"Bash": 55.0, "Read": 45.0}, scope="a", turns=100000)
+     bad["evidence_quality"] = "INVALID"
+     bad["sessions"] = 0
+     keep, _d = optimize.comparable(rows + [bad])
+     assert len(keep) == 6, len(keep)
+     """),
+
+    ("M_HOST_SHIFT_WRITES: status yang menolak promosi tidak menulis berkas",
+     [("optimize.py", '    if status != "CANDIDATE":\n        return written, existing, failed\n',
+       "")],
+     """
+     f = optimize.finding("x", "CANDIDATE", "h", "e", scope="s", bucket=1)
+     out = os.path.join(D, "gate")
+     for st in ("HOST_BEHAVIOR_SHIFT", "PARTIAL_EVIDENCE", "INSUFFICIENT_DATA", "ALREADY_RUNNING"):
+         w, e, fail = optimize.emit_candidates([f], out, st)
+         assert (w, e, fail) == ([], [], []), (st, w, e, fail)
+         assert not os.path.exists(out), st
+     w, e, fail = optimize.emit_candidates([f], out, "CANDIDATE")
+     assert len(w) == 1, (w, e, fail)
+     """),
+
+    ("M_MALFORMED_COMPLETE: transcript dengan baris JSON robek bukan sapuan COMPLETE",
+     [("carry.py",
+       'LOSS_FIELDS = ("unreadable", "oversize", "malformed", "identity_changed", "conflicted_sources")',
+       'LOSS_FIELDS = ("unreadable", "oversize", "identity_changed", "conflicted_sources")')],
+     """
+     d = tempfile.mkdtemp()
+     p = os.path.join(d, "t.jsonl")
+     rows = []
+     for t in range(30):
+         rows.append(json.dumps({"type": "assistant", "message": {"id": "m%d" % t,
+                     "usage": {"output_tokens": 5},
+                     "content": [{"type": "tool_use", "name": "Bash",
+                                  "input": {"command": "ls"}}]}}))
+         rows.append(json.dumps({"type": "user", "message": {
+                     "content": [{"type": "tool_result", "content": "o" * 200}]}}))
+     rows[11] = chr(123) + '"type": "assistant", "message": {"usage": {"out'
+     open(p, "w").write(chr(10).join(rows) + chr(10))
+     a = carry.accumulate([p], min_turns=1)
+     assert a["malformed"] == 1, a["malformed"]
+     assert a["quality"] != "COMPLETE", a["quality"]
+     assert optimize.sweep_quality(a) == "DEGRADED", optimize.sweep_quality(a)
+     """),
+
+    ("M_BOUND_SAMPLE_DIVERGES: sapuan dan pindaian listing memakai sampel terbatas yang SAMA",
+     [("optimize.py", "            listing, uses, sess = skills_tool.scan(selected)",
+       "            listing, uses, sess = skills_tool.scan(paths[:a.max_files] if a.max_files else paths)")],
+     """
+     import subprocess
+     d = tempfile.mkdtemp()
+     paths = []
+     for n, name in enumerate(("a.jsonl", "b.jsonl", "c.jsonl")):
+         q = os.path.join(d, name)
+         rows = []
+         if name == "a.jsonl":
+             rows.append(json.dumps({"type": "user", "attachment": {"type": "skill_listing",
+                         "content": chr(10).join(["- alpha: does a thing described at length",
+                                                  "- beta: does another thing, also at length",
+                                                  ""])}}))
+         for t in range(40):
+             rows.append(json.dumps({"type": "assistant", "message": {"id": "m%d" % t,
+                         "usage": {"output_tokens": 5},
+                         "content": [{"type": "tool_use", "name": "Bash",
+                                      "input": {"command": "ls"}}]}}))
+             rows.append(json.dumps({"type": "user", "message": {
+                         "content": [{"type": "tool_result", "content": "o" * 200}]}}))
+         open(q, "w").write(chr(10).join(rows) + chr(10))
+         os.utime(q, (1750000000 + n * 1000, 1750000000 + n * 1000))
+         paths.append(q)
+     empty = os.path.join(d, "none.jsonl")
+     open(empty, "w").write("")
+     opt = os.path.join(os.path.dirname(carry.__file__), "optimize.py")
+     r = subprocess.run([sys.executable, opt, "--history", empty, "--ledger", empty, "--json",
+                         "--scan"] + paths + ["--max-files", "1", "--min-turns", "1"],
+                        capture_output=True, text=True, timeout=300)
+     j = json.loads(r.stdout)
+     assert j["listing"] is None, j["listing"]
+     r2 = subprocess.run([sys.executable, opt, "--history", empty, "--ledger", empty, "--json",
+                          "--scan"] + paths + ["--min-turns", "1"],
+                         capture_output=True, text=True, timeout=300)
+     assert json.loads(r2.stdout)["listing"], "kontrol: sapuan penuh HARUS membaca listing itu"
+     """),
+
+    ("M_TREND_QUALITY_BYPASS: tren dari riwayat tak layak dilaporkan, bukan dipromosikan",
+     [("optimize.py", "            if not hist_usable:", "            if False:")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="q")
+             for i in range(6)]
+     for r in rows:
+         r["evidence_quality"] = "PARTIAL"
+         r["skipped_by_limit"] = 5
+     keep, dropped = optimize.comparable(rows)
+     h = {"comparable": keep, "total": 6, "in_scope": 6, "rejected": {}, "dropped": dropped,
+          "time_order": "ok"}
+     f = optimize.analyse(None, h, None, None, scope="q")
+     assert [x["state"] for x in f] == ["OBSERVED"], [x["state"] for x in f]
+     g = optimize.analyse(None, h, None, None, scope="q", accept_partial=True)
+     assert [x["state"] for x in g] == ["CANDIDATE"], [x["state"] for x in g]
+     """),
+
+
+    ("M_DEDUP_LAUNDERS: retry dgn run_id sama tak boleh menaikkan kualitas yang bertahan",
+     [("optimize.py", "    return TRUE_RETRY if prior_digest == digest else RUN_ID_CONFLICT",
+       "    return TRUE_RETRY")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="d")
+             for i in range(5)]
+     good = rec(100 + 5 * 604800, {"Bash": 45.0, "Read": 55.0}, scope="d", run_id="dup")
+     bad = rec(100 + 5 * 604800, {"Bash": 45.0, "Read": 55.0}, scope="d", run_id="dup")
+     bad["evidence_quality"] = "PARTIAL"
+     bad["skipped_by_limit"] = 7
+     p = w(os.path.join(D, "dup.jsonl"), rows + [good, bad])
+     recs, rej, _l, ep = optimize.load_history(p)
+     # salinan yang MENGAKU sesuatu yang lain bukan retry: ia konflik identitas, dan ia memotong.
+     assert ep["run_id_conflicts"] == 1, ep
+     assert rej.get("duplicate run_id (retry)", 0) == 0, dict(rej)
+     assert optimize.damage_summary(ep)["boundaries"] == 1, optimize.damage_summary(ep)
+     assert len(optimize.active_records(recs, ep)) == 0, "populasi pra-konflik masih dipakai"
+     """),
+
+
+    ("M_IMPOSSIBLE_COUNTERS: sesi lebih banyak daripada transcript yang dipindai = mustahil",
+     [("optimize.py", '    if "scanned" in nums and nums["scanned"] < nums.get("sessions", 0):',
+       "    if False:")],
+     """
+     r = rec(100, {"Bash": 60.0, "Read": 40.0})
+     r["scanned"] = 1
+     q = optimize.record_quality(r)
+     assert q == "INVALID", q
+     """),
+
+    ("M_CONTAINER_DAMAGE_IGNORED: baris robek di berkas history memotong epoch",
+     [("optimize.py", "    return not any(x in str(reason) for x in NOT_A_LOSS)",
+       "    return False")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="c")
+             for i in range(6)]
+     p = w(os.path.join(D, "torn_hist.jsonl"),
+           [json.dumps(r) for r in rows] + [chr(123) + '"torn":'])
+     recs, rej, _l, ep = optimize.load_history(p)
+     cur = optimize.active_records(recs, ep)
+     assert len(cur) == 0, ("epoch tak terpotong", len(cur))
+     keep, dropped = optimize.comparable(cur)
+     h = {"comparable": keep, "total": len(recs), "in_scope": len(recs), "rejected": rej,
+          "dropped": dropped, "time_order": "ok"}
+     f = optimize.analyse(None, h, None, None, scope="c", accept_partial=True)
+     assert all(x["state"] != "CANDIDATE" for x in f), [x["state"] for x in f]
+     """),
+
+    ("M_LEDGER_TORN_PROMOTES: ledger yang kehilangan baris bukan sampel lapangan",
+     [("optimize.py", """    ledger_usable = (bool(ledger) and ledger.get("writes", 0) >= LEDGER_MIN_WRITES
+                     and not ledger.get("rejected"))""",
+       "    ledger_usable = bool(ledger) and ledger.get(\"writes\", 0) >= LEDGER_MIN_WRITES")],
+     """
+     p = os.path.join(D, "led.jsonl")
+     with open(p, "w") as fh:
+         fh.write(chr(10).join('{"event": "checked"}' for _ in range(100)) + chr(10))
+         fh.write('{"event":' + chr(10))
+     led = optimize.load_ledger(p)
+     assert led["writes"] == 100 and led["rejected"] == 1, led
+     EMPTY = {"comparable": [], "total": 0, "in_scope": 0, "rejected": {}, "dropped": [],
+              "time_order": "ok"}
+     f = optimize.analyse(None, EMPTY, led, None)
+     assert [x["state"] for x in f] == ["OBSERVED"], [x["state"] for x in f]
+     """),
+
+    ("M_EMIT_FAILURE_SILENT: kandidat yang gagal ditulis tak boleh dilaporkan CANDIDATE",
+     [("optimize.py", """                if failed and not written:""", "                if False:")],
+     """
+     import subprocess
+     d = tempfile.mkdtemp()
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="e")
+             for i in range(6)]
+     h = w(os.path.join(d, "h.jsonl"), rows)
+     empty = os.path.join(d, "none.jsonl")
+     open(empty, "w").write("")
+     out = os.path.join(d, "cand")
+     os.makedirs(out)
+     keep, _dr = optimize.comparable(rows)
+     hh = {"comparable": keep, "total": 6, "in_scope": 6, "rejected": {}, "dropped": [],
+           "time_order": "ok"}
+     cid = [x["candidate_id"] for x in optimize.analyse(None, hh, None, None, scope="e")
+            if x["state"] == "CANDIDATE"][0]
+     open(os.path.join(out, cid), "w").write("a file where a directory must go")
+     opt = os.path.join(os.path.dirname(carry.__file__), "optimize.py")
+     r = subprocess.run([sys.executable, opt, "--history", h, "--ledger", empty, "--scan",
+                         "--emit-candidate", out, "--json", "--strict-exit"],
+                        capture_output=True, text=True, timeout=300)
+     j = json.loads(r.stdout)
+     assert j["status"] == "INTERNAL_ERROR", (j["status"], j["candidates_failed"])
+     assert r.returncode == 50, r.returncode
+     """),
+
+
+    ("M_BARE_PARTIAL_CLAIM: klaim PARTIAL tanpa counter yang menjelaskannya bukan bound",
+     [("optimize.py", """    if claimed == "PARTIAL" and derived == "COMPLETE":""", "    if False:")],
+     """
+     r = rec(100, {"Bash": 60.0, "Read": 40.0})
+     r["evidence_quality"] = "PARTIAL"
+     q = optimize.record_quality(r)
+     assert q == "UNKNOWN", q
+     assert optimize.may_promote(q, True) is False, q
+     """),
+
+    ("M_RECORD_LOSS_IGNORED: counter kehilangan pada record ikut menentukan kualitas",
+     [("optimize.py",
+       'RECORD_LOSS_COUNTERS = ("unreadable", "oversize", "malformed", "malformed_lines",\n                        "identity_changed", "conflicted_sources", "records_rejected")',
+       'RECORD_LOSS_COUNTERS = ("unreadable", "oversize")')],
+     """
+     for counter in ("malformed", "identity_changed", "conflicted_sources"):
+         r = rec(100, {"Bash": 60.0, "Read": 40.0})
+         r[counter] = 1
+         q = optimize.record_quality(r)
+         assert q == "DEGRADED", (counter, q)
+     """),
+
+    ("M_STRUCTURAL_REJECT_NOT_DAMAGE: penolakan struktural memotong epoch, bukan sekadar dicatat",
+     [("optimize.py",
+       'NOT_A_LOSS = ("current-generation", "duplicate run_id", "not an object", "no shares",\n              "not our record_type")',
+       'NOT_A_LOSS = ("unsupported schema_version", "shares sum to")')],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="g")
+             for i in range(6)]
+     bad = chr(123) + '"schema_version":3,"record_type":"carry_run","shares":' \
+           + chr(123) + '"Bash":60.0,"Read":40.0' + chr(125) + chr(125)
+     p = w(os.path.join(D, "struct.jsonl"), [json.dumps(r) for r in rows] + [bad])
+     recs, rej, _l, ep = optimize.load_history(p)
+     cur = optimize.active_records(recs, ep)
+     assert len(cur) == 0, ("penolakan struktural tak memotong epoch", len(cur))
+     """),
+
+    ("M_LEDGER_UNKNOWN_EVENT: baris ledger yang tak terhitung adalah baris yang hilang",
+     [("optimize.py", """            else:
+                # Neither a write nor a prevented write: a line this reader cannot account for.
+                # Counting it as nothing at all let a ledger full of unknown events look like a
+                # clean sample. (cross-family review, confirmation round)
+                rejected += 1""", "            else:\n                pass")],
+     """
+     p = os.path.join(D, "unknown_led.jsonl")
+     with open(p, "w") as fh:
+         fh.write(chr(10).join('{"event": "checked"}' for _ in range(100)) + chr(10))
+         fh.write('{"event": "garbage"}' + chr(10))
+     led = optimize.load_ledger(p)
+     assert led["rejected"] == 1, led
+     EMPTY = {"comparable": [], "total": 0, "in_scope": 0, "rejected": {}, "dropped": [],
+              "time_order": "ok"}
+     f = optimize.analyse(None, EMPTY, led, None)
+     assert [x["state"] for x in f] == ["OBSERVED"], [x["state"] for x in f]
+     """),
+
+
+    # ------------------------------------------- B1: the history epoch (acceptance-review blocker)
+    ("M_DAMAGE_POISONS_FOREVER: kerusakan lama tak boleh memblokir epoch yang bersih",
+     [("optimize.py", "    hist_q = history_quality(hist.get(\"comparable\", []))",
+       "    hist_q = worst_quality([history_quality(hist.get(\"comparable\", [])),\n"
+       "                            \"DEGRADED\" if (hist.get(\"damage\") or {}).get(\"boundaries\") "
+       "else \"COMPLETE\"])")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="p")
+             for i in range(6)]
+     later = [rec(100 + (20 + i) * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="p")
+              for i in range(6)]
+     p = w(os.path.join(D, "recover.jsonl"),
+           [json.dumps(r) for r in rows] + [chr(123) + '"torn":'] + [json.dumps(r) for r in later])
+     recs, rej, _l, ep = optimize.load_history(p)
+     cur = optimize.active_records(recs, ep)
+     keep, dropped = optimize.comparable(cur)
+     h = {"comparable": keep, "total": len(recs), "in_scope": len(cur), "rejected": rej,
+          "dropped": dropped, "time_order": "ok",
+          "damage": optimize.damage_summary(ep)}
+     f = optimize.analyse(None, h, None, None, scope="p")
+     assert any(x["state"] == "CANDIDATE" for x in f), [x["state"] for x in f]
+     """),
+
+    ("M_DAMAGE_IGNORED_COMPLETELY: kehilangan yang tak teratribusi tetap memotong",
+     [("optimize.py", "            if rejection_is_loss(why):\n                cuts_file += 1",
+       "            if False:\n                cuts_file += 1")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="q")
+             for i in range(6)]
+     p = w(os.path.join(D, "tail.jsonl"),
+           [json.dumps(r) for r in rows] + [chr(123) + '"torn":'])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert len(optimize.active_records(recs, ep)) == 0, "epoch tak terpotong"
+     """),
+
+    ("M_EPOCH_MERGES_ACROSS_GAP: dua epoch tak boleh digabung",
+     [("optimize.py", "    scoped = [r for r in current if scope_of(r) == scope]",
+       "    scoped = [r for r in recs if scope_of(r) == scope]")],
+     """
+     import subprocess
+     d = tempfile.mkdtemp()
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}) for i in range(6)]
+     later = [rec(100 + (20 + i) * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3})
+              for i in range(6)]
+     h = w(os.path.join(d, "h.jsonl"),
+           [json.dumps(r) for r in rows] + [chr(123) + '"torn":'] + [json.dumps(r) for r in later])
+     empty = os.path.join(d, "none.jsonl")
+     opt = os.path.join(os.path.dirname(carry.__file__), "optimize.py")
+     r = subprocess.run([sys.executable, opt, "--history", h, "--ledger", empty, "--scan", "--json"],
+                        capture_output=True, text=True, timeout=300)
+     j = json.loads(r.stdout)
+     assert j["history"]["comparable"] == 6, j["history"]["comparable"]
+     assert j["scope"]["records_in_epoch"] == 6, j["scope"]["records_in_epoch"]
+     """),
+
+    ("M_SCOPE_DAMAGE_GLOBALIZED: kerusakan milik satu scope tak memotong scope lain",
+     [("optimize.py", '    return (e.get("file_global", 0), (e.get("scope_local") or {}).get(scope, 0))',
+       '    return (e.get("file_global", 0) + sum((e.get("scope_local") or {}).values()), 0)')],
+     """
+     good_a = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a")
+               for i in range(6)]
+     deg_b = rec(100 + 9 * 604800, {"Bash": 50.0, "Read": 50.0}, scope="b")
+     deg_b["unreadable"] = 2
+     p = w(os.path.join(D, "scoped.jsonl"), [json.dumps(r) for r in good_a] + [json.dumps(deg_b)])
+     recs, rej, _l, ep = optimize.load_history(p)
+     cur = [r for r in optimize.active_records(recs, ep) if optimize.scope_of(r) == "a"]
+     assert len(cur) == 6, ("scope a ikut terpotong", len(cur))
+     """),
+
+    ("M_UNATTRIBUTABLE_DAMAGE_SCOPED: baris robek memotong SEMUA scope",
+     [("optimize.py", "            if rejection_is_loss(why):\n                cuts_file += 1",
+       "            if rejection_is_loss(why):\n"
+       "                cuts_scope[scope_of(o) if isinstance(o, dict) else 'default'] += 1")],
+     """
+     good_a = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a")
+               for i in range(6)]
+     p = w(os.path.join(D, "global.jsonl"),
+           [json.dumps(r) for r in good_a] + [chr(123) + '"torn":'])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert len(optimize.active_records(recs, ep)) == 0, "scope a lolos dari potongan global"
+     """),
+
+    ("M_EMPTY_COMPARABLE_REPORTS_COMPLETE: nol rekaman layak bukan COMPLETE",
+     [("optimize.py", '        return "EMPTY"\n    return worst_quality([record_quality(r) for r in records])',
+       '        return "COMPLETE"\n    return worst_quality([record_quality(r) for r in records])')],
+     """
+     assert optimize.history_quality([]) == "EMPTY", optimize.history_quality([])
+     """),
+
+    ("M_ZERO_CARRY_BECOMES_DAMAGE: sapuan tanpa carry itu bukti terbaca, bukan korupsi",
+     [("optimize.py", '        if not claims_ours:\n            return False, "no shares"\n        sh = {}',
+       '        return False, "carry record without shares"')],
+     """
+     zero = rec(100 + 9 * 604800, {"Bash": 50.0, "Read": 50.0})
+     zero["shares"] = {}
+     zero["bpt"] = {}
+     zero["carry_bytes"] = 0
+     ok, why = optimize.valid_record(zero)
+     assert ok, ("record zero-carry ditolak", why)
+     assert optimize.record_quality(zero) == "EMPTY", optimize.record_quality(zero)
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}) for i in range(6)]
+     p = w(os.path.join(D, "zero.jsonl"), [json.dumps(r) for r in rows] + [json.dumps(zero)])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert optimize.damage_summary(ep)["boundaries"] == 0, optimize.damage_summary(ep)
+     """),
+
+    ("M_PRE_DAMAGE_RECORD_ANCHORS: jangkar datang dari epoch yang sedang dianalisis",
+     [("optimize.py", "        anchor = (eligible_anchor(current)",
+       "        anchor = (eligible_anchor(recs) or eligible_anchor(current)")],
+     """
+     import subprocess
+     d = tempfile.mkdtemp()
+     # jam mundur: rekaman SEBELUM potongan punya ts paling baru, tapi epoch adalah POSISI FISIK
+     old_scope = [rec(9_000_000_000 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3},
+                      scope="stale") for i in range(6)]
+     new_scope = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3},
+                      scope="fresh") for i in range(6)]
+     h = w(os.path.join(d, "h.jsonl"),
+           [json.dumps(r) for r in old_scope] + [chr(123) + '"torn":']
+           + [json.dumps(r) for r in new_scope])
+     empty = os.path.join(d, "none.jsonl")
+     opt = os.path.join(os.path.dirname(carry.__file__), "optimize.py")
+     r = subprocess.run([sys.executable, opt, "--history", h, "--ledger", empty, "--scan", "--json"],
+                        capture_output=True, text=True, timeout=300)
+     j = json.loads(r.stdout)
+     assert j["scope"]["analysed"] == "fresh", j["scope"]["analysed"]
+     assert j["status"] == "CANDIDATE", (j["status"], j["history"]["comparable"])
+     """),
+
+
+    ("M_STALE_SCOPE_ANCHOR: populasi pra-loss tak boleh menamai kandidat pasca-loss",
+     [("optimize.py",
+       "        anchor = (eligible_anchor(current)\n"
+       "                  or (max(current, key=lambda r: r.get(\"ts\") or 0) if current else None))\n"
+       "        scope = scope_of(anchor) if anchor is not None else \"default\"",
+       "        anchor = (eligible_anchor(current) or eligible_anchor(recs)\n"
+       "                  or max(recs, key=lambda r: r.get(\"ts\") or 0))\n"
+       "        scope = scope_of(anchor)")],
+     """
+     import subprocess
+     d = tempfile.mkdtemp()
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="stale")
+             for i in range(6)]
+     h = w(os.path.join(d, "h.jsonl"), [json.dumps(r) for r in rows] + [chr(123) + '"torn":'])
+     led = os.path.join(d, "led.jsonl")
+     with open(led, "w") as fh:
+         fh.write(chr(10).join('{"event": "checked"}' for _ in range(100)) + chr(10))
+     opt = os.path.join(os.path.dirname(carry.__file__), "optimize.py")
+     r = subprocess.run([sys.executable, opt, "--history", h, "--ledger", led, "--scan", "--json"],
+                        capture_output=True, text=True, timeout=300)
+     j = json.loads(r.stdout)
+     assert j["scope"]["analysed"] == "default", j["scope"]["analysed"]
+     assert not any("stale" in c for c in j["candidate_ids"]), j["candidate_ids"]
+     """),
+
+    ("M_DEDUP_IGNORES_SCOPE: dua scope bisa punya nomor epoch yang sama",
+     [("optimize.py", '    return (scope_of(rec), rec.get(EPOCH_KEY, (0, 0))[0], rid)',
+       '    return (rec.get(EPOCH_KEY, (0, 0))[0], rid)')],
+     """
+     def degraded(scope):
+         x = rec(100, {"Bash": 20.0, "Read": 80.0}, scope=scope)
+         x["unreadable"] = 1
+         return json.dumps(x)
+     broken_a = degraded("a")
+     broken_b = degraded("b")
+     rows_a = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a",
+                   run_id="shared" if i == 0 else "a%d" % i) for i in range(6)]
+     row_b = rec(100 + 9 * 604800, {"Bash": 50.0, "Read": 50.0}, scope="b", run_id="shared")
+     row_b["evidence_quality"] = "PARTIAL"
+     row_b["skipped_by_limit"] = 1
+     p = w(os.path.join(D, "twoscope.jsonl"),
+           [broken_a] + [json.dumps(r) for r in rows_a] + [broken_b, json.dumps(row_b)])
+     recs, rej, _l, ep = optimize.load_history(p)
+     cur = [r for r in optimize.active_records(recs, ep) if optimize.scope_of(r) == "a"]
+     q = optimize.history_quality(optimize.comparable(cur)[0])
+     assert q == "COMPLETE", (q, rej)
+     # run_id yang sama di scope LAIN bukan pengamatan yang sama: bukan retry, bukan konflik
+     assert ep["run_id_conflicts"] == 0, ep
+     assert rej.get("duplicate run_id (retry)", 0) == 0, dict(rej)
+     """),
+
+    # --------------------------- the trusted damage boundary (adversarial-review blocker B-UTF8)
+    ("M_UTF8_REPLACEMENT_ATTRIBUTED: byte yang tak ter-decode bukan record, dan bukan label",
+     [("optimize.py", '                    text = raw.decode("utf-8")',
+       '                    text = raw.decode("utf-8", "replace")')],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
+             for i in range(6)]
+     # sah dalam segala hal KECUALI byte-nya: dengan decode longgar ia jadi record diterima
+     ghost = rec(100 + 9 * 604800, {"Bash": 50.0, "Read": 50.0}, scope="@@M@@")
+     bad = json.dumps(ghost).encode().replace("@@M@@".encode(), bytes([255, 254, 128]))
+     p = w(os.path.join(D, "utf8.jsonl"), [json.dumps(r) for r in rows] + [bad])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert rej.get("line is not valid UTF-8") == 1, dict(rej)
+     assert len(recs) == 6, ("baris tak ter-decode diterima sebagai record", len(recs))
+     assert optimize.damage_summary(ep)["file_global"] == 1, optimize.damage_summary(ep)
+     assert all(chr(65533) not in optimize.scope_of(r) for r in recs), "U+FFFD masuk sebagai scope"
+     """),
+
+    ("M_FOREIGN_RECORD_TYPE_IS_DAMAGE: entri alat lain di berkas bersama bukan kehilangan kita",
+     [("optimize.py",
+       '        return False, ("unknown record_type" if claims_ours else "not our record_type")',
+       '        return False, "unknown record_type"')],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
+             for i in range(6)]
+     foreign = json.dumps({"record_type": "hermes_run", "ts": 100, "note": "bukan record kita"})
+     p = w(os.path.join(D, "foreign_type.jsonl"), [json.dumps(r) for r in rows] + [foreign])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert optimize.damage_summary(ep)["boundaries"] == 0, optimize.damage_summary(ep)
+     assert len(optimize.active_records(recs, ep)) == 6, "populasi rev ikut terpotong"
+     # kontrol: baris yang MENGAKU record kita dengan record_type asing TETAP kehilangan
+     ours = json.dumps({"record_type": "carry_note", "schema_version": 2, "run_id": "x",
+                        "shares": {"Bash": 100.0}})
+     p2 = w(os.path.join(D, "ours_type.jsonl"), [json.dumps(r) for r in rows] + [ours])
+     recs2, rej2, _l2, ep2 = optimize.load_history(p2)
+     assert optimize.damage_summary(ep2)["file_global"] == 1, optimize.damage_summary(ep2)
+     """),
+
+    ("M_SCOPE_LABEL_UNCHECKED: scope_id adalah otoritas atribusi, jadi diperiksa sebelum diterima",
+     [("optimize.py",
+       "    if sid is not None and (not isinstance(sid, str) or len(sid) > 64):",
+       "    if False:")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
+             for i in range(6)]
+     forged = rec(100 + 6 * 604800, {"Bash": 48.0, "Read": 52.0}, run_id="LOSS-X")
+     forged["unreadable"] = 2
+     forged["scope_id"] = ["rev"]
+     later = [rec(100 + (20 + i) * 604800, {"Bash": 48.0 + i * 3, "Read": 52.0 - i * 3},
+                  scope="rev") for i in range(6)]
+     p = w(os.path.join(D, "forged_scope.jsonl"),
+           [json.dumps(r) for r in rows] + [json.dumps(forged)]
+           + [json.dumps(r) for r in later])
+     recs, rej, _l, ep = optimize.load_history(p)
+     d = optimize.damage_summary(ep)
+     assert d["file_global"] == 1, d
+     assert d["scope_local"] == {}, d
+     cur = optimize.active_records(recs, ep)
+     assert len(cur) == 6, ("populasi rev menyeberangi loss", len(cur))
+     assert sorted({optimize.scope_of(r) for r in recs}) == ["rev"], "scope hantu terbit"
+     # kontrol: label yang MEMANG ditulis produser tetap diterima
+     fine = rec(100, {"Bash": 50.0, "Read": 50.0}, scope="y" * 64)
+     assert optimize.valid_record(fine) == (True, ""), optimize.valid_record(fine)
+     """),
+
+    ("M_REJECTED_VALUE_ECHOED: isi baris yang ditolak tak boleh masuk output publik",
+     [("optimize.py", '    if v is None or (isinstance(v, (int, float)) and not isinstance(v, bool)):\n'
+       '        return repr(v)\n    return "of type " + type(v).__name__',
+       "    return repr(v)")],
+     """
+     secret = "sk-synthetic-NOTAREALKEY-0123456789"
+     bad = rec(100, {"Bash": 10.0, "Read": 10.0}, scope="/home/synthetic/.ssh/id_ed25519")
+     bad["schema_version"] = secret
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
+             for i in range(6)]
+     p = w(os.path.join(D, "leak.jsonl"), [json.dumps(r) for r in rows] + [json.dumps(bad)])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert all(secret[:12] not in k for k in rej), list(rej)
+     assert list(rej) == ["unsupported schema_version of type str"], list(rej)
+     """),
+
+    ("M_REJECTED_SCOPE_TRUSTED: record yang gagal validasi bukan otoritas atas scope-nya sendiri",
+     [("optimize.py", "            if rejection_is_loss(why):\n                cuts_file += 1",
+       "            if rejection_is_loss(why):\n"
+       "                sid = (o or {}).get('scope_id')\n"
+       "                if isinstance(sid, str) and 0 < len(sid) <= 64 and not carry.SAFE_LABEL.search(sid):\n"
+       "                    cuts_scope[sid] += 1\n"
+       "                else:\n"
+       "                    cuts_file += 1")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
+             for i in range(6)]
+     bad = rec(100 + 9 * 604800, {"Bash": 10.0, "Read": 10.0}, scope="ghost")
+     p = w(os.path.join(D, "trusted.jsonl"), [json.dumps(r) for r in rows] + [json.dumps(bad)])
+     recs, rej, _l, ep = optimize.load_history(p)
+     d = optimize.damage_summary(ep)
+     assert d["scope_local"] == {}, d
+     assert d["file_global"] == 1, d
+     assert len(optimize.active_records(recs, ep)) == 0, "populasi rev tak ikut terpotong"
+     """),
+
+    ("M_REJECTED_SCOPE_GHOST_KEY: label dari baris yang ditolak tak boleh jadi kunci publik",
+     [("optimize.py", "            if rejection_is_loss(why):\n                cuts_file += 1",
+       "            if rejection_is_loss(why):\n"
+       "                cuts_scope[str((o or {}).get('scope_id') or 'default')] += 1")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
+             for i in range(6)]
+     for label in ("/etc/passwd.d/synthetic", "agent-b", "x" * 64):
+         bad = rec(100 + 9 * 604800, {"Bash": 10.0, "Read": 10.0}, scope=label)
+         p = w(os.path.join(D, "ghost.jsonl"), [json.dumps(r) for r in rows] + [json.dumps(bad)])
+         recs, rej, _l, ep = optimize.load_history(p)
+         d = optimize.damage_summary(ep)
+         assert d["scope_local"] == {}, (label, d)
+         assert d["file_global"] == 1, (label, d)
+     """),
+
+    ("M_REJECTED_SCOPE_CARDINALITY: regex 'label yang tampak aman' tetap mempercayai baris ditolak",
+     [("optimize.py", "            if rejection_is_loss(why):\n                cuts_file += 1",
+       "            if rejection_is_loss(why):\n"
+       "                sid = (o or {}).get('scope_id')\n"
+       "                if isinstance(sid, str) and sid.isalnum() and len(sid) <= 32:\n"
+       "                    cuts_scope[sid] += 1\n"
+       "                else:\n"
+       "                    cuts_file += 1")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
+             for i in range(6)]
+     flood = [json.dumps(rec(100 + 9 * 604800, {"Bash": 10.0, "Read": 10.0}, scope="s%04d" % i))
+              for i in range(2000)]
+     p = w(os.path.join(D, "flood.jsonl"), flood + [json.dumps(r) for r in rows])
+     recs, rej, _l, ep = optimize.load_history(p)
+     d = optimize.damage_summary(ep)
+     assert d["scope_local"] == {}, len(d["scope_local"])
+     assert d["file_global"] == 2000, d["file_global"]
+     """),
+
+    ("M_GLOBAL_DAMAGE_NOT_CUT: kegagalan decode adalah kehilangan, bukan catatan kaki",
+     [("optimize.py",
+       'NOT_A_LOSS = ("current-generation", "duplicate run_id", "not an object", "no shares",\n              "not our record_type")',
+       'NOT_A_LOSS = ("not valid UTF-8",)')],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
+             for i in range(6)]
+     ghost = rec(100 + 9 * 604800, {"Bash": 10.0, "Read": 10.0}, scope="@@M@@")
+     bad = json.dumps(ghost).encode().replace("@@M@@".encode(), bytes([255, 254, 128]))
+     p = w(os.path.join(D, "notcut.jsonl"), [json.dumps(r) for r in rows] + [bad])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert optimize.damage_summary(ep)["boundaries"] == 1, optimize.damage_summary(ep)
+     assert len(optimize.active_records(recs, ep)) == 0, "epoch tak terpotong"
+     """),
+
+    ("M_GLOBAL_DAMAGE_POISONS_FOREVER: potongan global memotong di POSISI, bukan selamanya",
+     [("optimize.py", "        if r.get(EPOCH_KEY, key) == key:",
+       "        if r.get(EPOCH_KEY, key) == key and not (epochs or {}).get('file_global'):")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
+             for i in range(6)]
+     later = [rec(100 + (20 + i) * 604800, {"Bash": 48.0 + i * 3, "Read": 52.0 - i * 3},
+                  scope="rev") for i in range(6)]
+     p = w(os.path.join(D, "poison.jsonl"),
+           [json.dumps(r) for r in rows] + [chr(123) + '"torn":'] + [json.dumps(r) for r in later])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert len(optimize.active_records(recs, ep)) == 6, len(optimize.active_records(recs, ep))
+     """),
+
+    ("M_VALID_DEGRADED_POISONS_SCOPE_FOREVER: record sah yang kehilangan bukti membuka epoch",
+     [("optimize.py", "                if verdict == RUN_ID_CONFLICT or degrades_scope(o):",
+       "                if verdict == RUN_ID_CONFLICT:")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a")
+             for i in range(6)]
+     deg = rec(100 + 6 * 604800, {"Bash": 48.0, "Read": 52.0}, scope="a")
+     deg["unreadable"] = 3
+     later = [rec(100 + (20 + i) * 604800, {"Bash": 48.0 + i * 3, "Read": 52.0 - i * 3},
+                  scope="a") for i in range(6)]
+     p = w(os.path.join(D, "stuck.jsonl"),
+           [json.dumps(r) for r in rows] + [json.dumps(deg)] + [json.dumps(r) for r in later])
+     recs, rej, _l, ep = optimize.load_history(p)
+     cur = optimize.active_records(recs, ep)
+     assert len(cur) == 6, ("epoch pemulihan tak terbuka", len(cur))
+     assert optimize.history_quality(optimize.comparable(cur)[0]) == "COMPLETE", "masih DEGRADED"
+     """),
+
+    ("M_VALID_DEGRADED_CUTS_ALL_SCOPES: kehilangan milik satu scope hanya memotong scope itu",
+     [("optimize.py", "                    cuts_scope[scope_of(o)] += 1",
+       "                    cuts_file += 1")],
+     """
+     a = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a")
+          for i in range(6)]
+     b = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="b")
+          for i in range(6)]
+     deg = rec(100 + 6 * 604800, {"Bash": 48.0, "Read": 52.0}, scope="a")
+     deg["unreadable"] = 3
+     p = w(os.path.join(D, "neighbour.jsonl"),
+           [json.dumps(r) for r in a] + [json.dumps(r) for r in b] + [json.dumps(deg)])
+     recs, rej, _l, ep = optimize.load_history(p)
+     cur = [r for r in optimize.active_records(recs, ep) if optimize.scope_of(r) == "b"]
+     assert len(cur) == 6, ("tetangga kehilangan epoch-nya", len(cur))
+     """),
+
+    ("M_DEGRADED_RECORD_INCLUDED_POST_BOUNDARY: record yang melaporkan kehilangan ada di epoch LAMA",
+     [("optimize.py",
+       "                o[EPOCH_KEY] = (cuts_file, cuts_scope[scope_of(o)])",
+       "                o[EPOCH_KEY] = (cuts_file, cuts_scope[scope_of(o)]\n"
+       "                                + (1 if degrades_scope(o) else 0))")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a")
+             for i in range(6)]
+     deg = rec(100 + 6 * 604800, {"Bash": 48.0, "Read": 52.0}, scope="a", run_id="degraded-one")
+     deg["unreadable"] = 3
+     later = [rec(100 + (20 + i) * 604800, {"Bash": 48.0 + i * 3, "Read": 52.0 - i * 3},
+                  scope="a") for i in range(6)]
+     p = w(os.path.join(D, "order.jsonl"),
+           [json.dumps(r) for r in rows] + [json.dumps(deg)] + [json.dumps(r) for r in later])
+     recs, rej, _l, ep = optimize.load_history(p)
+     cur = optimize.active_records(recs, ep)
+     assert "degraded-one" not in [r.get("run_id") for r in cur], "record DEGRADED masuk epoch baru"
+     assert len(cur) == 6, len(cur)
+     """),
+
+    ("M_DEGRADED_RETRY_CUTS_TWICE: satu boundary per run logis, bukan per salinan",
+     [("optimize.py", "                if verdict == TRUE_RETRY:", "                if False:")],
+     """
+     def deg(seq, bash, run_id):
+         r = rec(100 + seq * 604800, {"Bash": bash, "Read": 100.0 - bash}, scope="a",
+                 run_id=run_id)
+         r["unreadable"] = 2
+         return json.dumps(r)
+     healthy = [json.dumps(rec(100 + (20 + i) * 604800,
+                               {"Bash": 48.0 + i * 3, "Read": 52.0 - i * 3}, scope="a"))
+                for i in range(6)]
+     p = w(os.path.join(D, "retrycut.jsonl"), [deg(0, 30.0, "X")] + healthy + [deg(0, 30.0, "X")])
+     recs, rej, _l, ep = optimize.load_history(p)
+     d = optimize.damage_summary(ep)
+     assert d["scope_local"] == {"a": 1}, d
+     assert len(optimize.active_records(recs, ep)) == 6, len(optimize.active_records(recs, ep))
+     # kontrol: kehilangan kedua dari run yang BENAR-BENAR lain tetap memotong
+     p2 = w(os.path.join(D, "realsecond.jsonl"),
+            [deg(0, 30.0, "X")] + healthy + [deg(30, 30.0, "Y")])
+     recs2, rej2, _l2, ep2 = optimize.load_history(p2)
+     assert optimize.damage_summary(ep2)["scope_local"] == {"a": 2}, optimize.damage_summary(ep2)
+     """),
+
+    ("M_DEGRADED_RETRY_NO_RECOVERY: retry tak boleh mencuci kehilangan yang dilaporkan kembarannya",
+     [("optimize.py", '    return (scope_of(rec), rec.get(EPOCH_KEY, (0, 0))[0], rid)',
+       '    return (scope_of(rec), rec.get(EPOCH_KEY), rid)')],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a")
+             for i in range(5)]
+     deg = rec(100 + 5 * 604800, {"Bash": 45.0, "Read": 55.0}, scope="a", run_id="X")
+     deg["unreadable"] = 2
+     clean_retry = rec(100 + 6 * 604800, {"Bash": 48.0, "Read": 52.0}, scope="a", run_id="X")
+     later = [rec(100 + (20 + i) * 604800, {"Bash": 48.0 + i * 3, "Read": 52.0 - i * 3},
+                  scope="a") for i in range(6)]
+     p = w(os.path.join(D, "retry.jsonl"),
+           [json.dumps(r) for r in rows] + [json.dumps(deg), json.dumps(clean_retry)]
+           + [json.dumps(r) for r in later])
+     recs, rej, _l, ep = optimize.load_history(p)
+     # amandemen §7.6: kedua salinan BERBEDA, jadi yang belakangan adalah konflik identitas,
+     # bukan retry. Yang dijaga tetap sama: salinan bersih itu tak boleh jadi bukti epoch pulih.
+     assert ep["run_id_conflicts"] == 1, dict(rej)
+     assert rej.get("duplicate run_id (retry)", 0) == 0, dict(rej)
+     cur = optimize.active_records(recs, ep)
+     assert len(cur) == 6, ("salinan bersih dari run yang sama ikut jadi bukti", len(cur))
+     assert all(r.get("run_id") != "X" for r in cur), "salinan konflik masuk epoch pulih"
+     """),
+
+
+    # ------------------------------- run-id conflict (author-adversarial review of 71016ee)
+    ("M_RUNID_CONFLICT_TREATED_AS_RETRY: run_id sama bukan bukti pengamatan sama",
+     [("optimize.py", "    return TRUE_RETRY if prior_digest == digest else RUN_ID_CONFLICT",
+       "    return TRUE_RETRY")],
+     """
+     def obs(seq, bash, run_id, unreadable=0, scanned=100):
+         r = rec(100 + seq * 604800, {"Bash": bash, "Read": 100.0 - bash}, scope="a",
+                 run_id=run_id)
+         r["unreadable"] = unreadable
+         r["scanned"] = scanned
+         return json.dumps(r)
+     mid = [json.dumps(rec(100 + (10 + i) * 604800,
+                           {"Bash": 36.0 + i * 3, "Read": 64.0 - i * 3}, scope="a"))
+            for i in range(6)]
+     tail = [json.dumps(rec(100 + (50 + i) * 604800,
+                            {"Bash": 72.0 + i * 3, "Read": 28.0 - i * 3}, scope="a"))
+             for i in range(6)]
+     p = w(os.path.join(D, "conflict.jsonl"),
+           [obs(0, 30.0, "X", unreadable=2)] + mid
+           + [obs(40, 66.0, "X", unreadable=9, scanned=150)] + tail)
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert ep["run_id_conflicts"] == 1, dict(rej)
+     assert rej.get("duplicate run_id (retry)", 0) == 0, dict(rej)
+     assert optimize.damage_summary(ep)["scope_local"] == {"a": 2}, optimize.damage_summary(ep)
+     assert len(optimize.active_records(recs, ep)) == 6, "bukti menyeberangi konflik identitas"
+     """),
+
+    ("M_RUNID_CONFLICT_SECOND_LOSS_SUPPRESSED: konflik identitas memotong di posisinya sendiri",
+     [("optimize.py", "                if verdict == RUN_ID_CONFLICT or degrades_scope(o):",
+       "                if degrades_scope(o) and verdict != RUN_ID_CONFLICT:")],
+     """
+     def obs(seq, bash, run_id, unreadable=0):
+         r = rec(100 + seq * 604800, {"Bash": bash, "Read": 100.0 - bash}, scope="a",
+                 run_id=run_id)
+         r["unreadable"] = unreadable
+         return json.dumps(r)
+     mid = [json.dumps(rec(100 + (10 + i) * 604800,
+                           {"Bash": 36.0 + i * 3, "Read": 64.0 - i * 3}, scope="a"))
+            for i in range(6)]
+     tail = [json.dumps(rec(100 + (50 + i) * 604800,
+                            {"Bash": 72.0 + i * 3, "Read": 28.0 - i * 3}, scope="a"))
+             for i in range(6)]
+     p = w(os.path.join(D, "second.jsonl"),
+           [obs(0, 30.0, "X", unreadable=2)] + mid + [obs(40, 66.0, "X", unreadable=9)] + tail)
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert len(optimize.active_records(recs, ep)) == 6, "kehilangan kedua tak dipotong"
+     """),
+
+    ("M_EXACT_RETRY_OPENS_SECOND_BOUNDARY: salinan PERSIS SAMA tetap satu kehilangan",
+     [("optimize.py", "    return TRUE_RETRY if prior_digest == digest else RUN_ID_CONFLICT",
+       "    return RUN_ID_CONFLICT")],
+     """
+     deg = rec(100, {"Bash": 30.0, "Read": 70.0}, scope="a", run_id="X")
+     deg["unreadable"] = 2
+     mid = [json.dumps(rec(100 + (10 + i) * 604800,
+                           {"Bash": 36.0 + i * 3, "Read": 64.0 - i * 3}, scope="a"))
+            for i in range(6)]
+     p = w(os.path.join(D, "exact.jsonl"), [json.dumps(deg)] + mid + [json.dumps(deg)])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert rej.get("duplicate run_id (retry)") == 1, dict(rej)
+     assert ep["run_id_conflicts"] == 0, dict(rej)
+     assert optimize.damage_summary(ep)["scope_local"] == {"a": 1}, optimize.damage_summary(ep)
+     assert len(optimize.active_records(recs, ep)) == 6, "epoch pulih terhapus retry persis"
+     """),
+
+    ("M_RUNID_CONFLICT_CROSSES_EPOCH: record yang mengontradiksi identitasnya ada di epoch LAMA",
+     [("optimize.py", "                o[EPOCH_KEY] = (cuts_file, cuts_scope[scope_of(o)])",
+       "                o[EPOCH_KEY] = (cuts_file, cuts_scope[scope_of(o)]\n"
+       "                                + (1 if retry_identity(o) in under else 0))")],
+     """
+     def obs(seq, bash, run_id, unreadable=0):
+         r = rec(100 + seq * 604800, {"Bash": bash, "Read": 100.0 - bash}, scope="a",
+                 run_id=run_id)
+         r["unreadable"] = unreadable
+         return json.dumps(r)
+     tail = [json.dumps(rec(100 + (50 + i) * 604800,
+                            {"Bash": 72.0 + i * 3, "Read": 28.0 - i * 3}, scope="a"))
+             for i in range(6)]
+     p = w(os.path.join(D, "crosses.jsonl"),
+           [obs(0, 30.0, "X"), obs(40, 66.0, "X", unreadable=9)] + tail)
+     recs, rej, _l, ep = optimize.load_history(p)
+     cur = optimize.active_records(recs, ep)
+     assert all(r.get("run_id") != "X" for r in cur), "record konflik masuk epoch yang ia buka"
+     assert len(cur) == 6, len(cur)
+     """),
+
+    ("M_RUNID_CONFLICT_CROSS_SCOPE_COLLIDES: run_id sama di scope lain bukan pengamatan yang sama",
+     [("optimize.py", '    return (scope_of(rec), rec.get(EPOCH_KEY, (0, 0))[0], rid)',
+       '    return (rec.get(EPOCH_KEY, (0, 0))[0], rid)')],
+     """
+     a = rec(100, {"Bash": 30.0, "Read": 70.0}, scope="a", run_id="X")
+     b = rec(200, {"Bash": 50.0, "Read": 50.0}, scope="b", run_id="X")
+     p = w(os.path.join(D, "xscope.jsonl"), [json.dumps(a), json.dumps(b)])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert ep["run_id_conflicts"] == 0, dict(rej)
+     assert optimize.damage_summary(ep)["boundaries"] == 0, optimize.damage_summary(ep)
+     assert len(recs) == 2, len(recs)
+     """),
+
+    ("M_RUNID_CONFLICT_GLOBAL_EPOCH_COLLIDES: kehilangan global memutus kontinuitas identitas",
+     [("optimize.py", '    return (scope_of(rec), rec.get(EPOCH_KEY, (0, 0))[0], rid)',
+       '    return (scope_of(rec), 0, rid)')],
+     """
+     a = rec(100, {"Bash": 30.0, "Read": 70.0}, scope="a", run_id="X")
+     b = rec(200, {"Bash": 50.0, "Read": 50.0}, scope="a", run_id="X")
+     p = w(os.path.join(D, "xglobal.jsonl"),
+           [json.dumps(a), chr(123) + '"torn":', json.dumps(b)])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert ep["run_id_conflicts"] == 0, dict(rej)
+     assert optimize.damage_summary(ep)["scope_local"] == {}, optimize.damage_summary(ep)
+     assert len(recs) == 2, len(recs)
+     """),
+
+    ("M_CLEAN_RUNID_CONFLICT_IGNORED: kontradiksi identitas tanpa kehilangan tetap integritas",
+     [("optimize.py", "                if verdict == RUN_ID_CONFLICT or degrades_scope(o):",
+       "                if degrades_scope(o):")],
+     """
+     a = rec(100, {"Bash": 30.0, "Read": 70.0}, scope="a", run_id="X")
+     b = rec(200, {"Bash": 50.0, "Read": 50.0}, scope="a", run_id="X")
+     tail = [json.dumps(rec(100 + (50 + i) * 604800,
+                            {"Bash": 72.0 + i * 3, "Read": 28.0 - i * 3}, scope="a"))
+             for i in range(6)]
+     p = w(os.path.join(D, "cleanconf.jsonl"), [json.dumps(a), json.dumps(b)] + tail)
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert ep["run_id_conflicts"] == 1, dict(rej)
+     assert optimize.damage_summary(ep)["scope_local"] == {"a": 1}, optimize.damage_summary(ep)
+     assert len(optimize.active_records(recs, ep)) == 6, "bukti menyeberangi kontradiksi identitas"
+     """),
+
+    ("M_PRIVATE_ANNOTATION_IN_FINGERPRINT: anotasi pembaca bukan bagian dari observasi",
+     [("optimize.py", "    body = {k: v for k, v in rec.items() if k not in READER_PRIVATE}",
+       "    body = dict(rec)")],
+     """
+     deg = rec(100, {"Bash": 30.0, "Read": 70.0}, scope="a", run_id="X")
+     deg["unreadable"] = 2
+     mid = [json.dumps(rec(100 + (10 + i) * 604800,
+                           {"Bash": 36.0 + i * 3, "Read": 64.0 - i * 3}, scope="a"))
+            for i in range(6)]
+     p = w(os.path.join(D, "private.jsonl"), [json.dumps(deg)] + mid + [json.dumps(deg)])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert rej.get("duplicate run_id (retry)") == 1, dict(rej)
+     assert ep["run_id_conflicts"] == 0, dict(rej)
      """),
 ]
 

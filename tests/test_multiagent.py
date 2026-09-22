@@ -32,9 +32,14 @@ def check(label, got, want):
 
 
 def rec(ts, shares, scope="default", turns=1000, sessions=40, **kw):
+    # The acquisition counters are part of the record, not decoration: carry.history() has written
+    # them since schema 2, and since 1.4.2 a record that claims COMPLETE without them cannot carry
+    # a promotion (see tests/test_evidence_integrity.py). A fixture that omitted them was asserting
+    # a completeness no real sweep asserts that way.
     r = {"schema_version": 2, "record_type": "carry_run", "ts": ts, "sessions": sessions,
          "turns": turns, "carry_bytes": 10 ** 7, "scanned": 100, "scope_id": scope,
          "workload_class": "", "evidence_quality": "COMPLETE",
+         "unreadable": 0, "oversize": 0, "skipped_by_limit": 0,
          "run_id": kw.pop("run_id", None) or carry.new_run_id(),
          "shares": shares, "bpt": {k: 1.0 for k in shares}}
     r.update(kw)
@@ -112,7 +117,7 @@ def main():
              for i in range(6)]
     mixed += [rec(100 + i * 86400, {"Bash": 80.0, "Read": 20.0}, scope="reviewer") for i in range(6)]
     p = write(os.path.join(d, "mixed.jsonl"), mixed)
-    recs, _, _ = optimize.load_history(p)
+    recs, _, _, _ = optimize.load_history(p)
     check("dua scope terbaca utuh", len(recs), 12)
     groups = optimize.by_scope(recs)
     check("record dikelompokkan per scope", sorted(groups), ["builder", "reviewer"])
@@ -207,7 +212,7 @@ def main():
         # WHY: phase 2 ports acquisition, not promotion. An optimizer that guessed at a
         # current-generation record would be reading fields whose meaning it does not know —
         # the exact "legacy gains current trust" failure, in the other direction.
-        recs, rej, _ = optimize.load_history(hp)
+        recs, rej, _, _ = optimize.load_history(hp)
         check(f"{n} penulis paralel: optimizer 1.3 menolak skema baru, fail closed",
               (len(recs), sum(rej.values())), (0, n))
 
@@ -295,12 +300,27 @@ def main():
           far["candidate_id"] != f1["candidate_id"], True)
     check("candidate_id membawa scope-nya", f1["candidate_id"].split("-")[-2], "x")
 
+    # Lock the rule the fixture above now satisfies: the SAME record without its counters claims a
+    # completeness it cannot show, and a population of those cannot promote anything.
+    bare = [{k: v for k, v in r.items() if k not in ("unreadable", "oversize", "skipped_by_limit")}
+            for r in [rec(100 + i * 86400 * 7, {"Bash": 30.0 + i * 8, "Read": 70.0 - i * 8},
+                          scope="bare") for i in range(6)]]
+    keep_bare, _dropped_bare = optimize.comparable(bare)
+    check("record tanpa counters: tetap dibandingkan, tapi kualitasnya UNKNOWN",
+          (len(keep_bare), optimize.history_quality(keep_bare)), (6, "UNKNOWN"))
+    h_bare = {"comparable": keep_bare, "total": 6, "in_scope": 6, "rejected": {}, "dropped": [],
+              "time_order": "ok"}
+    check("dan UNKNOWN tak melahirkan kandidat, dgn atau tanpa --accept-partial",
+          {x["state"] for x in optimize.analyse(None, h_bare, None, None, scope="bare")}
+          | {x["state"] for x in optimize.analyse(None, h_bare, None, None, scope="bare",
+                                                  accept_partial=True)}, {"OBSERVED"})
+
     out2 = os.path.join(d, "cand_dedup")
-    w, e, _fail = optimize.emit_candidates([f1], out2)
+    w, e, _fail = optimize.emit_candidates([f1], out2, "CANDIDATE")
     check("emisi pertama menulis", (len(w), len(e)), (1, 0))
-    w, e, _fail = optimize.emit_candidates([f2], out2)
+    w, e, _fail = optimize.emit_candidates([f2], out2, "CANDIDATE")
     check("emisi kedua dgn bukti setara: EXISTING, nol penulisan ulang", (len(w), len(e)), (0, 1))
-    w, e, _fail = optimize.emit_candidates([far], out2)
+    w, e, _fail = optimize.emit_candidates([far], out2, "CANDIDATE")
     check("bukti yang benar-benar bergerak: kandidat baru ditulis", (len(w), len(e)), (1, 0))
 
     # ------------------------------------------------------------ 8b. identitas tren stabil
@@ -483,11 +503,11 @@ def main():
     h1 = [rec(100 + i * 86400, {"Bash": 40.0, "Read": 60.0}, scope="fleet") for i in range(3)]
     h2 = [rec(100 + i * 86400, {"Bash": 41.0, "Read": 59.0}, scope="fleet") for i in range(3)]
     merged = write(os.path.join(d, "fleet.jsonl"), h1 + h2)   # dua host, satu scope, digabung
-    recs, rej, _ = optimize.load_history(merged)
+    recs, rej, _, _ = optimize.load_history(merged)
     check("record dua host dalam satu scope bisa digabung tanpa tabrakan", len(recs), 6)
     check("nol tolakan saat penggabungan", sum(rej.values()), 0)
     dup = write(os.path.join(d, "fleet_dup.jsonl"), h1 + h2 + h1)  # rsync menyalin dua kali
-    recs, rej, _ = optimize.load_history(dup)
+    recs, rej, _, _ = optimize.load_history(dup)
     check("penggabungan ulang idempoten (run_id sama = satu observasi)", len(recs), 6)
     check("salinan ganda dihitung sebagai retry", rej["duplicate run_id (retry)"], 3)
 
@@ -509,7 +529,7 @@ def main():
     big = os.path.join(d, "budget.jsonl")
     write(big, [rec(100 + i * 3600, {"Bash": 50.0, "Read": 50.0}, scope="b") for i in range(20000)])
     t0 = time.time()
-    recs, _, _ = optimize.load_history(big)
+    recs, _, _, _ = optimize.load_history(big)
     dt = time.time() - t0
     check("20k record terbaca", len(recs), 20000)
     check(f"20k record dalam waktu terbatas (terukur {dt:.1f} s, plafon 120 s)", dt < 120, True)

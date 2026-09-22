@@ -1,0 +1,1158 @@
+#!/usr/bin/env python3
+"""v1.4.2 — one case per row of docs/V142_COUNTEREXAMPLES.md.
+
+The legacy optimizer promoted findings from evidence it had never checked: a history built from
+bounded sweeps, a record claiming a completeness its own numbers contradict, a population anchored
+on the one record that was thrown away, a sweep that lost records to torn JSON, and a status that
+refused promotion while still writing the candidate file to disk.
+
+Every case below is a counterexample first and a regression second: it was RED on 77e3677, and the
+matrix that says what it must do was frozen before the repair existed.
+
+Standalone: run this file."""
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OPT = os.path.join(ROOT, "tools", "optimize.py")
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+import carry                                                            # noqa: E402
+import optimize                                                         # noqa: E402
+
+P = F = 0
+TS0 = 1_750_000_000
+
+
+def check(label, got, want):
+    global P, F
+    if got == want:
+        P += 1
+        print(f"  PASS  {label}")
+    else:
+        F += 1
+        print(f"  FAIL  {label}: got {got!r}, want {want!r}")
+
+
+def rec(i, share, quality="COMPLETE", schema=2, counters=True, sessions=40, turns=1000,
+        carry_bytes=10 ** 7, scanned=100, scope="default", workload="code", runtime="2.1.270",
+        unreadable=0, oversize=0, skipped=0):
+    """One legacy history record, shaped like the one carry.history() wrote in 1.2/1.3.
+
+    `counters=False` is the record a hand-edited file or a back-filled migration produces: it
+    claims a quality it never acquired the facts for."""
+    r = {"schema_version": schema, "record_type": "carry_run", "run_id": f"r{scope}{i}",
+         "scope_id": scope, "workload_class": workload, "ts": TS0 + i * 604800,
+         "sessions": sessions, "turns": turns, "carry_bytes": carry_bytes, "scanned": scanned,
+         "runtimes": {runtime: 40}, "models": {"m1": 40},
+         "shares": {"Bash": round(share, 4), "Read": round(100.0 - share, 4)},
+         "bpt": {"Bash": 1.0, "Read": 1.0}}
+    if schema >= 2:
+        r["evidence_quality"] = quality
+        if counters:
+            r.update(unreadable=unreadable, oversize=oversize, skipped_by_limit=skipped)
+    return r
+
+
+def write(path, rows):
+    """Rows may be bytes: a history holding a line that is not valid UTF-8 is exactly the input
+    the decode rule has to be tested against, and it cannot be written through a text handle."""
+    with open(path, "wb") as fh:
+        for r in rows:
+            if not isinstance(r, bytes):
+                r = (r if isinstance(r, str) else json.dumps(r)).encode("utf-8")
+            fh.write(r + b"\n")
+    return path
+
+
+def run(rows, extra=(), scan=(), lock=False):
+    """Run the optimizer as the scheduler runs it -> (exit code, parsed --json, files on disk)."""
+    d = tempfile.mkdtemp(prefix="sw-142-")
+    hist = write(os.path.join(d, "history.jsonl"), rows)
+    out = os.path.join(d, "cand")
+    if lock:
+        os.makedirs(out, exist_ok=True)
+        open(os.path.join(out, ".optimize.lock"), "w").write("1")
+    argv = [sys.executable, OPT, "--history", hist, "--ledger", os.path.join(d, "none.jsonl"),
+            "--emit-candidate", out, "--json", "--strict-exit", "--scan"] + list(scan) + list(extra)
+    p = subprocess.run(argv, capture_output=True, text=True, timeout=300)
+    try:
+        j = json.loads(p.stdout)
+    except Exception:
+        raise SystemExit(f"optimizer produced no JSON (rc={p.returncode}):\n{p.stdout}\n{p.stderr}")
+    files = [f for _b, _d, fs in os.walk(out) for f in fs if f != ".optimize.lock"]
+    return p.returncode, j, len(files)
+
+
+def case(label, rows, status, code, files, comparable=None, extra=(), scan=(), lock=False,
+         history_quality=None):
+    rc, j, n = run(rows, extra=extra, scan=scan, lock=lock)
+    check(f"{label}: status", j["status"], status)
+    check(f"{label}: strict exit", rc, code)
+    check(f"{label}: candidate files on disk", n, files)
+    if comparable is not None:
+        check(f"{label}: comparable", j["history"]["comparable"], comparable)
+    if history_quality is not None:
+        check(f"{label}: history quality", j["history"].get("quality"), history_quality)
+    return j
+
+
+def transcript(path, turns=80, listing=False, torn=False):
+    """A minimal Claude-Code-shaped transcript: enough turns to be a session, optionally one
+    skill listing attachment, optionally one torn JSON record."""
+    rows = []
+    if listing:
+        rows.append(json.dumps({"type": "user", "attachment": {
+            "type": "skill_listing",
+            "content": "- alpha: does a thing that is described at some length\n"
+                       "- beta: does another thing, also described at some length\n"}}))
+    for t in range(turns):
+        rows.append(json.dumps({"type": "assistant", "message": {
+            "id": f"msg_{t}", "usage": {"input_tokens": 10, "output_tokens": 7},
+            "content": [{"type": "tool_use", "name": "Bash", "input": {"command": "ls -la"}}]}}))
+        rows.append(json.dumps({"type": "user", "message": {
+            "content": [{"type": "tool_result", "content": "o" * 400}]}}))
+    if torn:
+        rows[len(rows) // 2] = '{"type": "assistant", "message": {"usage": {"out'
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(rows) + "\n")
+    return path
+
+
+EMPTY_HIST = {"comparable": [], "total": 0, "in_scope": 0, "rejected": {}, "dropped": [],
+              "time_order": "ok"}
+
+
+
+def trusted_boundaries():
+    """docs/V142_COUNTEREXAMPLES.md §6 — a line that failed validation is not an authority.
+
+    The epoch model's attribution came from the very line that had just been rejected: invalid
+    UTF-8 in `scope_id` survived `errors="replace"` as U+FFFD, read as a "readable" label, and cut
+    a scope that does not exist while the real population kept crossing the loss. Every case below
+    was frozen before this repair existed and is RED on e6c1f4f.
+    """
+    d = tempfile.mkdtemp(prefix="sw-142-tb-")
+
+    def ser(n, first=0, scope="rev", per_week=3.0, base=30.0):
+        return [json.dumps(rec(first + i, base + per_week * i, scope=scope)) for i in range(n)]
+
+    def later(n=6, scope="rev"):
+        """The population AFTER the boundary: its own climb, so it can promote on its own."""
+        return ser(n, 20, scope=scope, base=48.0)
+
+    def bad_utf8(field, scope="ghost"):
+        """A SameWrite-shaped line holding invalid UTF-8, which also fails validation on its own."""
+        r = dict(rec(99, 50.0, scope=scope), shares={"Bash": 10.0, "Read": 10.0})
+        if field == "shares":
+            r["shares"] = {"Bash": 10.0, "@@M@@": 10.0}
+        else:
+            r[field] = "@@M@@"
+        return json.dumps(r).encode().replace(b"@@M@@", b"\xff\xfe\x80")
+
+    def rejected_rec(scope="ghost", **over):
+        r = dict(rec(99, 50.0, scope=scope), shares={"Bash": 10.0, "Read": 10.0})
+        r.update(over)
+        return json.dumps(r)
+
+    def dmg(j):
+        x = j["history"].get("damage") or {}
+        return x.get("file_global"), x.get("scope_local")
+
+    def shape(rc, j, n):
+        return ((j["status"], rc, n, j["scope"]["records_in_epoch"], j["history"]["comparable"])
+                + dmg(j))
+
+    def run_paths(rows, extra=()):
+        dd = tempfile.mkdtemp(dir=d)
+        hist = write(os.path.join(dd, "history.jsonl"), rows)
+        out = os.path.join(dd, "cand")
+        p = subprocess.run([sys.executable, OPT, "--history", hist, "--ledger",
+                            os.path.join(dd, "none.jsonl"), "--emit-candidate", out, "--json",
+                            "--strict-exit", "--scan"] + list(extra),
+                           capture_output=True, text=True, timeout=300)
+        files = [os.path.join(b, f) for b, _sub, fs in os.walk(out) for f in fs
+                 if f != ".optimize.lock"]
+        return p.returncode, json.loads(p.stdout), files
+
+    # ---------------------------------------------------------------- TUTF (§6.1)
+    print("\nTUTF - a line that cannot be decoded cannot name a scope")
+    for name, field in (("TUTF_01", "scope_id"), ("TUTF_02", "shares"),
+                        ("TUTF_03", "run_id"), ("TUTF_04", "workload_class")):
+        rc, j, n = run(ser(6) + [bad_utf8(field)] + later())
+        check(f"{name} invalid UTF-8 in {field} is an unattributable loss",
+              shape(rc, j, n), ("CANDIDATE", 10, 1, 6, 6, 1, {}))
+        check(f"{name} the decode failure is counted by name",
+              j["history"]["rejected"].get("line is not valid UTF-8"), 1)
+        check(f"{name} nothing from the rejected line reaches the report",
+              ("�" in json.dumps(j, ensure_ascii=False), "ghost" in j["scope"]["known"]),
+              (False, False))
+
+    rc, j, n = run([bad_utf8("scope_id")] + ser(6))
+    check("TUTF_05 an undecodable line before every record",
+          shape(rc, j, n), ("CANDIDATE", 10, 1, 6, 6, 1, {}))
+    rc, j, n = run(ser(6) + [bad_utf8("scope_id")])
+    check("TUTF_06 an undecodable line at EOF leaves no epoch",
+          shape(rc, j, n), ("INSUFFICIENT_DATA", 20, 0, 0, 0, 1, {}))
+    rc, j, n = run(ser(6) + [bad_utf8("scope_id")] + ser(6, 20, base=48.0)
+                   + [bad_utf8("run_id")] + ser(6, 40, base=66.0))
+    check("TUTF_07 two undecodable lines are two boundaries",
+          shape(rc, j, n), ("CANDIDATE", 10, 1, 6, 6, 2, {}))
+    between = ser(6, 0, "a") + [bad_utf8("scope_id")] + later(6, "b")
+    rc, j, n = run(between)
+    check("TUTF_08 an undecodable line between two scopes cuts both",
+          shape(rc, j, n) + (j["scope"]["analysed"],),
+          ("CANDIDATE", 10, 1, 6, 6, 1, {}, "b"))
+    rc, j, n = run(between, extra=["--scope-id", "a"])
+    check("TUTF_08 ...and the scope before it has no epoch left",
+          shape(rc, j, n), ("INSUFFICIENT_DATA", 20, 0, 0, 0, 1, {}))
+
+    rc, j, files = run_paths(ser(6) + [bad_utf8("scope_id")] + later())
+    body = open(files[0], encoding="utf-8").read() if files else ""
+    ids = sorted(x.strip() for line in body.splitlines() if line.startswith("evidence_run_ids:")
+                 for x in line.split(":", 1)[1].split(","))
+    check("TUTF_01 the candidate rests only on the recovered epoch",
+          ids, sorted("rrev%d" % i for i in range(20, 26)))
+
+    # A line that would be a perfectly good record BUT FOR its bytes: with a lenient decode it is
+    # accepted and publishes U+FFFD as a scope; strictly, it is a loss like any other. (post-freeze
+    # addition, docs §6.9 — it strengthens TUTF_01 rather than changing any frozen expectation.)
+    whole = dict(rec(99, 50.0, scope="@@M@@"))
+    intact_but_undecodable = json.dumps(whole).encode().replace(b"@@M@@", b"\xff\xfe\x80")
+    rc, j, n = run(ser(6) + [intact_but_undecodable] + later())
+    check("TUTF_09 an otherwise-valid record with undecodable bytes is a loss, not a record",
+          shape(rc, j, n) + (j["history"]["records"], j["scope"]["known"]),
+          ("CANDIDATE", 10, 1, 6, 6, 1, {}, 12, ["rev"]))
+
+    # TSCOPE_08: `scope_id` is an ATTRIBUTION AUTHORITY, so it is checked before a record is
+    # accepted. The producer writes exactly one shape — `str(scope_id or "default")[:64]` — and a
+    # value of another type let `["rev"]` become the scope `"['rev']"`: the cut landed on a
+    # population nobody has while the real `rev` records kept crossing the loss. (docs §6.11)
+    print("\nTSCOPE_08 - a scope label the producer could not have written")
+    for label, sid in (("a list", ["rev"]), ("an integer", 5), ("an object", {"s": 1}),
+                       ("a label longer than the producer's own cap", "x" * 200)):
+        forged = dict(rec(6, 48.0, scope="rev", unreadable=2), run_id="LOSS-X")
+        forged["scope_id"] = sid
+        rc, j, n = run(ser(6) + [json.dumps(forged)] + later())
+        check(f"TSCOPE_08 {label} is a loss nobody can attribute",
+              shape(rc, j, n) + (j["scope"]["known"],),
+              ("CANDIDATE", 10, 1, 6, 6, 1, {}, ["rev"]))
+    for label, sid in (("absent", None), ("a plain label", "rev"), ("the empty string", ""),
+                       ("exactly 64 characters", "y" * 64),
+                       ("a control byte the producer can write", "a\u0001b")):
+        ok = dict(rec(6, 48.0, scope="rev"), run_id="OK-X")
+        if sid is None:
+            ok.pop("scope_id")
+        else:
+            ok["scope_id"] = sid
+        check(f"TSCOPE_08 control: {label} is still a record",
+              optimize.valid_record(ok), (True, ""))
+
+    # ---------------------------------------------------------------- privacy (§35)
+    print("\nTPRIV - a rejected line's own content is never echoed into public output")
+    secret = "sk-synthetic-NOTAREALKEY-0123456789"
+    leaky = dict(rec(99, 50.0, scope="/home/synthetic/.ssh/id_ed25519"),
+                 shares={"Bash": 10.0, "Read": 10.0}, workload_class=secret,
+                 run_id=secret + "-run", schema_version=secret)
+    rc, j, files = run_paths(ser(6) + [json.dumps(leaky)] + later())
+    blob = json.dumps(j, ensure_ascii=False)
+    spec = "".join(open(f, encoding="utf-8").read() for f in files)
+    check("TPRIV nothing from the rejected line reaches --json or a candidate file",
+          (secret[:16] in blob, "/home/synthetic" in blob,
+           secret[:16] in spec, "/home/synthetic" in spec, dmg(j)),
+          (False, False, False, False, (1, {})))
+    check("TPRIV the reason names the value's TYPE, never the value",
+          sorted(j["history"]["rejected"]), ["unsupported schema_version of type str"])
+    check("TPRIV a real schema number is still named",
+          optimize.valid_record({"schema_version": 3, "shares": {"Bash": 100.0}})[1],
+          "unsupported schema_version 3")
+
+    # ---------------------------------------------------------------- TSCOPE (§6.2)
+    print("\nTSCOPE - a rejected record does not authenticate its own scope_id")
+    for label, bad in (
+            ("TSCOPE_01 shares that do not sum to a population", rejected_rec()),
+            ("TSCOPE_02 a non-numeric share",
+             rejected_rec(shares={"Bash": "lots", "Read": 50.0})),
+            ("TSCOPE_03 an impossible session count", rejected_rec(sessions=-1)),
+            ("TSCOPE_04 a quality word outside the vocabulary",
+             rejected_rec(evidence_quality="SPLENDID")),
+            ("TSCOPE_05 a legacy schema this reader cannot name", rejected_rec(schema_version=3)),
+            ("TSCOPE_06 a carry record with no shares key",
+             json.dumps({k: v for k, v in rec(99, 50.0, scope="ghost").items()
+                         if k != "shares"})),
+            ("TSCOPE_07 a record_type this reader does not know",
+             rejected_rec(record_type="carry_note"))):
+        rc, j, n = run(ser(6) + [bad] + later())
+        check(label, shape(rc, j, n), ("CANDIDATE", 10, 1, 6, 6, 1, {}))
+        check(label + " — and no ghost scope is published", "ghost" in j["scope"]["known"], False)
+
+    for label, line in (("a foreign JSON line", json.dumps({"note": "another tool's entry"})),
+                        ("another tool's record_type in a shared history",
+                         json.dumps({"record_type": "hermes_run", "ts": TS0, "note": "not ours"})),
+                        ("a bare object that never claimed to be ours",
+                         json.dumps({"note": "x", "shares": None})),
+                        ("current-generation evidence refused by design",
+                         json.dumps({"envelope": {"schema_version": 4, "run_id": "x"},
+                                     "payload": {}, "certificate": {}}))):
+        rc, j, n = run(ser(6) + [line] + later())
+        check("TSCOPE control: " + label + " is not damage",
+              shape(rc, j, n), ("CANDIDATE", 10, 1, 12, 12, 0, {}))
+
+    print("\nTSCOPE canaries - no rejected label may become a public map key")
+    for canary in ("/etc/passwd.d/synthetic", "agent-b", "rev", "x" * 63, "y" * 64,
+                   "ctl\x01label", "shares: 100"):
+        rc, j, n = run(ser(6, scope="real") + [rejected_rec(scope=canary)]
+                       + later(6, "real"))
+        check("TSCOPE canary %r stays out of the public report" % canary[:18],
+              (dmg(j), canary in j["scope"]["known"]), ((1, {}), False))
+
+    flood = [rejected_rec(scope="s%04d" % i) for i in range(2000)]
+    rc, j, n = run(flood + later())
+    check("TSCOPE cardinality: 2000 rejected labels add no public key",
+          (dmg(j), j["scope"]["known"], len(json.dumps(j["history"]["damage"])) < 200),
+          ((2000, {}), ["rev"], True))
+
+    # ---------------------------------------------------------------- VD (§6.3)
+    print("\nVD - a VALID record whose own counters prove a loss cuts its own scope")
+    deg = json.dumps(rec(6, 48.0, scope="a", unreadable=3))
+    check("the fail-stuck hypothesis names a real quality",
+          optimize.record_quality(json.loads(deg)), "DEGRADED")
+    for label, tail, epoch, status, code, files, quality in (
+            ("VD_01 an epoch too small to carry a trend", ser(2, 20, "a", base=48.0), 2,
+             "INSUFFICIENT_DATA", 20, 0, "COMPLETE"),
+            ("VD_02 a sufficient epoch promotes on its own", ser(6, 20, "a", base=48.0), 6,
+             "CANDIDATE", 10, 1, "COMPLETE"),
+            ("VD_03 and it still promotes sixty records later",
+             ser(60, 20, "a", per_week=1.0, base=20.0), 60, "CANDIDATE", 10, 1, "COMPLETE")):
+        rc, j, n = run(ser(6, 0, "a") + [deg] + tail)
+        check(label, (j["status"], rc, n, j["scope"]["records_in_epoch"],
+                      j["history"].get("quality")) + dmg(j),
+              (status, code, files, epoch, quality, 0, {"a": 1}))
+
+    rc, j, files = run_paths(ser(6, 0, "a") + [deg] + ser(6, 20, "a", base=48.0))
+    body = open(files[0], encoding="utf-8").read() if files else ""
+    ids = sorted(x.strip() for line in body.splitlines() if line.startswith("evidence_run_ids:")
+                 for x in line.split(":", 1)[1].split(","))
+    check("VD_04 the degraded record is not evidence in the epoch it opened",
+          ids, sorted("ra%d" % i for i in range(20, 26)))
+
+    rc, j, n = run(ser(6, 0, "a") + [deg])
+    check("VD_05 a degradation at EOF leaves no epoch to promote from",
+          (j["status"], rc, n, j["scope"]["records_in_epoch"], j["history"].get("quality"))
+          + dmg(j), ("INSUFFICIENT_DATA", 20, 0, 0, "EMPTY", 0, {"a": 1}))
+
+    both = (ser(6, 0, "a") + ser(6, 0, "b") + [deg] + ser(6, 20, "a", base=48.0)
+            + ser(6, 20, "b", base=48.0))
+    rc, j, n = run(both, extra=["--scope-id", "a"])
+    check("VD_06 the degraded scope starts again after its own loss",
+          (j["status"], j["scope"]["records_in_epoch"]) + dmg(j), ("CANDIDATE", 6, 0, {"a": 1}))
+    rc, j, n = run(both, extra=["--scope-id", "b"])
+    check("VD_06 ...and the neighbour keeps every record it ever had",
+          (j["status"], j["scope"]["records_in_epoch"]) + dmg(j), ("CANDIDATE", 12, 0, {"a": 1}))
+
+    bounded = json.dumps(rec(6, 48.0, scope="a", quality="PARTIAL", skipped=3))
+    rows = ser(6, 0, "a") + [bounded] + ser(6, 20, "a", base=48.0)
+    rc, j, n = run(rows)
+    check("VD_07 an intentional bound is not damage",
+          (j["status"], j["scope"]["records_in_epoch"], j["history"].get("quality")) + dmg(j),
+          ("PARTIAL_EVIDENCE", 13, "PARTIAL", 0, {}))
+    rc, j, n = run(rows, extra=["--accept-partial"])
+    check("VD_07 ...and the flag still adopts it", (j["status"], n), ("CANDIDATE", 1))
+
+    rc, j, n = run(ser(6, 0, "a") + [json.dumps(rec(6, 48.0, scope="a", schema=1))]
+                   + ser(6, 20, "a", base=48.0))
+    check("VD_08 a schema that cannot attest completeness is not a loss",
+          (j["status"], j["scope"]["records_in_epoch"], j["history"].get("quality")) + dmg(j),
+          ("PARTIAL_EVIDENCE", 13, "UNKNOWN", 0, {}))
+
+    rc, j, n = run(ser(6, 0, "a")
+                   + [json.dumps(rec(6, 48.0, scope="a", sessions=0, scanned=40)),
+                      json.dumps(dict(rec(7, 48.0, scope="a"), shares={}, bpt={}, carry_bytes=0))]
+                   + ser(6, 20, "a", base=48.0))
+    check("VD_09 an ineligible record is not a damaged one",
+          (j["status"], j["scope"]["records_in_epoch"], j["history"]["comparable"]) + dmg(j),
+          ("CANDIDATE", 14, 12, 0, {}))
+
+    # ---------------------------------------------------------------- retry (§6.4)
+    print("\nVD_10/VD_11 - a retry may neither launder a loss nor poison the epoch after it")
+    clean_x = json.dumps(dict(rec(5, 45.0, scope="a"), run_id="X"))
+    deg_x = json.dumps(dict(rec(6, 48.0, scope="a", unreadable=2), run_id="X"))
+    # Frozen-decision amendment (docs/V142_COUNTEREXAMPLES.md §7.6): both pairs differ materially,
+    # so under the identity law each later copy is a CONFLICT, not a retry. The population after it
+    # still recovers and neither copy can launder anything — the guarantee these rows exist for.
+    for label, rows, loc in (("VD_10 clean first, then something else under the same id",
+                              ser(5, 0, "a") + [clean_x, deg_x] + ser(6, 20, "a", base=48.0),
+                              {"a": 1}),
+                             ("VD_11 the loss first, then something else under the same id",
+                              ser(5, 0, "a") + [deg_x, clean_x] + ser(6, 20, "a", base=48.0),
+                              {"a": 2})):
+        rc, j, n = run(rows)
+        check(label, (j["status"], rc, n, j["scope"]["records_in_epoch"],
+                      j["history"].get("quality"),
+                      (j["history"]["rejected"] or {}).get("duplicate run_id (retry)", 0),
+                      j["history"]["run_id_conflicts"]) + dmg(j),
+              ("CANDIDATE", 10, 1, 6, "COMPLETE", 0, 1, 0, loc))
+
+    # VD_12/VD_13: what a cross-family review of THIS repair found. A retry reports the same loss
+    # its twin already reported, and a deduplicated retry is bookkeeping by this reader's own rule.
+    # Letting a late copy open a SECOND boundary let "six healthy records, then one more copy of X"
+    # erase a recovered epoch — on repeat, forever: the fail-stuck shape this repair exists to
+    # remove, rebuilt out of its own recovery mechanism. (docs §6.10)
+    print("\nVD_12/VD_13 - one boundary per logical run, and still one per real loss")
+    healthy = ser(6, 20, "a", base=48.0)
+    rc, j, n = run([deg] + healthy + [deg])
+    check("VD_12 a late copy of the SAME degraded run does not cut again",
+          (j["status"], rc, n, j["scope"]["records_in_epoch"],
+           j["history"]["rejected"].get("duplicate run_id (retry)")) + dmg(j),
+          ("CANDIDATE", 10, 1, 6, 1, 0, {"a": 1}))
+    rc, j, n = run([deg] + healthy + [deg] + ser(6, 40, "a", base=66.0) + [deg])
+    check("VD_12 ...and repeating the pattern cannot hold the scope down forever",
+          (j["status"], j["scope"]["records_in_epoch"]) + dmg(j), ("CANDIDATE", 12, 0, {"a": 1}))
+    other = json.dumps(dict(json.loads(deg), run_id="ra-other", ts=TS0 + 30 * 604800))
+    rc, j, n = run([deg] + healthy + [other])
+    check("VD_13 a genuinely different second loss still cuts",
+          (j["status"], rc, n, j["scope"]["records_in_epoch"]) + dmg(j),
+          ("INSUFFICIENT_DATA", 20, 0, 0, 0, {"a": 2}))
+    anon = json.dumps({k: v for k, v in json.loads(deg).items() if k != "run_id"})
+    rc, j, n = run([anon, anon] + healthy)
+    check("VD_13 a degraded record with no run_id cannot be shown to be a retry",
+          (j["status"], j["scope"]["records_in_epoch"]) + dmg(j), ("CANDIDATE", 6, 0, {"a": 2}))
+    twin_b = json.dumps(dict(json.loads(deg), scope_id="b"))
+    rc, j, n = run([deg, twin_b] + healthy, extra=["--scope-id", "a"])
+    check("VD_13 the same run_id in another scope is that scope's own loss",
+          (j["status"], j["scope"]["records_in_epoch"]) + dmg(j),
+          ("CANDIDATE", 6, 0, {"a": 1, "b": 1}))
+
+    # ---------------------------------------------------------------- file-global (§6.5)
+    print("\nMSG - a file-global cut applies to every scope at that position, and only there")
+    TORN = '{"schema_version": 2, "record_type": "carry_run", "ts": 1750000000, "sessions": 5'
+    msg1 = (ser(6, 0, "a") + ser(6, 0, "b") + [TORN] + ser(6, 20, "a", base=48.0)
+            + ser(2, 20, "b", base=48.0))
+    for scope, status, code, files, epoch in (("a", "CANDIDATE", 10, 1, 6),
+                                              ("b", "INSUFFICIENT_DATA", 20, 0, 2)):
+        rc, j, n = run(msg1, extra=["--scope-id", scope])
+        check(f"MSG_01 scope {scope} after an unattributable loss",
+              (j["status"], rc, n, j["scope"]["records_in_epoch"]) + dmg(j),
+              (status, code, files, epoch, 1, {}))
+    msg2 = (ser(6, 0, "a") + ser(6, 0, "b") + [TORN] + ser(2, 20, "a", base=48.0)
+            + ser(6, 20, "b", base=48.0))
+    for scope, status, code, files, epoch in (("a", "INSUFFICIENT_DATA", 20, 0, 2),
+                                              ("b", "CANDIDATE", 10, 1, 6)):
+        rc, j, n = run(msg2, extra=["--scope-id", scope])
+        check(f"MSG_02 scope {scope} when the sufficiencies are reversed",
+              (j["status"], rc, n, j["scope"]["records_in_epoch"]) + dmg(j),
+              (status, code, files, epoch, 1, {}))
+
+
+def run_id_conflicts():
+    """docs/V142_COUNTEREXAMPLES.md §7 — run_id is an identity CLAIM, not proof of equality.
+
+    Two materially different valid observations sharing one run_id were collapsed into a single
+    retry on 71016ee, so the second loss never opened a boundary and a candidate was written whose
+    evidence spanned it. Every row below was frozen before the repair existed and is RED on that
+    head."""
+    d = tempfile.mkdtemp(prefix="sw-142-rid-")
+
+    def A(n, first, base, scope="s1", **kw):
+        return [json.dumps(rec(first + i, base + 3.0 * i, scope=scope, **kw)) for i in range(n)]
+
+    def X(run_id="SHARED", **kw):
+        """One persisted observation under a chosen identity."""
+        return dict(rec(0, 30.0, scope="s1", **kw), run_id=run_id)
+
+    TORN = '{"schema_version": 2, "record_type": "carry_run", "ts": 1750000000, "sessions": 4'
+    MID, TAIL = A(6, 10, 36.0), A(6, 50, 72.0)
+    X1 = X(unreadable=2)
+    X2 = dict(X(unreadable=9), ts=TS0 + 40 * 604800, sessions=91, turns=2400,
+              carry_bytes=3 * 10 ** 7, scanned=150,
+              shares={"Bash": 66.0, "Read": 34.0})
+    X3 = dict(X2, ts=TS0 + 41 * 604800, unreadable=4, sessions=55,
+              shares={"Bash": 70.0, "Read": 30.0})
+
+    def rid(label, rows, status, code, files, epoch, comparable, scope_local, file_global,
+            retries, conflicts, quality, extra=(), post_only=None):
+        rc, j, n = run(rows, extra=extra)
+        h, sc = j["history"], j["scope"]
+        dm = h["damage"]
+        got = (j["status"], rc, n, sc["records_in_epoch"], h["comparable"],
+               sum(dm["scope_local"].values()), dm["file_global"],
+               (h["rejected"] or {}).get("duplicate run_id (retry)", 0),
+               h.get("run_id_conflicts", 0), h["quality"])
+        check(label, got, (status, code, files, epoch, comparable, scope_local, file_global,
+                           retries, conflicts, quality))
+
+    rid("RID_01 an exact duplicate is one retry and one boundary",
+        [json.dumps(X1)] + MID + [json.dumps(dict(X1))] + TAIL,
+        "CANDIDATE", 10, 1, 12, 12, 1, 0, 1, 0, "COMPLETE")
+    rid("RID_02 a materially different copy under one id is a conflict",
+        [json.dumps(X1)] + MID + [json.dumps(X2)],
+        "INSUFFICIENT_DATA", 20, 0, 0, 0, 2, 0, 0, 1, "EMPTY")
+    rid("RID_03 ...and the population after it recovers on its own",
+        [json.dumps(X1)] + MID + [json.dumps(X2)] + TAIL,
+        "CANDIDATE", 10, 1, 6, 6, 2, 0, 0, 1, "COMPLETE")
+    rid("RID_04 a clean record and a degraded one under one id conflict",
+        [json.dumps(X(unreadable=0))] + MID + [json.dumps(X2)] + TAIL,
+        "CANDIDATE", 10, 1, 6, 6, 1, 0, 0, 1, "COMPLETE")
+    rid("RID_05 ...and so do a degraded one and a clean one",
+        [json.dumps(X1)] + MID + [json.dumps(dict(X2, unreadable=0, oversize=0))] + TAIL,
+        "CANDIDATE", 10, 1, 6, 6, 2, 0, 0, 1, "COMPLETE")
+    rid("RID_06 two different COMPLETE records under one id still contradict",
+        [json.dumps(X(unreadable=0))] + MID
+        + [json.dumps(dict(X2, unreadable=0, oversize=0))] + TAIL,
+        "CANDIDATE", 10, 1, 6, 6, 1, 0, 0, 1, "COMPLETE")
+    partial_a = json.dumps(X(quality="PARTIAL", skipped=4))
+    partial_b = json.dumps(dict(X2, unreadable=0, evidence_quality="PARTIAL", skipped_by_limit=9))
+    for flag in ((), ("--accept-partial",)):
+        rid(f"RID_07 a bounded pair under one id conflicts too {list(flag)}",
+            [partial_a] + MID + [partial_b] + TAIL,
+            "CANDIDATE", 10, 1, 6, 6, 1, 0, 0, 1, "COMPLETE", extra=flag)
+    rid("RID_08 the same id in another scope is another observation",
+        [json.dumps(dict(X1, scope_id="a")), json.dumps(dict(X1, scope_id="b"))]
+        + A(6, 20, 48.0, scope="a") + A(6, 20, 48.0, scope="b"),
+        "CANDIDATE", 10, 1, 6, 6, 2, 0, 0, 0, "COMPLETE", extra=["--scope-id", "a"])
+    rid("RID_09 a file-global loss makes the later copy a fresh identity",
+        [json.dumps(X1)] + MID + [TORN, json.dumps(dict(X1))] + TAIL,
+        "CANDIDATE", 10, 1, 6, 6, 2, 1, 0, 0, "COMPLETE")
+    rid("RID_10 key order alone is not a different observation",
+        [json.dumps(X1)] + MID
+        + [json.dumps({k: X1[k] for k in reversed(list(X1))})] + TAIL,
+        "CANDIDATE", 10, 1, 12, 12, 1, 0, 1, 0, "COMPLETE")
+    rid("RID_11 whitespace alone is not a different observation",
+        [json.dumps(X1)] + MID + [json.dumps(X1, separators=(" , ", " : "))] + TAIL,
+        "CANDIDATE", 10, 1, 12, 12, 1, 0, 1, 0, "COMPLETE")
+    for label, other in (("RID_12 another workload class", dict(X1, workload_class="other")),
+                         ("RID_13 other shares", dict(X1, shares={"Bash": 31.0, "Read": 69.0})),
+                         ("RID_14 another loss counter", dict(X1, unreadable=5))):
+        rid(label + " is a conflict", [json.dumps(X1)] + MID + [json.dumps(other)] + TAIL,
+            "CANDIDATE", 10, 1, 6, 6, 2, 0, 0, 1, "COMPLETE")
+    rid("RID_15 three different copies under one id are three boundaries",
+        [json.dumps(X1)] + A(3, 10, 36.0) + [json.dumps(X2)] + A(3, 20, 48.0)
+        + [json.dumps(X3)] + TAIL,
+        "CANDIDATE", 10, 1, 6, 6, 3, 0, 0, 2, "COMPLETE")
+
+    # the candidate may rest only on the population after the last boundary
+    for label, rows in (("RID_03", [json.dumps(X1)] + MID + [json.dumps(X2)] + TAIL),
+                        ("RID_06", [json.dumps(X(unreadable=0))] + MID
+                         + [json.dumps(dict(X2, unreadable=0, oversize=0))] + TAIL),
+                        ("RID_15", [json.dumps(X1)] + A(3, 10, 36.0) + [json.dumps(X2)]
+                         + A(3, 20, 48.0) + [json.dumps(X3)] + TAIL)):
+        dd = tempfile.mkdtemp(dir=d)
+        hist = write(os.path.join(dd, "history.jsonl"), rows)
+        out = os.path.join(dd, "cand")
+        subprocess.run([sys.executable, OPT, "--history", hist, "--ledger",
+                        os.path.join(dd, "none.jsonl"), "--emit-candidate", out, "--json",
+                        "--strict-exit", "--scan"], capture_output=True, text=True, timeout=300)
+        body = "".join(open(os.path.join(b, f), encoding="utf-8").read()
+                       for b, _s, fs in os.walk(out) for f in fs if f != ".optimize.lock")
+        names = sorted(x.strip() for line in body.splitlines()
+                       if line.startswith("evidence_run_ids:")
+                       for x in line.split(":", 1)[1].split(","))
+        check(f"{label} the candidate names only the recovered population",
+              names, sorted("rs1%d" % i for i in range(50, 56)))
+
+    # §18: a reader annotation may never change what a record IS
+    a = dict(X1)
+    b = dict(X1)
+    a[optimize.EPOCH_KEY] = (3, 7)
+    b[optimize.QUALITY_FLOOR] = "DEGRADED"
+    check("a private annotation does not change the observation",
+          (optimize.observation_digest(a), optimize.observation_digest(b)),
+          (optimize.observation_digest(dict(X1)), optimize.observation_digest(dict(X1))))
+    check("but a persisted field does",
+          optimize.observation_digest(dict(X1, ts=X1["ts"] + 1))
+          != optimize.observation_digest(X1), True)
+    check("an extra persisted field this reader does not know makes them differ",
+          optimize.observation_digest(dict(X1, future_field=1))
+          != optimize.observation_digest(X1), True)
+
+
+def main():
+    d = tempfile.mkdtemp(prefix="sw-142-fx-")
+    good_rows = [rec(i, 30.0 + 3.0 * i) for i in range(6)]
+
+    # ---------------------------------------------------------------- the law itself
+    print("\nlegacy evidence-quality law")
+    check("worst wins, not the majority",
+          optimize.worst_quality(["COMPLETE", "COMPLETE", "PARTIAL", "COMPLETE"]), "PARTIAL")
+    check("no evidence is not bad evidence", optimize.worst_quality([]), "COMPLETE")
+    check("a schema older than the field cannot claim the field",
+          optimize.record_quality(rec(0, 40.0, schema=1, counters=False)), "UNKNOWN")
+    check("schema 2 without the counters its writer always wrote",
+          optimize.record_quality(rec(0, 40.0, counters=False)), "UNKNOWN")
+    check("counters present and zero: COMPLETE is attested",
+          optimize.record_quality(rec(0, 40.0)), "COMPLETE")
+    check("a chosen bound is PARTIAL",
+          optimize.record_quality(rec(0, 40.0, skipped=5)), "PARTIAL")
+    check("a loss is DEGRADED, not a chosen bound",
+          optimize.record_quality(rec(0, 40.0, unreadable=3)), "DEGRADED")
+    check("the claim cannot be better than the counters",
+          optimize.record_quality(rec(0, 40.0, quality="COMPLETE", oversize=1)), "DEGRADED")
+    check("the counters cannot be better than the claim",
+          optimize.record_quality(rec(0, 40.0, quality="PARTIAL", skipped=5)), "PARTIAL")
+    check("...but a PARTIAL claim no counter can explain is not a bound to adopt",
+          optimize.record_quality(rec(0, 40.0, quality="PARTIAL")), "UNKNOWN")
+    check("and the flag does not adopt it either",
+          optimize.may_promote(optimize.record_quality(rec(0, 40.0, quality="PARTIAL")), True),
+          False)
+    for counter in ("malformed", "malformed_lines", "identity_changed", "conflicted_sources",
+                    "records_rejected"):
+        check(f"a record carrying {counter} is not COMPLETE",
+              optimize.record_quality(dict(rec(0, 40.0), **{counter: 1})), "DEGRADED")
+    check("looked and found nothing usable: INVALID",
+          optimize.record_quality(rec(0, 40.0, sessions=0, scanned=100)), "INVALID")
+    check("had nothing to look at: EMPTY",
+          optimize.record_quality(rec(0, 40.0, sessions=0, scanned=0)), "EMPTY")
+    check("sessions without turns is not a sweep that happened",
+          optimize.record_quality(rec(0, 40.0, turns=0)), "INVALID")
+    check("sessions without carry is not a sweep that happened",
+          optimize.record_quality(rec(0, 40.0, carry_bytes=0)), "INVALID")
+    check("a count that is not a count",
+          optimize.record_quality(rec(0, 40.0, unreadable=-1)), "INVALID")
+    check("a boolean is not a count",
+          optimize.record_quality(rec(0, 40.0, oversize=True)), "INVALID")
+    check("--accept-partial accepts the bound it is named for",
+          optimize.may_promote("PARTIAL", True), True)
+    check("--accept-partial does not accept a loss",
+          optimize.may_promote("DEGRADED", True), False)
+    check("--accept-partial does not accept what cannot be verified",
+          optimize.may_promote("UNKNOWN", True), False)
+    check("--accept-partial does not accept an invalid record",
+          optimize.may_promote("INVALID", True), False)
+    check("COMPLETE needs no flag", optimize.may_promote("COMPLETE", False), True)
+    check("PARTIAL without the flag stays refused", optimize.may_promote("PARTIAL", False), False)
+
+    # ---------------------------------------------------------------- R142_01 / R142_01P
+    print("\nR142_01 - a history built from bounded sweeps is not a population")
+    partial = [rec(i, 30.0 + 3.0 * i, quality="PARTIAL", skipped=5) for i in range(6)]
+    case("R142_01", partial, "PARTIAL_EVIDENCE", 40, 0, comparable=6, history_quality="PARTIAL")
+    case("R142_01P (--accept-partial)", partial, "CANDIDATE", 10, 1, comparable=6,
+         extra=["--accept-partial"], history_quality="PARTIAL")
+
+    # ---------------------------------------------------------------- R142_02
+    print("\nR142_02 - the anchor comes from evidence that survives its own filter")
+    stranding = [rec(i, 30.0 + 3.0 * i) for i in range(6)]
+    stranding.append(rec(9, 55.0, quality="INVALID", sessions=0, turns=100000, carry_bytes=0))
+    case("R142_02", stranding, "CANDIDATE", 10, 1, comparable=6, history_quality="COMPLETE")
+
+    # ---------------------------------------------------------------- R142_03
+    print("\nR142_03 - a status that refuses promotion writes nothing")
+    shifted = ([rec(i, 30.0 + 4.0 * i, runtime="2.1.270") for i in range(3)]
+               + [rec(i, 30.0 + 4.0 * i, runtime="2.1.290") for i in range(3, 6)])
+    case("R142_03", shifted, "HOST_BEHAVIOR_SHIFT", 30, 0, comparable=6)
+
+    # ---------------------------------------------------------------- R142_04
+    print("\nR142_04 - a record cannot claim a completeness its own numbers contradict")
+    impossible = [rec(i, 30.0 + 3.0 * i, sessions=0, turns=0, carry_bytes=0) for i in range(6)]
+    case("R142_04", impossible, "PARTIAL_EVIDENCE", 40, 0, comparable=0)
+
+    # ---------------------------------------------------------------- R142_05
+    print("\nR142_05 - a sweep that lost records to torn JSON is not COMPLETE")
+    clean = transcript(os.path.join(d, "clean.jsonl"))
+    torn = transcript(os.path.join(d, "torn.jsonl"), torn=True)
+    a_clean, a_torn = carry.accumulate([clean], min_turns=1), carry.accumulate([torn], min_turns=1)
+    check("control: a clean sweep is still COMPLETE", a_clean["quality"], "COMPLETE")
+    check("the torn record is counted", a_torn["malformed"], 1)
+    check("and the sweep is no longer COMPLETE", a_torn["quality"] != "COMPLETE", True)
+    check("the optimizer reads it as a loss, not a bound",
+          optimize.sweep_quality(a_torn), "DEGRADED")
+    check("control: the clean sweep reads COMPLETE", optimize.sweep_quality(a_clean), "COMPLETE")
+    check("a loss is not rescued by --accept-partial",
+          optimize.may_promote(optimize.sweep_quality(a_torn), True), False)
+    case("R142_05 (live, torn)", [], "PARTIAL_EVIDENCE", 40, 0, scan=[torn, "--min-turns", "1"])
+    case("R142_05 (live, torn, --accept-partial)", [], "PARTIAL_EVIDENCE", 40, 0,
+         scan=[torn, "--min-turns", "1"], extra=["--accept-partial"])
+
+    # ---------------------------------------------------------------- R142_06
+    print("\nR142_06 - one definition of a bounded sample")
+    paths = []
+    for n, name in enumerate(("a.jsonl", "b.jsonl", "c.jsonl")):
+        p = transcript(os.path.join(d, name), turns=60, listing=(name == "a.jsonl"))
+        os.utime(p, (TS0 + n * 1000, TS0 + n * 1000))         # a oldest, c newest
+        paths.append(p)
+    check("the bound is the newest N",
+          [os.path.basename(p) for p in carry.bounded_paths(paths, 1)], ["c.jsonl"])
+    check("and it does not depend on discovery order",
+          carry.bounded_paths(list(reversed(paths)), 1), carry.bounded_paths(paths, 1))
+    check("an unbounded sweep keeps every source", carry.bounded_paths(paths, 0), paths)
+    _rc, j, _n = run([], scan=paths + ["--max-files", "1", "--min-turns", "1"])
+    check("the listing scan reads the sweep's sample, not a discovery-order slice",
+          j["listing"], None)
+    _rc, j2, _n = run([], scan=paths + ["--min-turns", "1"])
+    check("control: unbounded, the listing in the oldest transcript IS read",
+          bool(j2["listing"]), True)
+
+    # ---------------------------------------------------------------- the bound itself
+    print("\nthe bound a caller asked for is not a loss (and is still not COMPLETE)")
+    bounded = carry.accumulate(paths, min_turns=1, max_files=1)
+    check("a bounded sweep records what it skipped", bounded["skipped_by_limit"], 2)
+    check("the producer labels it PARTIAL", bounded["quality"], "PARTIAL")
+    check("the optimizer reads a bound, not a loss", optimize.sweep_quality(bounded), "PARTIAL")
+    check("refused without the flag",
+          optimize.may_promote(optimize.sweep_quality(bounded), False), False)
+    check("adopted with it", optimize.may_promote(optimize.sweep_quality(bounded), True), True)
+
+    # ---------------------------------------------------------------- U1
+    print("\nU1 - a generation that never had the field cannot have defaulted to COMPLETE")
+    old = [rec(i, 30.0 + 3.0 * i, schema=1, counters=False) for i in range(6)]
+    case("U1", old, "PARTIAL_EVIDENCE", 40, 0, comparable=6, history_quality="UNKNOWN")
+    case("U1 (--accept-partial does not rescue it)", old, "PARTIAL_EVIDENCE", 40, 0,
+         extra=["--accept-partial"])
+
+    # ---------------------------------------------------------------- a retry cannot launder
+    print("\nR142_07 - a retry cannot upgrade what its own run_id saw")
+    # Frozen-decision amendment (docs/V142_COUNTEREXAMPLES.md §7.6): the two copies below differ,
+    # so under the identity law they are a CONFLICT rather than a retry. The property is the same
+    # and the guarantee is stricter — no repeated id can upgrade what it saw — but it is now
+    # enforced by a boundary instead of by a quality floor.
+    same = [rec(i, 30.0 + 3.0 * i) for i in range(5)]
+    twice = dict(rec(5, 45.0), run_id="dup")
+    same += [dict(twice), dict(twice)]
+    hist_path = write(os.path.join(d, "same.jsonl"), same)
+    recs, rejected, _lines, ep = optimize.load_history(hist_path)
+    check("an identical copy is dropped as an observation", len(recs), 6)
+    check("and counted as a retry", rejected["duplicate run_id (retry)"], 1)
+    check("and it opens no boundary", optimize.damage_summary(ep)["boundaries"], 0)
+    dup = [rec(i, 30.0 + 3.0 * i) for i in range(5)]
+    dup.append(dict(twice))
+    worse = rec(5, 45.0, quality="PARTIAL", skipped=7)
+    worse["run_id"] = "dup"
+    dup.append(worse)
+    hist_path = write(os.path.join(d, "dup.jsonl"), dup)
+    recs, rejected, _lines, ep = optimize.load_history(hist_path)
+    check("a copy that says something else is kept, not merged", len(recs), 7)
+    check("and it is NEVER called a retry",
+          rejected.get("duplicate run_id (retry)", 0), 0)
+    check("it is counted as an identity conflict", ep["run_id_conflicts"], 1)
+    check("and it cuts where it appears", optimize.damage_summary(ep)["boundaries"], 1)
+    check("so nothing before it can promote",
+          len(optimize.active_records(recs, ep)), 0)
+    case("R142_07", dup, "INSUFFICIENT_DATA", 20, 0, history_quality="EMPTY")
+    case("R142_07 (--accept-partial is not an identity override)", dup,
+         "INSUFFICIENT_DATA", 20, 0, extra=["--accept-partial"])
+    check("a schema_version this reader cannot name is not a newer one",
+          optimize.record_quality(dict(rec(0, 40.0), schema_version="2")), "UNKNOWN")
+    check("nor is a float one",
+          optimize.record_quality(dict(rec(0, 40.0), schema_version=2.0)), "UNKNOWN")
+
+    # ------------------------------------------------- round-1 cross-family review findings
+    print("\nR142_08 - what a record must SHOW before its zeroes mean anything")
+    no_corpus = {"schema_version": 2, "record_type": "carry_run", "ts": TS0,
+                 "evidence_quality": "COMPLETE", "unreadable": 0, "oversize": 0,
+                 "skipped_by_limit": 0, "shares": {"Bash": 60.0, "Read": 40.0},
+                 "bpt": {"Bash": 1.0, "Read": 1.0}}
+    check("zero counters do not say a sweep happened",
+          optimize.record_quality(no_corpus), "UNKNOWN")
+    for missing in ("sessions", "turns", "carry_bytes"):
+        partial_rec = {k: v for k, v in rec(0, 40.0).items() if k != missing}
+        check(f"a record without {missing} cannot attest completeness",
+              optimize.record_quality(partial_rec), "UNKNOWN")
+
+    print("\nR142_09 - one undateable source does not collapse the bound")
+    undated = []
+    for n, name in enumerate(("x.jsonl", "y.jsonl", "z.jsonl")):
+        q = transcript(os.path.join(d, name), turns=5)
+        os.utime(q, (TS0 + n * 1000, TS0 + n * 1000))            # z newest
+        undated.append(q)
+    os.remove(undated[2])                                      # ...and now undateable
+    picked = [os.path.basename(q) for q in carry.bounded_paths(undated, 2)]
+    check("the datable sources still order by mtime", picked, ["y.jsonl", "x.jsonl"])
+    check("and discovery order still does not matter",
+          carry.bounded_paths(list(reversed(undated)), 2), carry.bounded_paths(undated, 2))
+
+    print("\nR142_10 - counters that cannot describe one sweep")
+    check("more sessions than transcripts scanned",
+          optimize.record_quality(rec(0, 40.0, sessions=40, scanned=1)), "INVALID")
+    check("sessions out of a sweep that scanned nothing",
+          optimize.record_quality(rec(0, 40.0, sessions=40, scanned=0)), "INVALID")
+    check("...and the bound flag does not rescue that either",
+          optimize.may_promote(optimize.record_quality(
+              rec(0, 40.0, quality="PARTIAL", sessions=40, scanned=0, skipped=5)), True), False)
+    check("control: sessions within what was scanned",
+          optimize.record_quality(rec(0, 40.0, sessions=40, scanned=40)), "COMPLETE")
+    case("R142_10", [rec(i, 30.0 + 3.0 * i, sessions=40, scanned=1) for i in range(6)],
+         "PARTIAL_EVIDENCE", 40, 0, comparable=0)
+
+    print("\nR142_11 - a torn line in the history file is lost evidence, not a footnote")
+    # Expectation updated by the B1 repair (docs/V142_COUNTEREXAMPLES.md §5.1): the loss still
+    # refuses the records it followed — nothing is promoted and nothing is written — but it is a
+    # BOUNDARY, not a verdict on the file, so the status is "no epoch to analyse" rather than a
+    # permanent PARTIAL_EVIDENCE that no later evidence could ever clear.
+    torn_hist = [json.dumps(r) for r in good_rows] + ['{"torn":']
+    j = case("R142_11", torn_hist, "INSUFFICIENT_DATA", 20, 0, history_quality="EMPTY")
+    check("the torn line is still counted", j["history"]["rejected"].get("unparseable line"), 1)
+    check("and the file's loss is named", (j["history"].get("damage") or {}).get("boundaries"), 1)
+    case("R142_11 (--accept-partial does not adopt a loss)", torn_hist,
+         "INSUFFICIENT_DATA", 20, 0, extra=["--accept-partial"])
+    check("the records BEFORE the loss cannot support a promotion after it",
+          run([json.dumps(r) for r in good_rows] + ['{"torn":']
+              + [json.dumps(rec(i, 30.0 + 3.0 * i)) for i in range(20, 22)])[1]["history"]["comparable"],
+          2)
+    envelope_line = json.dumps({"envelope": {"schema_version": 4, "run_id": "x"},
+                                "payload": {}, "certificate": {}})
+    foreign = json.dumps({"note": "another tool's line in a shared file"})
+    case("R142_11 control: a foreign line that parses is counted, not called damage",
+         [json.dumps(r) for r in good_rows] + [foreign], "CANDIDATE", 10, 1,
+         history_quality="COMPLETE")
+    case("R142_11 control: a refusal by design is not damage",
+         [json.dumps(r) for r in good_rows] + [envelope_line], "CANDIDATE", 10, 1,
+         history_quality="COMPLETE")
+
+    print("\nR142_12 - a ledger that lost a line is not a field sample")
+    ledger_dir = tempfile.mkdtemp(dir=d)
+    clean_ledger = os.path.join(ledger_dir, "clean.jsonl")
+    with open(clean_ledger, "w", encoding="utf-8") as fh:
+        fh.write("\n".join('{"event": "checked"}' for _ in range(100)) + "\n")
+    torn_ledger = os.path.join(ledger_dir, "torn.jsonl")
+    with open(torn_ledger, "w", encoding="utf-8") as fh:
+        fh.write("\n".join('{"event": "checked"}' for _ in range(100)) + "\n" + '{"event":' + "\n")
+    clean = optimize.load_ledger(clean_ledger)
+    lost = optimize.load_ledger(torn_ledger)
+    check("control: a clean sample retires the guard",
+          [f["state"] for f in optimize.analyse(None, dict(EMPTY_HIST), clean, None)], ["CANDIDATE"])
+    check("a sample that lost a line only observes",
+          [f["state"] for f in optimize.analyse(None, dict(EMPTY_HIST), lost, None)], ["OBSERVED"])
+    check("a ledger that exists and cannot be read is not 'no ledger'",
+          (optimize.load_ledger(ledger_dir) or {}).get("rejected"), 1)
+
+    print("\nR142_13 - a status that promised a candidate and could not write one")
+    fail_dir = tempfile.mkdtemp(dir=d)
+    findings = optimize.analyse(None, {"comparable": good_rows, "total": 6, "in_scope": 6,
+                                       "rejected": {}, "dropped": [], "time_order": "ok"},
+                                None, None)
+    blocked = [f["candidate_id"] for f in findings if f["state"] == "CANDIDATE"][0]
+    open(os.path.join(fail_dir, blocked), "w").write("a file where a directory must go")
+    hist_file = write(os.path.join(fail_dir, "h.jsonl"), good_rows)
+    argv = [sys.executable, OPT, "--history", hist_file, "--ledger",
+            os.path.join(fail_dir, "none.jsonl"), "--scan", "--emit-candidate", fail_dir,
+            "--json", "--strict-exit"]
+    proc = subprocess.run(argv, capture_output=True, text=True, timeout=300)
+    jf = json.loads(proc.stdout)
+    check("nothing landed, so the status does not claim it did", jf["status"], "INTERNAL_ERROR")
+    check("and the exit code follows the status", proc.returncode, 50)
+    check("the failure is named", len(jf["candidates_failed"]), 1)
+
+    print("\nR142_14 - the scope fallback is a label on an empty run, not a way back in")
+    only_bad = [{"schema_version": 2, "record_type": "carry_run", "ts": TS0, "sessions": 0,
+                 "scanned": 1, "scope_id": "attack", "evidence_quality": "INVALID",
+                 "shares": {"Bash": 100.0}}]
+    j = case("R142_14 (nothing eligible anywhere)", only_bad, "PARTIAL_EVIDENCE", 40, 0,
+             comparable=0)
+    check("the scope it names is the one real record's scope", j["scope"]["analysed"], "attack")
+    prod = [dict(r, scope_id="prod", run_id="prod%d" % i) for i, r in enumerate(good_rows)]
+    j2 = case("R142_14 (an eligible population is never stranded by it)", prod + only_bad,
+              "CANDIDATE", 10, 1, comparable=6)
+    check("and the eligible population chooses the scope", j2["scope"]["analysed"], "prod")
+
+    print("\nR142_15 - a rejected line is damage unless it is one of the named exceptions")
+    for line, label, status, quality in (
+            ('{"schema_version":3,"record_type":"carry_run","shares":{"Bash":60.0,"Read":40.0}}',
+             "a record from a schema this reader does not know", "INSUFFICIENT_DATA", "EMPTY"),
+            ('{"schema_version":2,"record_type":"carry_run","shares":{"Bash":10.0}}',
+             "a carry record whose shares do not sum to a population", "INSUFFICIENT_DATA",
+             "EMPTY"),
+            ('{"note": "another tool\'s line in a shared file"}',
+             "a line that was never a carry record", "CANDIDATE", "COMPLETE")):
+        code = {"INSUFFICIENT_DATA": 20, "PARTIAL_EVIDENCE": 40, "CANDIDATE": 10}[status]
+        case(f"R142_15: {label}", [json.dumps(r) for r in good_rows] + [line],
+             status, code, 1 if status == "CANDIDATE" else 0, history_quality=quality)
+        if status != "CANDIDATE":
+            # the same rejected line BEFORE a healthy population: the loss cuts, it does not kill
+            case(f"R142_15: {label} — and a population after it still stands",
+                 [line] + [json.dumps(r) for r in good_rows], "CANDIDATE", 10, 1,
+                 comparable=6, history_quality="COMPLETE")
+
+    print("\nR142_16 - a ledger line that is neither a write nor a denial is a line lost")
+    led_dir = tempfile.mkdtemp(dir=d)
+    unknown_event = os.path.join(led_dir, "unknown.jsonl")
+    with open(unknown_event, "w", encoding="utf-8") as fh:
+        fh.write("\n".join('{"event": "checked"}' for _ in range(100)) + "\n")
+        fh.write('{"event": "garbage"}\n')
+    led = optimize.load_ledger(unknown_event)
+    check("the unaccountable line is counted", (led["writes"], led["rejected"]), (100, 1))
+    check("and the guard only observes",
+          [f["state"] for f in optimize.analyse(None, dict(EMPTY_HIST), led, None)], ["OBSERVED"])
+
+    print("\nR142_18 - round-4 findings: the live sweep, the shares reason, the temp file")
+    live_impossible = {"sessions": 40, "turns": 0, "scanned": 40, "unreadable": 0, "oversize": 0,
+                       "skipped_by_limit": 0, "malformed": 0, "identity_changed": 0,
+                       "conflicted_sources": 0, "quality": "COMPLETE"}
+    check("a live sweep with sessions and no turns is impossible too",
+          optimize.sweep_quality(live_impossible), "INVALID")
+    check("control: the same sweep with turns is COMPLETE",
+          optimize.sweep_quality(dict(live_impossible, turns=2000)), "COMPLETE")
+    claims_ours = json.dumps({"schema_version": 2, "record_type": "carry_run", "ts": TS0,
+                              "sessions": 40, "turns": 1000, "carry_bytes": 10 ** 7})
+    case("R142_18: a carry record with no shares key at all is a loss",
+         [json.dumps(r) for r in good_rows] + [claims_ours],
+         "INSUFFICIENT_DATA", 20, 0, history_quality="EMPTY")
+    case("R142_18: ...and a population after that loss still stands",
+         [claims_ours] + [json.dumps(r) for r in good_rows], "CANDIDATE", 10, 1,
+         comparable=6, history_quality="COMPLETE")
+    tmp_dir = tempfile.mkdtemp(dir=d)
+    blocked_id = [f["candidate_id"] for f in optimize.analyse(
+        None, {"comparable": good_rows, "total": 6, "in_scope": 6, "rejected": {}, "dropped": [],
+               "time_order": "ok"}, None, None) if f["state"] == "CANDIDATE"][0]
+    open(os.path.join(tmp_dir, blocked_id), "w").write("a file where a directory must go")
+    hist2 = write(os.path.join(tmp_dir, "h.jsonl"), good_rows)
+    subprocess.run([sys.executable, OPT, "--history", hist2, "--ledger",
+                    os.path.join(tmp_dir, "none.jsonl"), "--scan", "--emit-candidate", tmp_dir,
+                    "--json", "--strict-exit"], capture_output=True, text=True, timeout=300)
+    check("a failed write leaves no half-written file behind",
+          [f for _b, _dd, fs in os.walk(tmp_dir) for f in fs if ".tmp-" in f], [])
+    bound_dir = tempfile.mkdtemp(dir=d)
+    trio = []
+    for n, name in enumerate(("p.jsonl", "q.jsonl", "r.jsonl")):
+        q = transcript(os.path.join(bound_dir, name), turns=30)
+        os.utime(q, (TS0 + n * 1000, TS0 + n * 1000))
+        trio.append(q)
+    once = carry.bounded_paths(trio, 2)
+    swept = carry.accumulate(trio, min_turns=1, max_files=2, selected=once)
+    check("a caller can hand the sweep the selection it already made",
+          sorted(os.path.basename(x) for x in swept["parsed"]),
+          sorted(os.path.basename(x) for x in once))
+    check("and the bound is still reported against the whole population",
+          swept["skipped_by_limit"], 1)
+
+    # ============================================================ B1: the history epoch
+    # An unattributable loss cuts the promotion history at that physical position. Evidence before
+    # the cut never joins evidence after it; the loss stays reported; the newest epoch is, by
+    # construction, free of damage. docs/V142_COUNTEREXAMPLES.md §5 froze every row below.
+    print("\nB1 - a damaged history recovers, and the loss is still reported")
+    TORN = '{"schema_version": 2, "record_type": "carry_run", "ts": 1750000000, "sessions": 5'
+    FOREIGN = json.dumps({"note": "another tool's line in a shared file"})
+    ENVELOPE = json.dumps({"envelope": {"schema_version": 4, "run_id": "x"}, "payload": {},
+                           "certificate": {}})
+
+    def series(n, first=0, scope="default", per_week=3.0, base=30.0):
+        return [json.dumps(rec(first + i, base + per_week * i, scope=scope)) for i in range(n)]
+
+    def b1(label, rows, status, code, files, comparable, epoch, quality, boundaries, extra=()):
+        rc, j, n = run(rows, extra=extra)
+        got = (j["status"], rc, n, j["history"]["comparable"],
+               j["scope"].get("records_in_epoch"), j["history"].get("quality"),
+               (j["history"].get("damage") or {}).get("boundaries"))
+        check(label, got, (status, code, files, comparable, epoch, quality, boundaries))
+
+    b1("B1_01 loss at the tail leaves no epoch to promote from",
+       series(6) + [TORN], "INSUFFICIENT_DATA", 20, 0, 0, 0, "EMPTY", 1)
+    b1("B1_02 an epoch too small to carry a trend",
+       series(6) + [TORN] + series(2, 20), "INSUFFICIENT_DATA", 20, 0, 2, 2, "COMPLETE", 1)
+    b1("B1_03 a sufficient post-loss epoch promotes on its own",
+       series(6) + [TORN] + series(6, 20), "CANDIDATE", 10, 1, 6, 6, "COMPLETE", 1)
+    b1("B1_04 and it still promotes sixty records later",
+       series(6) + [TORN] + series(60, 20, per_week=1.0, base=20.0),
+       "CANDIDATE", 10, 1, 60, 60, "COMPLETE", 1)
+    b1("B1_05 an unattributable loss cuts every scope (analysing the recovered one)",
+       series(6, scope="agent-a") + [TORN] + series(6, 20, scope="agent-b"),
+       "CANDIDATE", 10, 1, 6, 6, "COMPLETE", 1)
+    b1("B1_05b ...and the scope with nothing after the loss says so",
+       series(6, scope="agent-a") + [TORN] + series(6, 20, scope="agent-b"),
+       "INSUFFICIENT_DATA", 20, 0, 0, 0, "EMPTY", 1, extra=["--scope-id", "agent-a"])
+    b1("B1_06 two boundaries: only the newest epoch is analysed",
+       series(6) + [TORN] + series(6, 20) + [TORN] + series(6, 40),
+       "CANDIDATE", 10, 1, 6, 6, "COMPLETE", 2)
+    b1("B1_07 a loss before any record does not stop the file",
+       [TORN] + series(6), "CANDIDATE", 10, 1, 6, 6, "COMPLETE", 1)
+    b1("B1_09 a foreign line is not a loss",
+       series(6) + [FOREIGN], "CANDIDATE", 10, 1, 6, 6, "COMPLETE", 0)
+    b1("B1_10 current-generation evidence refused by design is not a loss",
+       series(6) + [ENVELOPE], "CANDIDATE", 10, 1, 6, 6, "COMPLETE", 0)
+    b1("B1_12 records the law calls INVALID are refused, not a loss",
+       [json.dumps(rec(i, 30.0 + 3.0 * i, sessions=0, scanned=40)) for i in range(6)],
+       "PARTIAL_EVIDENCE", 40, 0, 0, 6, "EMPTY", 0)
+
+    # B1_08: a truncated final line, written the way a crash leaves one
+    trunc_dir = tempfile.mkdtemp(dir=d)
+    trunc = os.path.join(trunc_dir, "history.jsonl")
+    with open(trunc, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(series(6)) + "\n")
+        fh.write('{"schema_version": 2, "record_type": "carry_run", "ts": 17500000')
+    out_dir = os.path.join(trunc_dir, "cand")
+    proc = subprocess.run([sys.executable, OPT, "--history", trunc, "--ledger",
+                           os.path.join(trunc_dir, "none.jsonl"), "--scan", "--emit-candidate",
+                           out_dir, "--json", "--strict-exit"], capture_output=True, text=True,
+                          timeout=300)
+    jt = json.loads(proc.stdout)
+    # the emit directory itself is created by the LOCK, before any status is known; what the
+    # matrix froze is the candidate-FILE count
+    spec_files = [f for _b, _dd, fs in os.walk(out_dir) for f in fs if f != ".optimize.lock"]
+    check("B1_08 a truncated final line is the same loss",
+          (jt["status"], proc.returncode, len(spec_files),
+           (jt["history"].get("damage") or {}).get("boundaries")),
+          ("INSUFFICIENT_DATA", 20, 0, 1))
+
+    print("\nB1_11 / M2 - a zero-carry sweep is readable evidence, not corruption")
+    zero_carry = dict(rec(9, 0.0), shares={}, bpt={}, carry_bytes=0)
+    ok, why = optimize.valid_record(zero_carry)
+    check("the reader accepts the shape the producer writes", (ok, why), (True, ""))
+    check("and the quality law calls it EMPTY, not INVALID",
+          optimize.record_quality(zero_carry), "EMPTY")
+    b1("B1_11 one zero-carry record does not stop a healthy population",
+       series(6) + [json.dumps(zero_carry)], "CANDIDATE", 10, 1, 6, 7, "COMPLETE", 0)
+    b1("B1_11b a history of nothing but zero-carry records is not damage",
+       [json.dumps(dict(rec(i, 0.0), shares={}, bpt={}, carry_bytes=0)) for i in range(6)],
+       "INSUFFICIENT_DATA", 20, 0, 0, 6, "EMPTY", 0)
+    check("carry with no shares is still a contradiction",
+          optimize.record_quality(dict(rec(9, 40.0), carry_bytes=0)), "INVALID")
+    check("shares with no carry is still a contradiction",
+          optimize.record_quality(dict(rec(9, 40.0), shares={}, bpt={})), "INVALID")
+    # the producer's own words, executed: a session whose items all land on its last turn
+    zt = os.path.join(d, "zero_carry.jsonl")
+    with open(zt, "w", encoding="utf-8") as fh:
+        for i in range(5):
+            fh.write(json.dumps({"type": "assistant", "message": {
+                "id": f"t{i}", "usage": {"output_tokens": 3}, "content": []}}) + "\n")
+        fh.write(json.dumps({"type": "assistant", "message": {
+            "id": "last", "usage": {"output_tokens": 3},
+            "content": [{"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}]}}) + "\n")
+    zsweep = carry.accumulate([zt], min_turns=1)
+    check("the producer really can measure zero carry",
+          (zsweep["sessions"] > 0, sum(zsweep["carry"].values())), (True, 0))
+
+    print("\nB1_13 - one run_id on both sides of a boundary")
+    dup_before = series(5) + [json.dumps(dict(json.loads(series(1, 5)[0]), run_id="carried"))]
+    dup_after = [json.dumps(dict(json.loads(r), run_id="carried" if i == 0 else None))
+                 for i, r in enumerate(series(6, 20))]
+    dup_after = [json.dumps({k: v for k, v in json.loads(r).items() if v is not None})
+                 for r in dup_after]
+    b1("B1_13 the post-loss epoch keeps its own copy",
+       dup_before + [TORN] + dup_after, "CANDIDATE", 10, 1, 6, 6, "COMPLETE", 1)
+    same_epoch = series(5) + [json.dumps(dict(json.loads(series(1, 5)[0]), run_id="twin")),
+                              json.dumps(dict(json.loads(series(1, 6)[0]), run_id="twin",
+                                              evidence_quality="PARTIAL", skipped_by_limit=9))]
+    rc, j, n = run(same_epoch)
+    # Frozen-decision amendment (§7.6): the twins differ, so they are an identity conflict.
+    check("B1_13b a copy that says something else cuts instead of lowering",
+          (j["history"]["quality"], j["status"], n, j["history"]["run_id_conflicts"],
+           (j["history"]["rejected"] or {}).get("duplicate run_id (retry)", 0)),
+          ("EMPTY", "INSUFFICIENT_DATA", 0, 1, 0))
+    # both line orders, because which copy comes first is exactly what a crash decides
+    clean_then_worse = (series(5) + [json.dumps(dict(rec(5, 45.0), run_id="X"))] + [TORN]
+                        + [json.dumps(dict(rec(6, 45.0), run_id="X", evidence_quality="PARTIAL",
+                                           skipped_by_limit=9))]
+                        + series(5, 21))
+    rc, j, n = run(clean_then_worse)
+    check("B1_13c the post-loss copy is judged on its OWN evidence",
+          j["history"]["quality"], "PARTIAL")
+    worse_then_clean = (series(5)
+                        + [json.dumps(dict(rec(5, 45.0), run_id="X", evidence_quality="PARTIAL",
+                                           skipped_by_limit=9))] + [TORN]
+                        + [json.dumps(dict(rec(6, 45.0), run_id="X"))] + series(5, 21))
+    rc, j, n = run(worse_then_clean)
+    check("B1_13d and an excluded pre-loss copy does not poison it",
+          (j["history"]["quality"], j["status"] == "PARTIAL_EVIDENCE"), ("COMPLETE", False))
+    # Frozen-decision amendment (docs/V142_COUNTEREXAMPLES.md §6.6): the middle copy used to carry
+    # unreadable=1, which under the trust model is a VALID record proving a loss — it now opens an
+    # epoch rather than sitting inside one. The property this case protects is unchanged and the
+    # fixture states it with copies that lose nothing; the degraded-copy behaviour is VD_10/VD_11.
+    three_in_one = series(4) + [json.dumps(dict(rec(4, 42.0), run_id="S")),
+                                json.dumps(dict(rec(5, 45.0), run_id="S",
+                                                evidence_quality="PARTIAL", skipped_by_limit=4)),
+                                json.dumps(dict(rec(6, 48.0), run_id="S"))]
+    rc, j, n = run(three_in_one)
+    # Frozen-decision amendment (§7.6): three DIFFERENT copies under one id are two conflicts.
+    # RID_15 is the frozen row for the same shape with a population after it.
+    check("B1_13e three different copies under one id are two conflicts",
+          (j["history"]["quality"], j["history"]["run_id_conflicts"],
+           (j["history"]["rejected"] or {}).get("duplicate run_id (retry)", 0), n),
+          ("EMPTY", 2, 0, 0))
+
+    print("\nB1_14/B1_15 - what a cross-family review of the epoch repair found")
+    # a finding that rests on the ledger alone may still promote after a loss — but nothing from
+    # before the loss may name it, because the scope travels into the candidate id
+    led_lines = ['{"event": "checked"}'] * 100
+    stale = [json.dumps(dict(rec(i, 30.0 + 3.0 * i), scope_id="stale")) for i in range(6)]
+    ld = os.path.join(tempfile.mkdtemp(dir=d), "ledger.jsonl")
+    with open(ld, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(led_lines) + "\n")
+    hd = tempfile.mkdtemp(dir=d)
+    hp = write(os.path.join(hd, "history.jsonl"), stale + [TORN])
+    out14 = os.path.join(hd, "cand")
+    pr = subprocess.run([sys.executable, OPT, "--history", hp, "--ledger", ld, "--scan",
+                         "--emit-candidate", out14, "--json", "--strict-exit"],
+                        capture_output=True, text=True, timeout=300)
+    j14 = json.loads(pr.stdout)
+    check("B1_14 a stale population cannot name a candidate raised after the loss",
+          (j14["scope"]["analysed"], j14["scope"]["records_in_epoch"],
+           any("stale" in c for c in j14["candidate_ids"])), ("default", 0, False))
+    check("B1_14 and the ledger finding itself still stands",
+          (j14["status"], [c.split("-")[0] for c in j14["candidate_ids"]]), ("CANDIDATE", ["noop"]))
+
+    # two scopes can hold the same epoch NUMBERS; identity needs the scope as well
+    # Frozen-decision amendment (§6.6): the two boundaries used to be taken from REJECTED lines,
+    # which no longer name a scope at all. The shape this case needs — one scope-local cut in each
+    # of two scopes, so both carry the same epoch numbers — is built from the only trusted source
+    # there is: a validated record whose own loss counter proves it lost evidence.
+    broken_a = json.dumps(dict(rec(0, 20.0), scope_id="a", run_id="dega", unreadable=1))
+    broken_b = json.dumps(dict(rec(0, 20.0), scope_id="b", run_id="degb", unreadable=1))
+    rows_a = [json.dumps(dict(rec(i, 30.0 + 3.0 * i), scope_id="a",
+                              run_id="shared" if i == 0 else f"a{i}")) for i in range(6)]
+    row_b = json.dumps(dict(rec(9, 50.0, quality="PARTIAL", skipped=1), scope_id="b",
+                            run_id="shared"))
+    rc15, j15, n15 = run([broken_a] + rows_a + [broken_b, row_b], extra=["--scope-id", "a"])
+    check("B1_15 a retry in another scope is not this scope's retry",
+          (j15["history"]["quality"], j15["history"]["comparable"],
+           j15["history"]["rejected"].get("duplicate run_id (retry)")), ("COMPLETE", 6, None))
+    check("B1_15 and the loss in each scope cut only that scope",
+          (j15["history"]["damage"]["boundaries"],
+           sorted((j15["history"]["damage"]["scope_local"] or {}).items())),
+          (2, [("a", 1), ("b", 1)]))
+
+    trusted_boundaries()
+    run_id_conflicts()
+
+    print("\nM1 - history.quality describes the evidence eligible RIGHT NOW")
+    rc, j, n = run([json.dumps(rec(i, 30.0 + 3.0 * i, sessions=0, scanned=40)) for i in range(6)])
+    check("nothing comparable is never reported as COMPLETE",
+          (j["history"]["comparable"], j["history"]["quality"]), (0, "EMPTY"))
+
+    print("\nthe damage is reported even while the current epoch is clean")
+    rc, j, n = run(series(6) + [TORN] + series(6, 20))
+    check("the rejection is still counted", j["history"]["rejected"].get("unparseable line"), 1)
+    check("and the file's historical damage is named",
+          ((j["history"].get("damage") or {}).get("boundaries"),
+           (j["history"].get("damage") or {}).get("file_global")), (1, 1))
+    check("while the analysed epoch is clean and promotes",
+          (j["history"]["quality"], j["status"]), ("COMPLETE", "CANDIDATE"))
+
+    # ---------------------------------------------------------------- positive controls
+    print("\npositive controls - a gate that refuses everything is not a gate")
+    good = good_rows
+    case("P1 clean COMPLETE population", good, "CANDIDATE", 10, 1, comparable=6,
+         history_quality="COMPLETE")
+    case("P3 an invalid record in ANOTHER scope does not poison this one",
+         good + [rec(9, 55.0, quality="INVALID", sessions=0, scope="other")],
+         "CANDIDATE", 10, 1, comparable=6)
+    envelope = json.dumps({"envelope": {"schema_version": 4, "run_id": "x"},
+                           "payload": {}, "certificate": {}})
+    rc, j, n = run([envelope])
+    check("P4 current-generation evidence stays unsupported", j["status"], "INSUFFICIENT_DATA")
+    check("P4 strict exit", rc, 20)
+    check("P4 refused by name, not consumed",
+          any("current-generation" in k for k in j["history"]["rejected"]), True)
+    check("P4 nothing written", n, 0)
+    check("P4 the supported schema set is unchanged", j["history_schema_supported"], [0, 1, 2])
+    flat = [rec(i, 50.0) for i in range(6)]
+    case("S_NOACTION nothing moved", flat, "NO_ACTION", 0, 0, comparable=6)
+    case("S_LOCK another run holds the lock", good, "ALREADY_RUNNING", 41, 0, lock=True)
+
+    # ---------------------------------------------------------------- the emission gate itself
+    print("\nthe gate is in the emitter, not only in its caller")
+    f = optimize.finding("x", "CANDIDATE", "head", "ev", scope="s", bucket=1)
+    for status in ("PARTIAL_EVIDENCE", "HOST_BEHAVIOR_SHIFT", "INSUFFICIENT_DATA",
+                   "INTERNAL_ERROR", "ALREADY_RUNNING", "NO_ACTION"):
+        out = os.path.join(d, "gate_" + status)
+        w, e, fail = optimize.emit_candidates([f], out, status)
+        check(f"{status} writes nothing", (w, e, fail, os.path.exists(out)), ([], [], [], False))
+    out = os.path.join(d, "gate_CANDIDATE")
+    w, _e, _f = optimize.emit_candidates([f], out, "CANDIDATE")
+    check("CANDIDATE still writes", (len(w), os.path.exists(out)), (1, True))
+
+    print(f"\n{P} PASS, {F} FAIL")
+    return 1 if F else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

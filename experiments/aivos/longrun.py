@@ -30,8 +30,12 @@ EMPTY_HIST = {"comparable": [], "total": 0, "in_scope": 0, "rejected": {}, "drop
 
 
 def rec(ts, shares, scope, turns=1000, workload="", runtimes=None):
+    # The acquisition counters a real 1.2/1.3 sweep always wrote. Since 1.4.2 a record claiming
+    # COMPLETE without them cannot carry a promotion, so a simulation that omitted them would be
+    # simulating a population no producer ever writes.
     return {"schema_version": 2, "record_type": "carry_run", "run_id": carry.new_run_id(),
-            "ts": ts, "sessions": 40, "turns": turns, "carry_bytes": 10 ** 7,
+            "ts": ts, "sessions": 40, "turns": turns, "carry_bytes": 10 ** 7, "scanned": 100,
+            "unreadable": 0, "oversize": 0, "skipped_by_limit": 0,
             "scope_id": scope, "workload_class": workload, "evidence_quality": "COMPLETE",
             "runtimes": runtimes or {"2.1.270": 40}, "models": {"m1": 40},
             "shares": shares, "bpt": {k: 1.0 for k in shares}}
@@ -154,17 +158,22 @@ def longrun(days, cycles, out, plateau=20):
 
         day_new = 0
         for _cycle in range(cycles):
-            recs, _rej, _lines = optimize.load_history(hist)
-            scopes = optimize.by_scope(recs)
+            recs, _rej, _lines, ep = optimize.load_history(hist)
+            # the same epoch the CLI analyses: evidence from before a loss is not combined with
+            # evidence after it, here either (cross-family review of the B1 repair)
+            current = optimize.active_records(recs, ep)
+            scopes = optimize.by_scope(current)
             for role in ROLES:
                 keep, dropped = optimize.comparable(scopes.get(role, []))
                 h = {"comparable": keep, "total": len(recs), "in_scope": len(scopes.get(role, [])),
-                     "rejected": {}, "dropped": dropped, "time_order": optimize.time_order(keep)}
+                     "in_epoch": len(scopes.get(role, [])), "rejected": dict(_rej),
+                     "dropped": dropped, "time_order": optimize.time_order(keep),
+                     "damage": optimize.damage_summary(ep)}
                 lv = live(int(30 + min(day, plateau) * (30.0 / plateau)))
                 f = optimize.analyse(lv, h, None, None, scope=role)
                 st = optimize.overall_status(f, h, lv, optimize.population(keep), False)
                 statuses[st] += 1
-                w, e, _fail = optimize.emit_candidates(f, cand)
+                w, e, _fail = optimize.emit_candidates(f, cand, st)
                 written += len(w)
                 existing += len(e)
                 day_new += len(w)

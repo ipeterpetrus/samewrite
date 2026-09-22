@@ -35,6 +35,14 @@ B2T = 1 / 3.14          # chars -> tokens, measured on o200k over this corpus. S
                         # ASCII, and the constant was calibrated on the same len().
 
 
+# Evidence a sweep SELECTED and then could not turn into a measurement. A chosen bound is NOT one
+# of them, which is the whole distinction `--accept-partial` rests on: a caller may adopt the bound
+# it asked for, and may never adopt a file it could not read or a record it could not parse.
+# One vocabulary, read by the producer below and by the optimizer's legacy law, so the two cannot
+# drift into disagreeing about what "partial" meant.
+LOSS_FIELDS = ("unreadable", "oversize", "malformed", "identity_changed", "conflicted_sources")
+BOUND_FIELDS = ("skipped_by_limit",)
+
 HISTORY_SCHEMA = 2            # the generation 1.3 wrote. Kept as the name older callers import.
                               # 0 = pre-1.2 records with no schema field · 1 = + population identity
                               # 2 = + run_id / scope_id / evidence quality (multi-agent safety)
@@ -231,7 +239,50 @@ def _identity(path):
             "mtime_ns": getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))}
 
 
-def accumulate(paths, min_turns=50, max_files=0):
+def bounded_paths(paths, max_files):
+    """The ONE definition of a bounded sample: the newest `max_files` sources by mtime.
+
+    A bound has to mean "the most RECENT N", not "the first N the filesystem listed". An
+    alphabetical prefix of a long-lived archive is a sample of whatever was created first, which
+    for a 24x7 population is the least informative slice there is.
+
+    It lives here, alone, because a bounded run had two of these: the carry sweep took the newest N
+    and the skill-listing scan took a discovery-order slice of the same list, so one `--max-files 1`
+    run analysed two different single-source populations and reported them as one.
+    """
+    paths = list(paths)
+    if not max_files or len(paths) <= max_files:
+        return paths
+
+    def age(q):
+        # Per SOURCE, not per sweep: one file whose mtime cannot be read used to send the whole
+        # selection back to a discovery-order slice, which is the very sample this function
+        # exists to avoid. A source that cannot be dated simply cannot claim to be the newest.
+        # (cross-family review, round 1)
+        try:
+            return os.path.getmtime(q)
+        except OSError:
+            return float("-inf")
+
+    return sorted(paths, key=age, reverse=True)[:max_files]
+
+
+def sweep_label(facts):
+    """The 1.3-generation word for how a sweep went, from the counters the sweep itself kept.
+
+    Four values, and PARTIAL has to carry two different meanings: a bound the caller ASKED for, and
+    evidence that was selected and then LOST. The label keeps the vocabulary a 1.3 reader knows;
+    a consumer that must tell the two apart reads LOSS_FIELDS and BOUND_FIELDS, which is exactly
+    what the optimizer's legacy law does — `--accept-partial` may adopt a bound, never a loss.
+    """
+    if not facts.get("sessions"):
+        return "INVALID" if facts.get("scanned") else "EMPTY"
+    if any(facts.get(k) for k in LOSS_FIELDS + BOUND_FIELDS):
+        return "PARTIAL"
+    return "COMPLETE"
+
+
+def accumulate(paths, min_turns=50, max_files=0, selected=None):
     carry, size, usage = collections.Counter(), collections.Counter(), collections.Counter()
     runtimes, models = collections.Counter(), collections.Counter()
     turns = sessions = 0
@@ -252,14 +303,10 @@ def accumulate(paths, min_turns=50, max_files=0):
     usage_conflicted_transcripts = identity_conflicted_transcripts = 0
     usage_exact_measurement_excluded = identity_exact_measurement_excluded = 0
     conflicted_sources = records_rejected = 0
-    # A bound has to mean "the most RECENT N", not "the first N the filesystem listed". An
-    # alphabetical prefix of a long-lived archive is a sample of whatever was created first, which
-    # for a 24x7 population is the least informative slice there is.
-    if max_files and len(paths) > max_files:
-        try:
-            paths = sorted(paths, key=lambda q: os.path.getmtime(q), reverse=True)[:max_files]
-        except OSError:
-            paths = list(paths)[:max_files]
+    # `selected` lets a caller that must hand the SAME sample to another consumer choose once and
+    # pass it in; without it the sweep selects for itself. `total_paths` above is still what
+    # discovery found, so the bound is reported against the whole population either way.
+    paths = list(selected) if selected is not None else bounded_paths(paths, max_files)
     for p in paths:
         scanned += 1
         try:
@@ -372,29 +419,24 @@ def accumulate(paths, min_turns=50, max_files=0):
                 "not_attempted": max(0, selected - accounted),
                 "malformed": malformed + oversize, "records_rejected": records_rejected,
                 "dirs_unreadable": vanished}
-    # Provenance, not decoration: an analyser that cannot tell a complete sweep from a sweep that
-    # hit unreadable files or a file cap will happily call a bounded corpus the population.
-    quality = "COMPLETE"
-    if unreadable or oversize or skipped_by_limit or conflicted_sources:
-        quality = "PARTIAL"
-    if sessions == 0:
-        quality = "INVALID" if scanned else "EMPTY"
-    return dict(sessions=sessions, turns=turns, lengths=sorted(lengths),
-                carry=carry, size=size, usage=usage, runtimes=runtimes, models=models,
-                unreadable=unreadable, short=short, scanned=scanned, oversize=oversize,
-                skipped_by_limit=skipped_by_limit, quality=quality,
-                # v1.4 acquisition facts. `quality` above stays for the 1.3 reader; it is NOT
-                # what the new record carries, and no record asserts it.
-                sources=sources, parsed=parsed_files, counters=counters,
-                sample_bound=max_files or 0, malformed=malformed,
-                identity_changed=identity_changed, empty_source=empty_source,
-                usage_conflicts=usage_conflicts, out_of_order=out_of_order,
-                identity_conflicts=identity_conflicts,
-                usage_conflicted_transcripts=usage_conflicted_transcripts,
-                identity_conflicted_transcripts=identity_conflicted_transcripts,
-                conflicted_sources=conflicted_sources,
-                usage_exact_measurement_excluded=usage_exact_measurement_excluded,
-                identity_exact_measurement_excluded=identity_exact_measurement_excluded)
+    facts = dict(sessions=sessions, turns=turns, lengths=sorted(lengths),
+                 carry=carry, size=size, usage=usage, runtimes=runtimes, models=models,
+                 unreadable=unreadable, short=short, scanned=scanned, oversize=oversize,
+                 skipped_by_limit=skipped_by_limit,
+                 # v1.4 acquisition facts. `quality` below stays for the 1.3 reader; it is NOT
+                 # what the new record carries, and no record asserts it.
+                 sources=sources, parsed=parsed_files, counters=counters,
+                 sample_bound=max_files or 0, malformed=malformed,
+                 identity_changed=identity_changed, empty_source=empty_source,
+                 usage_conflicts=usage_conflicts, out_of_order=out_of_order,
+                 identity_conflicts=identity_conflicts,
+                 usage_conflicted_transcripts=usage_conflicted_transcripts,
+                 identity_conflicted_transcripts=identity_conflicted_transcripts,
+                 conflicted_sources=conflicted_sources,
+                 usage_exact_measurement_excluded=usage_exact_measurement_excluded,
+                 identity_exact_measurement_excluded=identity_exact_measurement_excluded)
+    facts["quality"] = sweep_label(facts)
+    return facts
 
 
 # Relative price of one token in each bucket, base input = 1.0. A bucket's share of the
