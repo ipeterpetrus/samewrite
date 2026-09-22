@@ -471,3 +471,105 @@ The control byte stays accepted deliberately: the producer's cap truncates lengt
 control characters, such a label is already published through `scope.known` on every head of this
 branch, and calling it corruption would invent damage where the file is intact. That is the residual
 this repair states rather than hides.
+
+## 7. Run-id conflict: identity is a claim, not proof (frozen before the repair)
+
+The author-adversarial review of `71016ee` found that two **materially different** valid observations
+carrying the same `run_id` were collapsed into one retry, so the second loss never opened a
+boundary. Reproduced on that head before anything was designed for it:
+
+```text
+DEGRADED X1(run_id=SHARED, ts 0,  share 30, unreadable 2, sessions 40, turns 1000, scanned 80)
+6 healthy
+DEGRADED X2(run_id=SHARED, ts 40, share 66, unreadable 9, sessions 91, turns 2400, scanned 150)
+6 healthy
+
+  CANDIDATE / exit 10 / 1 candidate file
+  records_in_epoch 12, comparable 12, scope_local boundaries 1 (for TWO reported losses)
+  "duplicate run_id (retry)" = 1
+  candidate evidence = 6 records from before X2 and 6 from after it
+```
+
+Nine persisted fields differ between X1 and X2 (`ts`, `shares`, `sessions`, `turns`, `carry_bytes`,
+`scanned`, `unreadable`, `runtimes`, `models`). Both pass `valid_record()`; both are independently
+`DEGRADED`. Controls on the same head: a different `run_id` gives two boundaries and an active epoch
+of six; an identical duplicate, a key-order-only difference and a whitespace-only difference all give
+one boundary and an epoch of twelve; a file-global loss between the copies gives two scope-local
+boundaries plus one file-global.
+
+### 7.1 The rule this section freezes
+
+> **`run_id` is an identity CLAIM, not proof of semantic equality.**
+> Two records may be treated as one retry only when their identity AND their persisted observation
+> are equivalent.
+
+`SAME_RUN_ID_ONLY_IS_RETRY=NO`. Three cases, and one classification decides all of them — boundary
+opening, deduplication, the quality floor and the diagnostics read the same verdict:
+
+* **Case A — TRUE_RETRY.** Same scope, same file-global epoch, same `run_id`, **and the same
+  canonical persisted observation.** Deduplicated exactly as before: the later copy is dropped, it
+  is counted, its quality still travels to the survivor, and it does **not** open a second boundary.
+* **Case B — RUN_ID_CONFLICT.** Same identity, **different** canonical persisted observation. This
+  is an observable integrity event, not bookkeeping. The later record is **kept** (it is a valid
+  observation), it is **not** reported as a retry, and it opens a recoverable **scope-local**
+  boundary at its own physical position. It belongs to the epoch it closes.
+* **Case C — across a file-global boundary.** Unchanged: the reader cannot establish continuity
+  across an unattributable loss, so the later occurrence is a fresh identity. No retry, no conflict,
+  no imported quality floor.
+
+Equivalence is decided on the **whole persisted record**, not a hand-picked subset — the defect being
+repaired exists precisely because the previous identity was too weak. The comparison is a digest of
+the parsed object with keys sorted, so JSON key order and whitespace cannot make two semantically
+identical observations differ, and the reader's own private annotations (`_history_epoch`,
+`_evidence_quality_floor`) are excluded, because reading a file must not change what a record is. A
+difference in any other persisted field — including one this reader does not know — conservatively
+makes the observations non-equivalent: that is fail-closed, and epochs recover.
+
+### 7.2 The frozen matrix
+
+Pieces: `A` = 6 healthy COMPLETE records, `B` = 6 more, all scope `s1`, one file-global epoch unless
+stated. `scope_local` is the total count of scope-local boundaries.
+
+| case | fixture | status | exit | files | epoch | comparable | scope_local | file_global | retries | conflicts | history.quality |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| **RID_01** | `DEG X1 · A · DEG X1 (identical) · B` | `CANDIDATE` | 10 | 1 | 12 | 12 | 1 | 0 | 1 | 0 | `COMPLETE` |
+| **RID_02** | `DEG X1 · A · DEG X2 (different)` | `INSUFFICIENT_DATA` | 20 | 0 | 0 | 0 | 2 | 0 | 0 | 1 | `EMPTY` |
+| **RID_03** | `DEG X1 · A · DEG X2 · B` | `CANDIDATE` | 10 | 1 | 6 | 6 | 2 | 0 | 0 | 1 | `COMPLETE` |
+| **RID_04** | `CLEAN X · A · DEG X' (different) · B` | `CANDIDATE` | 10 | 1 | 6 | 6 | 1 | 0 | 0 | 1 | `COMPLETE` |
+| **RID_05** | `DEG X · A · CLEAN X' (different) · B` | `CANDIDATE` | 10 | 1 | 6 | 6 | 2 | 0 | 0 | 1 | `COMPLETE` |
+| **RID_06** | `COMPLETE X · A · COMPLETE X' (different) · B` | `CANDIDATE` | 10 | 1 | 6 | 6 | 1 | 0 | 0 | 1 | `COMPLETE` |
+| **RID_07** | `PARTIAL X · A · PARTIAL X' (different) · B`, with and without `--accept-partial` | `CANDIDATE` | 10 | 1 | 6 | 6 | 1 | 0 | 0 | 1 | `COMPLETE` |
+| **RID_08** | `DEG X scope a · DEG X scope b · 6×a · 6×b`, analysing `a` | `CANDIDATE` | 10 | 1 | 6 | 6 | 2 | 0 | 0 | 0 | `COMPLETE` |
+| **RID_09** | `DEG X1 · A · torn line · DEG X1 (identical) · B` | `CANDIDATE` | 10 | 1 | 6 | 6 | 2 | 1 | 0 | 0 | `COMPLETE` |
+| **RID_10** | `DEG X1 · A · DEG X1 with the keys in reverse order · B` | `CANDIDATE` | 10 | 1 | 12 | 12 | 1 | 0 | 1 | 0 | `COMPLETE` |
+| **RID_11** | `DEG X1 · A · DEG X1 with different separators · B` | `CANDIDATE` | 10 | 1 | 12 | 12 | 1 | 0 | 1 | 0 | `COMPLETE` |
+| **RID_12** | `DEG X1 · A · DEG X1 with another `workload_class` · B` | `CANDIDATE` | 10 | 1 | 6 | 6 | 2 | 0 | 0 | 1 | `COMPLETE` |
+| **RID_13** | `DEG X1 · A · DEG X1 with other `shares` · B` | `CANDIDATE` | 10 | 1 | 6 | 6 | 2 | 0 | 0 | 1 | `COMPLETE` |
+| **RID_14** | `DEG X1 · A · DEG X1 with another loss counter · B` | `CANDIDATE` | 10 | 1 | 6 | 6 | 2 | 0 | 0 | 1 | `COMPLETE` |
+| **RID_15** | `DEG X1 · 3 healthy · DEG X2 · 3 healthy · DEG X3 · B` (all three different) | `CANDIDATE` | 10 | 1 | 6 | 6 | 3 | 0 | 0 | 2 | `COMPLETE` |
+
+`RID_03`, `RID_04`, `RID_05`, `RID_06`, `RID_07`, `RID_12`–`RID_15` additionally require the
+candidate's `evidence_run_ids` to name **only** records after the last boundary.
+
+### 7.3 Complete-versus-complete is a boundary, and why
+
+`RID_06` is the row that needed an argument rather than an inference. Neither record reports an
+acquisition loss, so nothing was lost — but the file states two different things under one identity,
+and the reader has no way to tell which one the population it is about to compare actually belongs
+to. A trend drawn across that point is drawn over a file whose identity discipline has already
+failed. The choice is therefore a **recoverable scope-local boundary**: it costs the pre-conflict
+records, it costs nothing permanently, and the alternative — silently keeping one of the two and
+calling it a retry — is the exact statement the repair exists to stop making. The diagnostic stays
+honest either way: the conflict is counted as a conflict, never as a retry.
+
+### 7.4 The limit this repair cannot close
+
+`IDENTICAL_REUSED_RUNID_LIMITATION=YES`. Two physically distinct losses in one scope and one
+file-global epoch that carry the same `run_id` **and identical persisted content** are
+indistinguishable from one run retried identically. The flat legacy record has no other identity to
+read. Line position is deliberately NOT used as identity: doing so would make every true retry open
+a fresh boundary and recreate the fail-stuck behaviour the previous round removed.
+
+### 7.5 Deviations from this frozen section
+
+None.
