@@ -41,9 +41,13 @@ OUTPUT_SCHEMA_VERSION = 2        # shape of --json; bump when a field's meaning 
                                  #   DEGRADED/UNKNOWN · `history.quality` is the worst quality of
                                  #   the evidence ELIGIBLE FOR THIS ANALYSIS, and is EMPTY when
                                  #   nothing is comparable · `history.damage` counts the loss
-                                 #   boundaries the file holds · `scope.records_in_scope` counts the
-                                 #   whole scope while `scope.records_in_epoch` counts what the
-                                 #   current epoch contributes · a CANDIDATE outranks
+                                 #   boundaries the file holds: `file_global` is every loss a
+                                 #   rejected line represents, and `scope_local` maps a scope to
+                                 #   the losses its OWN VALIDATED RECORDS reported — never a label
+                                 #   read off a line that failed validation, so its keys are always
+                                 #   scopes that also appear in `scope.known` · `scope.records_in_scope`
+                                 #   counts the whole scope while `scope.records_in_epoch` counts what
+                                 #   the current epoch contributes · a CANDIDATE outranks
                                  #   PARTIAL_EVIDENCE, because each finding is gated on its own
                                  #   evidence before the run is summarised
 THRESHOLD_SCHEMA_VERSION = 1     # bump when any threshold below changes, with a reason and a test
@@ -252,29 +256,37 @@ NOT_A_LOSS = ("current-generation", "duplicate run_id", "not an object", "no sha
 EPOCH_KEY = "_history_epoch"
 
 
-def damage_boundary(reason, rec=None):
-    """Where a rejected line cuts the promotion history -> None | ("file", None) | ("scope", id).
-
-    The first repair made damage permanent: one torn line set the whole file DEGRADED, and since
-    nothing in this product expires, rotates or repairs a history — and no flag adopts a loss — a
-    single crash fragment disabled promotion for every scope, forever. An independent acceptance
-    review blocked that, correctly.
+def rejection_is_loss(reason):
+    """Did this rejected line cost the history a record? -> bool.
 
     A loss is not a verdict on the file. It is a BOUNDARY at that line's physical position: the
     records before it and the records after it are two populations, and only the newest one may
-    support a promotion. The gap stays visible in `history.rejected` and `history.damage`.
-
-    Attribution: a line that parses and carries a readable `scope_id` says which population lost a
-    record, so it cuts that scope only. A line that cannot say — unparseable, oversized, a file
-    that would not open — cuts every scope, because guessing would be the fail-open half of this.
+    support a promotion. The gap stays visible in `history.rejected` and `history.damage`. (The
+    first repair made damage permanent instead, and an independent acceptance review blocked it:
+    nothing in this product expires, rotates or repairs a history, and no flag adopts a loss, so a
+    single crash fragment disabled promotion for every scope, forever.)
     """
-    if any(x in str(reason) for x in NOT_A_LOSS):
-        return None
-    if isinstance(rec, dict):
-        sid = rec.get("scope_id")
-        if isinstance(sid, str) and 0 < len(sid) <= 64 and not carry.SAFE_LABEL.search(sid):
-            return ("scope", sid)
-    return ("file", None)
+    return not any(x in str(reason) for x in NOT_A_LOSS)
+
+
+def degrades_scope(rec):
+    """Does this VALIDATED record's own canonical evidence prove that it lost records? -> bool.
+
+    The one trusted source of a scope-local boundary, and the reason it is trusted is provenance,
+    not syntax: the record passed valid_record(), its `scope_id` is the same field every accepted
+    record already publishes through `scope.known`, and the damage fact comes from
+    RECORD_LOSS_COUNTERS rather than from guessing what a corrupt line meant.
+
+    Only an actual loss qualifies. A bound the caller asked for (PARTIAL), a legacy schema that
+    cannot attest completeness (UNKNOWN) and a readable record nothing can be compared with
+    (INVALID/EMPTY) are not proof that a line went missing, and must not open an epoch.
+    """
+    if not isinstance(rec, dict):
+        return False
+    schema = rec.get("schema_version", 0)
+    if isinstance(schema, bool) or not isinstance(schema, int):
+        schema = 0
+    return _derived_record_quality(rec, schema) == "DEGRADED"
 
 
 def active_epoch_key(scope, epochs):
@@ -299,7 +311,14 @@ def active_records(recs, epochs):
 
 def damage_summary(epochs):
     """What the FILE holds, as diagnostics — never a gate. A historical gap can stay true while the
-    evidence after it is independently complete."""
+    evidence after it is independently complete.
+
+    `file_global` is every loss a rejected line represents: a rejected line cannot say whose record
+    it was, so it cuts every scope at its position. `scope_local` therefore has exactly one source —
+    records that PASSED validation and whose own canonical counters reported a loss — and its keys
+    are always scopes that also appear in `scope.known`. No attacker-controlled string from a
+    rejected line can add a key here, whatever it looks like, and the map's cardinality is bounded
+    by the real scopes in the file rather than by the corrupt lines in it."""
     e = epochs or {}
     local = dict(e.get("scope_local") or {})
     return {"boundaries": e.get("file_global", 0) + sum(local.values()),
@@ -371,6 +390,20 @@ def safe_err(exc):
 
 
 # ---------------------------------------------------------------- history: load and validate
+def safe_label(v):
+    """A value read off a rejected line, before it may appear in a public reason string.
+
+    Only a number can be a schema version, so only a number is echoed. Anything else is a corrupt
+    line's own content, it carries no diagnostic value beyond its type, and a reason string is
+    public output: `history.rejected` keys reach --json, the human report and any log that keeps
+    them. Truncating such a value is not a bound — thirty characters of a credential is still the
+    credential — so it is named by TYPE and never by content.
+    """
+    if v is None or (isinstance(v, (int, float)) and not isinstance(v, bool)):
+        return repr(v)
+    return "of type " + type(v).__name__
+
+
 def valid_record(o):
     """-> (ok, reason). Malformed input must not poison a trend; it must be counted and dropped."""
     if not isinstance(o, dict):
@@ -381,14 +414,16 @@ def valid_record(o):
     # the exact "a record gains trust by defaulting" failure, in the direction nobody watches.
     # Refuse it by NAME, and count the refusal, until the optimizer is ported.
     if isinstance(o.get("envelope"), dict):
-        return False, ("unsupported schema_version %r: current-generation (v1.4) evidence, "
+        return False, ("unsupported schema_version %s: current-generation (v1.4) evidence, "
                        "not read by this optimizer"
-                       % o["envelope"].get("schema_version"))
+                       % safe_label(o["envelope"].get("schema_version")))
     if o.get("record_type") not in (None, "carry_run"):
         return False, "unknown record_type"
     sv = o.get("schema_version", 0)
     if not isinstance(sv, int) or isinstance(sv, bool) or sv not in SCHEMA_SUPPORTED:
-        return False, f"unsupported schema_version {sv!r}"
+        # The reason string is public: it becomes a key of `history.rejected`. A rejected line's
+        # own content therefore goes through safe_label() before it can be echoed there.
+        return False, f"unsupported schema_version {safe_label(sv)}"
     sh = o.get("shares")
     claims_ours = (o.get("record_type") == "carry_run" or "schema_version" in o
                    or "run_id" in o or "carry_bytes" in o)
@@ -440,44 +475,58 @@ def load_history(path):
         return recs, rejected, 0, {"file_global": 0, "scope_local": {}}
     lines = 0
     try:
-        fh = open(path, encoding="utf-8", errors="replace")
+        # BYTES, decoded strictly per physical line. `errors="replace"` destroyed the evidence that
+        # a decode had failed: undecodable bytes inside `scope_id` arrived as U+FFFD, passed for a
+        # readable label, and cut a scope that does not exist — while the real population kept
+        # crossing the loss. A line the reader cannot decode is named and counted as a loss; the
+        # reader then continues at the next line rather than abandoning the file.
+        fh = open(path, "rb")
     except OSError as e:
         rejected[f"history unreadable: {safe_err(e)}"] += 1
         # A file that would not open is a loss nobody can attribute: every scope starts a new epoch
         # with no records in it, which is the fail-closed answer.
         return recs, rejected, 0, {"file_global": 1, "scope_local": {}}
     with fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
+        for raw in fh:
+            raw = raw.strip()
+            if not raw:
                 continue
             lines += 1
             o, ok, why = None, False, ""
-            if len(line) > carry.MAX_RECORD:
+            if len(raw) > carry.MAX_RECORD:      # the cap is on BYTES; so is the line that hit it
                 why = "record above the size cap"
             else:
                 try:
-                    o = json.loads(line)
-                except Exception:
-                    why = "unparseable line"          # a torn line cannot say whose record it was
+                    text = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    why = "line is not valid UTF-8"
                 else:
-                    ok, why = valid_record(o)
+                    try:
+                        o = json.loads(text)
+                    except Exception:
+                        why = "unparseable line"      # a torn line cannot say whose record it was
+                    else:
+                        ok, why = valid_record(o)
             if ok:
                 # Stamped at READ time, in physical order: the epoch is a position in the file,
                 # never a timestamp, because the clock is exactly what a damaged history cannot
                 # be trusted about.
                 o[EPOCH_KEY] = (cuts_file, cuts_scope[scope_of(o)])
                 recs.append(o)
+                if degrades_scope(o):
+                    # The record belongs to the epoch it closes, never to the one it opens: it is
+                    # stamped first and the counter moves after it. A population that recovers is
+                    # not founded on the observation that reported the loss.
+                    cuts_scope[scope_of(o)] += 1
                 continue
             rejected[why] += 1
-            # ONE classifier for every rejection, including the ones that never became an object:
-            # a reason plus whatever the line could show about itself.
-            cut = damage_boundary(why, o)
-            if cut is None:
-                continue
-            if cut[0] == "scope":
-                cuts_scope[cut[1]] += 1
-            else:
+            # EVERY loss a rejected line represents is file-global. A record that failed validation
+            # is not a trustworthy authority for its own scope attribution: the field that would
+            # name the population is part of the line this reader just refused to believe. Reading
+            # it anyway is the fail-open half — it invents a scope that may not exist and leaves
+            # the damaged one uncut. This over-blocks on purpose, and the over-block is temporary
+            # because epochs recover; a crossing of a real loss is not.
+            if rejection_is_loss(why):
                 cuts_file += 1
     seen, uniq = {}, []
     for r in recs:
@@ -492,7 +541,12 @@ def load_history(path):
             # carry the same numbers while belonging to different epochs. Identity therefore needs
             # the scope: without it, one scope's retry lowered another scope's record through
             # QUALITY_FLOOR. (cross-family review of the B1 repair)
-            rid = (scope_of(r), r.get(EPOCH_KEY), rid)
+            # ...and only the FILE-GLOBAL half of the stamp. Across a file-global loss the reader
+            # cannot tell whether a repeated id is the same run, so both copies stand. Across a
+            # TRUSTED scope-local boundary the file is intact and the reader knows exactly what
+            # happened: the repeat is the same logical run retrying, and letting its cleaner copy
+            # into the recovered epoch would launder the loss its own twin reported.
+            rid = (scope_of(r), r.get(EPOCH_KEY, (0, 0))[0], rid)
             if rid in seen:
                 rejected["duplicate run_id (retry)"] += 1
                 # The retry is dropped as an OBSERVATION, never as provenance. One run_id that

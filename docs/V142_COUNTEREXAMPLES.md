@@ -377,3 +377,25 @@ and a line that cannot be decoded is never mistaken for one that can.
 ### 6.8 Deviations from this frozen section
 
 None.
+
+### 6.9 Added after the freeze (neither a deviation nor a replacement)
+
+Two cases were added while the repair was built. Neither changes a frozen expectation; each pins a
+property the frozen rows implied but did not state.
+
+```text
+TUTF_09  a line that would be a perfectly good record BUT FOR its bytes.
+         Every TUTF_01..08 fixture also fails validation on its own, so a lenient decode and a
+         strict one could in principle agree on the outcome by accident. Here they cannot: with
+         errors="replace" the line is ACCEPTED, publishes U+FFFD through scope.known and creates no
+         boundary; strictly it is a loss like any other. Expectation: 12 records read (not 13),
+         file-global boundary ×1, scope.known == ["rev"].
+
+TPRIV    a rejected line carrying synthetic secret- and path-shaped strings.
+         Found while verifying §35: valid_record() echoed the rejected line's own
+         `schema_version` VALUE into `history.rejected`, which reaches --json, the human report and
+         every log that keeps them. Truncating it is not a bound — thirty characters of a
+         credential is still the credential — so only a NUMBER is echoed now, and any other value
+         is named by type ("unsupported schema_version of type str"). A real schema number is still
+         named in full.
+```

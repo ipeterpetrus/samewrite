@@ -216,6 +216,35 @@ def trusted_boundaries():
     check("TUTF_01 the candidate rests only on the recovered epoch",
           ids, sorted("rrev%d" % i for i in range(20, 26)))
 
+    # A line that would be a perfectly good record BUT FOR its bytes: with a lenient decode it is
+    # accepted and publishes U+FFFD as a scope; strictly, it is a loss like any other. (post-freeze
+    # addition, docs §6.9 — it strengthens TUTF_01 rather than changing any frozen expectation.)
+    whole = dict(rec(99, 50.0, scope="@@M@@"))
+    intact_but_undecodable = json.dumps(whole).encode().replace(b"@@M@@", b"\xff\xfe\x80")
+    rc, j, n = run(ser(6) + [intact_but_undecodable] + later())
+    check("TUTF_09 an otherwise-valid record with undecodable bytes is a loss, not a record",
+          shape(rc, j, n) + (j["history"]["records"], j["scope"]["known"]),
+          ("CANDIDATE", 10, 1, 6, 6, 1, {}, 12, ["rev"]))
+
+    # ---------------------------------------------------------------- privacy (§35)
+    print("\nTPRIV - a rejected line's own content is never echoed into public output")
+    secret = "sk-synthetic-NOTAREALKEY-0123456789"
+    leaky = dict(rec(99, 50.0, scope="/home/synthetic/.ssh/id_ed25519"),
+                 shares={"Bash": 10.0, "Read": 10.0}, workload_class=secret,
+                 run_id=secret + "-run", schema_version=secret)
+    rc, j, files = run_paths(ser(6) + [json.dumps(leaky)] + later())
+    blob = json.dumps(j, ensure_ascii=False)
+    spec = "".join(open(f, encoding="utf-8").read() for f in files)
+    check("TPRIV nothing from the rejected line reaches --json or a candidate file",
+          (secret[:16] in blob, "/home/synthetic" in blob,
+           secret[:16] in spec, "/home/synthetic" in spec, dmg(j)),
+          (False, False, False, False, (1, {})))
+    check("TPRIV the reason names the value's TYPE, never the value",
+          sorted(j["history"]["rejected"]), ["unsupported schema_version of type str"])
+    check("TPRIV a real schema number is still named",
+          optimize.valid_record({"schema_version": 3, "shares": {"Bash": 100.0}})[1],
+          "unsupported schema_version 3")
+
     # ---------------------------------------------------------------- TSCOPE (§6.2)
     print("\nTSCOPE - a rejected record does not authenticate its own scope_id")
     for label, bad in (
@@ -814,14 +843,18 @@ def main():
     rc, j, n = run(worse_then_clean)
     check("B1_13d and an excluded pre-loss copy does not poison it",
           (j["history"]["quality"], j["status"] == "PARTIAL_EVIDENCE"), ("COMPLETE", False))
+    # Frozen-decision amendment (docs/V142_COUNTEREXAMPLES.md §6.6): the middle copy used to carry
+    # unreadable=1, which under the trust model is a VALID record proving a loss — it now opens an
+    # epoch rather than sitting inside one. The property this case protects is unchanged and the
+    # fixture states it with copies that lose nothing; the degraded-copy behaviour is VD_10/VD_11.
     three_in_one = series(4) + [json.dumps(dict(rec(4, 42.0), run_id="S")),
-                                json.dumps(dict(rec(5, 45.0), run_id="S", unreadable=1)),
-                                json.dumps(dict(rec(6, 48.0), run_id="S",
-                                                evidence_quality="PARTIAL", skipped_by_limit=4))]
+                                json.dumps(dict(rec(5, 45.0), run_id="S",
+                                                evidence_quality="PARTIAL", skipped_by_limit=4)),
+                                json.dumps(dict(rec(6, 48.0), run_id="S"))]
     rc, j, n = run(three_in_one)
     check("B1_13e three copies inside one epoch: the worst of them survives",
           (j["history"]["quality"], j["history"]["rejected"].get("duplicate run_id (retry)"), n),
-          ("DEGRADED", 2, 0))
+          ("PARTIAL", 2, 0))
 
     print("\nB1_14/B1_15 - what a cross-family review of the epoch repair found")
     # a finding that rests on the ledger alone may still promote after a loss — but nothing from
@@ -845,8 +878,12 @@ def main():
           (j14["status"], [c.split("-")[0] for c in j14["candidate_ids"]]), ("CANDIDATE", ["noop"]))
 
     # two scopes can hold the same epoch NUMBERS; identity needs the scope as well
-    broken_a = '{"schema_version":2,"record_type":"carry_run","scope_id":"a","shares":{"Bash":10.0}}'
-    broken_b = '{"schema_version":2,"record_type":"carry_run","scope_id":"b","shares":{"Bash":10.0}}'
+    # Frozen-decision amendment (§6.6): the two boundaries used to be taken from REJECTED lines,
+    # which no longer name a scope at all. The shape this case needs — one scope-local cut in each
+    # of two scopes, so both carry the same epoch numbers — is built from the only trusted source
+    # there is: a validated record whose own loss counter proves it lost evidence.
+    broken_a = json.dumps(dict(rec(0, 20.0), scope_id="a", run_id="dega", unreadable=1))
+    broken_b = json.dumps(dict(rec(0, 20.0), scope_id="b", run_id="degb", unreadable=1))
     rows_a = [json.dumps(dict(rec(i, 30.0 + 3.0 * i), scope_id="a",
                               run_id="shared" if i == 0 else f"a{i}")) for i in range(6)]
     row_b = json.dumps(dict(rec(9, 50.0, quality="PARTIAL", skipped=1), scope_id="b",

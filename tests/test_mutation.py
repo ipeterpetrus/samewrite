@@ -49,9 +49,11 @@ def oracle(toolsdir, body):
                     "scanned": 100, "unreadable": 0, "oversize": 0, "skipped_by_limit": 0,
                     "shares": shares, "bpt": {{k: 1.0 for k in shares}}}}
         def w(path, rows):
-            with open(path, "w", encoding="utf-8") as fh:
+            with open(path, "wb") as fh:
                 for r in rows:
-                    fh.write((r if isinstance(r, str) else json.dumps(r)) + chr(10))
+                    if not isinstance(r, bytes):
+                        r = (r if isinstance(r, str) else json.dumps(r)).encode()
+                    fh.write(r + chr(10).encode())
             return path
         import evidence_acquire, evidence_history
         from evidence.absence import Absence
@@ -703,8 +705,8 @@ CASES = [
      """),
 
     ("M_CONTAINER_DAMAGE_IGNORED: baris robek di berkas history memotong epoch",
-     [("optimize.py", '    if any(x in str(reason) for x in NOT_A_LOSS):\n        return None',
-       "    if True:\n        return None")],
+     [("optimize.py", "    return not any(x in str(reason) for x in NOT_A_LOSS)",
+       "    return False")],
      """
      rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="c")
              for i in range(6)]
@@ -846,8 +848,8 @@ CASES = [
      """),
 
     ("M_DAMAGE_IGNORED_COMPLETELY: kehilangan yang tak teratribusi tetap memotong",
-     [("optimize.py", "            if cut is None:\n                continue",
-       "            if True:\n                continue")],
+     [("optimize.py", "            if rejection_is_loss(why):\n                cuts_file += 1",
+       "            if False:\n                cuts_file += 1")],
      """
      rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="q")
              for i in range(6)]
@@ -878,21 +880,22 @@ CASES = [
      """),
 
     ("M_SCOPE_DAMAGE_GLOBALIZED: kerusakan milik satu scope tak memotong scope lain",
-     [("optimize.py", '            return ("scope", sid)', '            return ("file", None)')],
+     [("optimize.py", "                    cuts_scope[scope_of(o)] += 1", "                    cuts_file += 1")],
      """
      good_a = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a")
                for i in range(6)]
-     broken_b = chr(123) + '"schema_version":2,"record_type":"carry_run","scope_id":"b","shares":' \
-                + chr(123) + '"Bash":10.0' + chr(125) + chr(125)
-     p = w(os.path.join(D, "scoped.jsonl"), [json.dumps(r) for r in good_a] + [broken_b])
+     deg_b = rec(100 + 9 * 604800, {"Bash": 50.0, "Read": 50.0}, scope="b")
+     deg_b["unreadable"] = 2
+     p = w(os.path.join(D, "scoped.jsonl"), [json.dumps(r) for r in good_a] + [json.dumps(deg_b)])
      recs, rej, _l, ep = optimize.load_history(p)
-     cur = optimize.active_records(recs, ep)
+     cur = [r for r in optimize.active_records(recs, ep) if optimize.scope_of(r) == "a"]
      assert len(cur) == 6, ("scope a ikut terpotong", len(cur))
      """),
 
     ("M_UNATTRIBUTABLE_DAMAGE_SCOPED: baris robek memotong SEMUA scope",
-     [("optimize.py", '    return ("file", None)\n',
-       '    return ("scope", scope_of(rec) if isinstance(rec, dict) else "default")\n')],
+     [("optimize.py", "            if rejection_is_loss(why):\n                cuts_file += 1",
+       "            if rejection_is_loss(why):\n"
+       "                cuts_scope[scope_of(o) if isinstance(o, dict) else 'default'] += 1")],
      """
      good_a = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a")
                for i in range(6)]
@@ -976,13 +979,15 @@ CASES = [
      """),
 
     ("M_DEDUP_IGNORES_SCOPE: dua scope bisa punya nomor epoch yang sama",
-     [("optimize.py", '            rid = (scope_of(r), r.get(EPOCH_KEY), rid)',
-       "            rid = (r.get(EPOCH_KEY), rid)")],
+     [("optimize.py", '            rid = (scope_of(r), r.get(EPOCH_KEY, (0, 0))[0], rid)',
+       "            rid = (r.get(EPOCH_KEY, (0, 0))[0], rid)")],
      """
-     broken_a = chr(123) + '"schema_version":2,"record_type":"carry_run","scope_id":"a","shares":' \
-                + chr(123) + '"Bash":10.0' + chr(125) + chr(125)
-     broken_b = chr(123) + '"schema_version":2,"record_type":"carry_run","scope_id":"b","shares":' \
-                + chr(123) + '"Bash":10.0' + chr(125) + chr(125)
+     def degraded(scope):
+         x = rec(100, {"Bash": 20.0, "Read": 80.0}, scope=scope)
+         x["unreadable"] = 1
+         return json.dumps(x)
+     broken_a = degraded("a")
+     broken_b = degraded("b")
      rows_a = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a",
                    run_id="shared" if i == 0 else "a%d" % i) for i in range(6)]
      row_b = rec(100 + 9 * 604800, {"Bash": 50.0, "Read": 50.0}, scope="b", run_id="shared")
@@ -994,6 +999,204 @@ CASES = [
      cur = [r for r in optimize.active_records(recs, ep) if optimize.scope_of(r) == "a"]
      q = optimize.history_quality(optimize.comparable(cur)[0])
      assert q == "COMPLETE", (q, rej)
+     """),
+
+    # --------------------------- the trusted damage boundary (adversarial-review blocker B-UTF8)
+    ("M_UTF8_REPLACEMENT_ATTRIBUTED: byte yang tak ter-decode bukan record, dan bukan label",
+     [("optimize.py", '                    text = raw.decode("utf-8")',
+       '                    text = raw.decode("utf-8", "replace")')],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
+             for i in range(6)]
+     # sah dalam segala hal KECUALI byte-nya: dengan decode longgar ia jadi record diterima
+     ghost = rec(100 + 9 * 604800, {"Bash": 50.0, "Read": 50.0}, scope="@@M@@")
+     bad = json.dumps(ghost).encode().replace("@@M@@".encode(), bytes([255, 254, 128]))
+     p = w(os.path.join(D, "utf8.jsonl"), [json.dumps(r) for r in rows] + [bad])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert rej.get("line is not valid UTF-8") == 1, dict(rej)
+     assert len(recs) == 6, ("baris tak ter-decode diterima sebagai record", len(recs))
+     assert optimize.damage_summary(ep)["file_global"] == 1, optimize.damage_summary(ep)
+     assert all(chr(65533) not in optimize.scope_of(r) for r in recs), "U+FFFD masuk sebagai scope"
+     """),
+
+    ("M_REJECTED_VALUE_ECHOED: isi baris yang ditolak tak boleh masuk output publik",
+     [("optimize.py", '    if v is None or (isinstance(v, (int, float)) and not isinstance(v, bool)):\n'
+       '        return repr(v)\n    return "of type " + type(v).__name__',
+       "    return repr(v)")],
+     """
+     secret = "sk-synthetic-NOTAREALKEY-0123456789"
+     bad = rec(100, {"Bash": 10.0, "Read": 10.0}, scope="/home/synthetic/.ssh/id_ed25519")
+     bad["schema_version"] = secret
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
+             for i in range(6)]
+     p = w(os.path.join(D, "leak.jsonl"), [json.dumps(r) for r in rows] + [json.dumps(bad)])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert all(secret[:12] not in k for k in rej), list(rej)
+     assert list(rej) == ["unsupported schema_version of type str"], list(rej)
+     """),
+
+    ("M_REJECTED_SCOPE_TRUSTED: record yang gagal validasi bukan otoritas atas scope-nya sendiri",
+     [("optimize.py", "            if rejection_is_loss(why):\n                cuts_file += 1",
+       "            if rejection_is_loss(why):\n"
+       "                sid = (o or {}).get('scope_id')\n"
+       "                if isinstance(sid, str) and 0 < len(sid) <= 64 and not carry.SAFE_LABEL.search(sid):\n"
+       "                    cuts_scope[sid] += 1\n"
+       "                else:\n"
+       "                    cuts_file += 1")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
+             for i in range(6)]
+     bad = rec(100 + 9 * 604800, {"Bash": 10.0, "Read": 10.0}, scope="ghost")
+     p = w(os.path.join(D, "trusted.jsonl"), [json.dumps(r) for r in rows] + [json.dumps(bad)])
+     recs, rej, _l, ep = optimize.load_history(p)
+     d = optimize.damage_summary(ep)
+     assert d["scope_local"] == {}, d
+     assert d["file_global"] == 1, d
+     assert len(optimize.active_records(recs, ep)) == 0, "populasi rev tak ikut terpotong"
+     """),
+
+    ("M_REJECTED_SCOPE_GHOST_KEY: label dari baris yang ditolak tak boleh jadi kunci publik",
+     [("optimize.py", "            if rejection_is_loss(why):\n                cuts_file += 1",
+       "            if rejection_is_loss(why):\n"
+       "                cuts_scope[str((o or {}).get('scope_id') or 'default')] += 1")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
+             for i in range(6)]
+     for label in ("/etc/passwd.d/synthetic", "agent-b", "x" * 64):
+         bad = rec(100 + 9 * 604800, {"Bash": 10.0, "Read": 10.0}, scope=label)
+         p = w(os.path.join(D, "ghost.jsonl"), [json.dumps(r) for r in rows] + [json.dumps(bad)])
+         recs, rej, _l, ep = optimize.load_history(p)
+         d = optimize.damage_summary(ep)
+         assert d["scope_local"] == {}, (label, d)
+         assert d["file_global"] == 1, (label, d)
+     """),
+
+    ("M_REJECTED_SCOPE_CARDINALITY: regex 'label yang tampak aman' tetap mempercayai baris ditolak",
+     [("optimize.py", "            if rejection_is_loss(why):\n                cuts_file += 1",
+       "            if rejection_is_loss(why):\n"
+       "                sid = (o or {}).get('scope_id')\n"
+       "                if isinstance(sid, str) and sid.isalnum() and len(sid) <= 32:\n"
+       "                    cuts_scope[sid] += 1\n"
+       "                else:\n"
+       "                    cuts_file += 1")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
+             for i in range(6)]
+     flood = [json.dumps(rec(100 + 9 * 604800, {"Bash": 10.0, "Read": 10.0}, scope="s%04d" % i))
+              for i in range(2000)]
+     p = w(os.path.join(D, "flood.jsonl"), flood + [json.dumps(r) for r in rows])
+     recs, rej, _l, ep = optimize.load_history(p)
+     d = optimize.damage_summary(ep)
+     assert d["scope_local"] == {}, len(d["scope_local"])
+     assert d["file_global"] == 2000, d["file_global"]
+     """),
+
+    ("M_GLOBAL_DAMAGE_NOT_CUT: kegagalan decode adalah kehilangan, bukan catatan kaki",
+     [("optimize.py",
+       'NOT_A_LOSS = ("current-generation", "duplicate run_id", "not an object", "no shares")',
+       'NOT_A_LOSS = ("current-generation", "duplicate run_id", "not an object", "no shares", "not valid UTF-8")')],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
+             for i in range(6)]
+     ghost = rec(100 + 9 * 604800, {"Bash": 10.0, "Read": 10.0}, scope="@@M@@")
+     bad = json.dumps(ghost).encode().replace("@@M@@".encode(), bytes([255, 254, 128]))
+     p = w(os.path.join(D, "notcut.jsonl"), [json.dumps(r) for r in rows] + [bad])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert optimize.damage_summary(ep)["boundaries"] == 1, optimize.damage_summary(ep)
+     assert len(optimize.active_records(recs, ep)) == 0, "epoch tak terpotong"
+     """),
+
+    ("M_GLOBAL_DAMAGE_POISONS_FOREVER: potongan global memotong di POSISI, bukan selamanya",
+     [("optimize.py", "        if r.get(EPOCH_KEY, key) == key:",
+       "        if r.get(EPOCH_KEY, key) == key and not (epochs or {}).get('file_global'):")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
+             for i in range(6)]
+     later = [rec(100 + (20 + i) * 604800, {"Bash": 48.0 + i * 3, "Read": 52.0 - i * 3},
+                  scope="rev") for i in range(6)]
+     p = w(os.path.join(D, "poison.jsonl"),
+           [json.dumps(r) for r in rows] + [chr(123) + '"torn":'] + [json.dumps(r) for r in later])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert len(optimize.active_records(recs, ep)) == 6, len(optimize.active_records(recs, ep))
+     """),
+
+    ("M_VALID_DEGRADED_POISONS_SCOPE_FOREVER: record sah yang kehilangan bukti membuka epoch",
+     [("optimize.py", "                if degrades_scope(o):", "                if False:")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a")
+             for i in range(6)]
+     deg = rec(100 + 6 * 604800, {"Bash": 48.0, "Read": 52.0}, scope="a")
+     deg["unreadable"] = 3
+     later = [rec(100 + (20 + i) * 604800, {"Bash": 48.0 + i * 3, "Read": 52.0 - i * 3},
+                  scope="a") for i in range(6)]
+     p = w(os.path.join(D, "stuck.jsonl"),
+           [json.dumps(r) for r in rows] + [json.dumps(deg)] + [json.dumps(r) for r in later])
+     recs, rej, _l, ep = optimize.load_history(p)
+     cur = optimize.active_records(recs, ep)
+     assert len(cur) == 6, ("epoch pemulihan tak terbuka", len(cur))
+     assert optimize.history_quality(optimize.comparable(cur)[0]) == "COMPLETE", "masih DEGRADED"
+     """),
+
+    ("M_VALID_DEGRADED_CUTS_ALL_SCOPES: kehilangan milik satu scope hanya memotong scope itu",
+     [("optimize.py", "                    cuts_scope[scope_of(o)] += 1",
+       "                    cuts_file += 1")],
+     """
+     a = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a")
+          for i in range(6)]
+     b = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="b")
+          for i in range(6)]
+     deg = rec(100 + 6 * 604800, {"Bash": 48.0, "Read": 52.0}, scope="a")
+     deg["unreadable"] = 3
+     p = w(os.path.join(D, "neighbour.jsonl"),
+           [json.dumps(r) for r in a] + [json.dumps(r) for r in b] + [json.dumps(deg)])
+     recs, rej, _l, ep = optimize.load_history(p)
+     cur = [r for r in optimize.active_records(recs, ep) if optimize.scope_of(r) == "b"]
+     assert len(cur) == 6, ("tetangga kehilangan epoch-nya", len(cur))
+     """),
+
+    ("M_DEGRADED_RECORD_INCLUDED_POST_BOUNDARY: record yang melaporkan kehilangan ada di epoch LAMA",
+     [("optimize.py",
+       "                o[EPOCH_KEY] = (cuts_file, cuts_scope[scope_of(o)])\n"
+       "                recs.append(o)\n"
+       "                if degrades_scope(o):",
+       "                if degrades_scope(o):\n"
+       "                    cuts_scope[scope_of(o)] += 1\n"
+       "                o[EPOCH_KEY] = (cuts_file, cuts_scope[scope_of(o)])\n"
+       "                recs.append(o)\n"
+       "                if False:")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a")
+             for i in range(6)]
+     deg = rec(100 + 6 * 604800, {"Bash": 48.0, "Read": 52.0}, scope="a", run_id="degraded-one")
+     deg["unreadable"] = 3
+     later = [rec(100 + (20 + i) * 604800, {"Bash": 48.0 + i * 3, "Read": 52.0 - i * 3},
+                  scope="a") for i in range(6)]
+     p = w(os.path.join(D, "order.jsonl"),
+           [json.dumps(r) for r in rows] + [json.dumps(deg)] + [json.dumps(r) for r in later])
+     recs, rej, _l, ep = optimize.load_history(p)
+     cur = optimize.active_records(recs, ep)
+     assert "degraded-one" not in [r.get("run_id") for r in cur], "record DEGRADED masuk epoch baru"
+     assert len(cur) == 6, len(cur)
+     """),
+
+    ("M_DEGRADED_RETRY_NO_RECOVERY: retry tak boleh mencuci kehilangan yang dilaporkan kembarannya",
+     [("optimize.py", '            rid = (scope_of(r), r.get(EPOCH_KEY, (0, 0))[0], rid)',
+       "            rid = (scope_of(r), r.get(EPOCH_KEY), rid)")],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="a")
+             for i in range(5)]
+     deg = rec(100 + 5 * 604800, {"Bash": 45.0, "Read": 55.0}, scope="a", run_id="X")
+     deg["unreadable"] = 2
+     clean_retry = rec(100 + 6 * 604800, {"Bash": 48.0, "Read": 52.0}, scope="a", run_id="X")
+     later = [rec(100 + (20 + i) * 604800, {"Bash": 48.0 + i * 3, "Read": 52.0 - i * 3},
+                  scope="a") for i in range(6)]
+     p = w(os.path.join(D, "retry.jsonl"),
+           [json.dumps(r) for r in rows] + [json.dumps(deg), json.dumps(clean_retry)]
+           + [json.dumps(r) for r in later])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert rej.get("duplicate run_id (retry)") == 1, dict(rej)
+     cur = optimize.active_records(recs, ep)
+     assert len(cur) == 6, ("salinan bersih dari run yang sama ikut jadi bukti", len(cur))
      """),
 
 ]
