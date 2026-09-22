@@ -197,3 +197,183 @@ before they were believed and both now pinned by a case and a mutant:
 
 The long-run simulator was discarding the epoch it was handed, so it could combine records across a
 loss; it now analyses `active_records()` like the CLI.
+
+## 6. Trusted damage boundaries (frozen before the second repair)
+
+Frozen against the branch head `e6c1f4f`, **before** any of it was implemented. The adversarial
+review of the epoch model found that attribution was taken from the very line that had just failed
+validation: a `scope_id` holding invalid UTF-8 survived `errors="replace"` as `U+FFFD`, read as a
+"readable" label, and cut a scope that does not exist — while the real population kept crossing the
+loss. §2 of that review reproduced it as `CANDIDATE`, one candidate file, twelve comparable records
+spanning both sides of the gap.
+
+The rule this section freezes is about provenance, not about Unicode:
+
+> **A record that failed validation is not a trustworthy authority for its own scope attribution.**
+
+Two consequences, and one deliberate trade:
+
+* **Every rejection that is a loss is a FILE-GLOBAL boundary.** No rejected line may name a scope,
+  whatever its `scope_id` looks like — `rev`, `agent-b`, a path, a 64-character label, or bytes that
+  never decoded. This over-blocks: one corrupt line cuts scopes that were never damaged. That is the
+  chosen half of the trade (§23 of the task), because epochs recover and a fail-open crossing of a
+  real loss does not.
+* **The history is read as BYTES and decoded strictly, per physical line.** `errors="replace"`
+  destroyed the evidence that decoding had failed; a line that cannot decode is now a named
+  rejection (`line is not valid UTF-8`) and a file-global boundary, and the reader continues at the
+  next line rather than abandoning the file.
+* **A scope-local boundary now has exactly one trusted source** (§6.2): a record that PASSED
+  validation and whose own canonical loss counters prove that evidence was lost.
+
+### 6.1 TUTF — invalid UTF-8 (all FILE_GLOBAL, no ghost scope)
+
+Fixture unless stated: `6 clean scope=rev` + the bad line + `6 clean scope=rev`. The bad line is
+SameWrite-shaped, holds invalid UTF-8 in the named field, and independently fails `valid_record()`
+(its shares sum to 20, not ~100).
+
+| case | bad line | boundary | `damage.scope_local` | active epoch | status |
+|---|---|---|---|---|---|
+| **TUTF_01** | invalid UTF-8 inside `scope_id` | FILE_GLOBAL ×1 | `{}` | 6 | `CANDIDATE` |
+| **TUTF_02** | invalid UTF-8 inside `shares` | FILE_GLOBAL ×1 | `{}` | 6 | `CANDIDATE` |
+| **TUTF_03** | invalid UTF-8 inside `run_id` | FILE_GLOBAL ×1 | `{}` | 6 | `CANDIDATE` |
+| **TUTF_04** | invalid UTF-8 inside `workload_class` | FILE_GLOBAL ×1 | `{}` | 6 | `CANDIDATE` |
+| **TUTF_05** | one undecodable line before every record (`bad + 6 clean`) | FILE_GLOBAL ×1 | `{}` | 6 | `CANDIDATE` |
+| **TUTF_06** | one undecodable line at EOF (`6 clean + bad`) | FILE_GLOBAL ×1 | `{}` | 0 | `INSUFFICIENT_DATA` |
+| **TUTF_07** | two undecodable lines (`6 + bad + 6 + bad + 6`) | FILE_GLOBAL ×2 | `{}` | 6 | `CANDIDATE` |
+| **TUTF_08** | one undecodable line between two scopes (`6×a + bad + 6×b`) | FILE_GLOBAL ×1 | `{}` | 6 (`b`); 0 with `--scope-id a` | `CANDIDATE`; `INSUFFICIENT_DATA` |
+
+In every row: no candidate may name a `run_id` from before the boundary, `scope.known` may not
+contain a label that came from the rejected line, and no raw undecodable byte may appear anywhere in
+the JSON output, the human output or a candidate file.
+
+### 6.2 TSCOPE — a rejected record does not authenticate its own `scope_id`
+
+Fixture: `6 clean scope=rev` + one rejected record carrying a syntactically perfect
+`scope_id="ghost"` + `6 clean scope=rev`. Every row below is a loss.
+
+| case | rejected record | boundary | `damage.scope_local` | active epoch | status |
+|---|---|---|---|---|---|
+| **TSCOPE_01** | shares sum to 20, not ~100 | FILE_GLOBAL ×1 | `{}` | 6 | `CANDIDATE` |
+| **TSCOPE_02** | a non-numeric share value | FILE_GLOBAL ×1 | `{}` | 6 | `CANDIDATE` |
+| **TSCOPE_03** | `sessions` negative (implausible) | FILE_GLOBAL ×1 | `{}` | 6 | `CANDIDATE` |
+| **TSCOPE_04** | `evidence_quality` outside the vocabulary | FILE_GLOBAL ×1 | `{}` | 6 | `CANDIDATE` |
+| **TSCOPE_05** | `schema_version: 3`, a legacy schema this reader cannot name | FILE_GLOBAL ×1 | `{}` | 6 | `CANDIDATE` |
+| **TSCOPE_06** | a carry record with no `shares` key at all | FILE_GLOBAL ×1 | `{}` | 6 | `CANDIDATE` |
+| **TSCOPE_07** | `record_type` is not `carry_run` | FILE_GLOBAL ×1 | `{}` | 6 | `CANDIDATE` |
+
+Still **not** a loss, so still no boundary at all: a well-formed foreign JSON line, a bare object
+with no `shares` and no sign of being ours, and current-generation (schema-4) evidence refused by
+design. A migration must not read as file damage.
+
+Canaries, each used as the rejected record's `scope_id`, each of which must leave
+`damage.scope_local == {}` and must not appear in `scope.known`: `/etc/passwd.d/synthetic`,
+`agent-b`, `rev`, a 63-character label, a 64-character label, a label holding control bytes, and a
+label that never decoded. **Cardinality:** 2000 rejected lines carrying 2000 distinct `scope_id`
+values produce `file_global == 2000`, `scope_local == {}` — attacker-controlled strings cannot add a
+single public map key.
+
+### 6.3 The hypothesis this repair had to test first: a VALID record that is DEGRADED
+
+Reproduced on `e6c1f4f` before anything was designed for it, with a matched control:
+
+```text
+6 clean + 1 valid schema-2 record with unreadable=3 + N clean, scope agent-a
+  N=2    PARTIAL_EVIDENCE / history.quality DEGRADED / 0 candidate files
+  N=6    PARTIAL_EVIDENCE / history.quality DEGRADED / 0 candidate files
+  N=60   PARTIAL_EVIDENCE / history.quality DEGRADED / 0 candidate files
+control (identical populations, no degraded record)
+  N=2,6,60                CANDIDATE / history.quality COMPLETE / 1 candidate file
+```
+
+`VALID_DEGRADED_FAIL_STUCK=YES`. The record passes `valid_record()`, so no rejection and no
+boundary was ever considered; it stays in `comparable()` forever, and `history_quality()` is the
+worst of that set. No amount of later healthy evidence clears it — the same fail-stuck shape the
+epoch model was built to remove, reached through the one door the epoch model did not watch.
+
+So §9 of the task applies, and narrowly. A **fully validated** record whose OWN canonical loss
+counters prove degraded evidence creates a **scope-local** recovery boundary after itself. This is
+trusted where a rejected line is not: the record passed structural validation, its `scope_id` is the
+same field every accepted record publishes through `scope.known`, and the damage fact comes from
+`RECORD_LOSS_COUNTERS`, not from guessing what a corrupt line meant.
+
+| case | fixture (scope `a` unless stated) | boundary | active epoch | status | `history.quality` |
+|---|---|---|---|---|---|
+| **VD_01** | 6 clean + DEGRADED + 2 clean | SCOPE_LOCAL `{a: 1}` | 2 | `INSUFFICIENT_DATA` | `COMPLETE` |
+| **VD_02** | 6 clean + DEGRADED + 6 clean | SCOPE_LOCAL `{a: 1}` | 6 | `CANDIDATE` | `COMPLETE` |
+| **VD_03** | 6 clean + DEGRADED + 60 clean | SCOPE_LOCAL `{a: 1}` | 60 | `CANDIDATE` | `COMPLETE` |
+| **VD_04** | VD_02, reading the candidate | — | — | the candidate names none of the pre-boundary `run_id`s, and not the degraded record's own | |
+| **VD_05** | 6 clean + DEGRADED at EOF | SCOPE_LOCAL `{a: 1}` | 0 | `INSUFFICIENT_DATA` | `EMPTY` |
+| **VD_06** | `6×a`, `6×b`, DEGRADED `a`, `6×a`, `6×b` | SCOPE_LOCAL `{a: 1}` | `a`: 6 · `b`: 12 | `CANDIDATE` both | `COMPLETE` |
+| **VD_07** | 6 clean + valid `PARTIAL` by `skipped_by_limit=3` + 6 clean | **none** | 13 | `PARTIAL_EVIDENCE`; `CANDIDATE` with `--accept-partial` | `PARTIAL` |
+| **VD_08** | 6 clean + a schema-1 record (`UNKNOWN`, cannot attest) + 6 clean | **none** | 13 | `PARTIAL_EVIDENCE` | `UNKNOWN` |
+| **VD_09** | 6 clean + a valid `INVALID` record + a valid `EMPTY` (zero-carry) record + 6 clean | **none** | 14 | `CANDIDATE` | `COMPLETE` |
+
+The degraded record belongs to the OLD epoch (§14): it sits before its own boundary, in physical
+order, never in the population that recovers. Its degradation stays reported in `history.damage`.
+
+`PARTIAL`, `UNKNOWN`, `INVALID` and `EMPTY` are deliberately excluded. Only an actual loss counter
+cuts: a bound the caller asked for is an intentional population, a legacy schema that cannot attest
+completeness is not proof that a line was lost, and an ineligible record is not a damaged one.
+
+### 6.4 Retry and a trusted boundary (§15)
+
+Deduplication identity becomes `(scope, FILE-GLOBAL epoch, run_id)` — the scope-local component is
+deliberately **not** part of it. Across a file-global loss the reader cannot tell whether a repeated
+`run_id` is the same run, so both copies stand (B1_13). Across a *trusted* scope-local boundary the
+file is intact and the reader knows exactly what happened, so a repeated `run_id` is the same
+logical run retrying, and the later copy is bookkeeping.
+
+| case | physical order (scope `a`) | expectation |
+|---|---|---|
+| **VD_10** | `clean X`, `degraded retry X`, 6 clean | boundary `{a: 1}` after the degraded copy; both copies pre-boundary; `duplicate run_id (retry)` = 1; active epoch 6, `CANDIDATE`, `COMPLETE` |
+| **VD_11** | `degraded X`, `clean retry X`, 6 clean | boundary `{a: 1}` after the degraded copy; the clean retry is dropped as the same run's bookkeeping and never becomes evidence in the recovered epoch; `duplicate run_id (retry)` = 1; active epoch 6, `CANDIDATE`, `COMPLETE` |
+
+Neither order launders the loss into the recovered epoch, and neither poisons it forever.
+
+### 6.5 File-global recovery is unchanged (§20, §21)
+
+| case | fixture | expectation |
+|---|---|---|
+| **MSG_01** | `6×a`, `6×b`, torn line, `6×a`, `2×b` | `a`: epoch 6, `CANDIDATE`; `b`: epoch 2, `INSUFFICIENT_DATA`; nothing from before the cut helps either |
+| **MSG_02** | the same with the sufficiencies reversed (`2×a`, `6×b` after the cut) | `a`: `INSUFFICIENT_DATA`; `b`: `CANDIDATE` |
+
+File-global means every scope is cut **at that position**, never that a scope is disabled forever:
+`B1_01`–`B1_04` still pin `+0 / +2 / +6 / +60`.
+
+### 6.6 Frozen-decision amendments to §5 (§27)
+
+Two rows of the B1 matrix were written against the old attribution rule and are wrong under this
+one. Both are replaced rather than deleted, and the property each was protecting keeps a case.
+
+```text
+B1_13e  three copies of one run_id in one epoch, the middle one carrying unreadable=1
+        was: history.quality DEGRADED, 2 duplicates, 0 files
+        now: the middle copy is a VALID record proving a loss, so it cuts scope-locally.
+             The property "the worst copy survives inside one epoch" moves to a fixture whose
+             copies are PARTIAL/COMPLETE (no loss counter); the degraded-copy behaviour is
+             VD_10/VD_11 above.
+
+B1_15   two scope-local boundaries taken from two REJECTED lines
+        was: damage.scope_local == {a: 1, b: 1} from rejected records
+        now: rejected lines are file-global, so the same fixture yields file_global == 2.
+             The property it protected — two scopes can hold the same epoch NUMBERS, so the
+             deduplication identity must carry the scope — is re-pinned with the same shape
+             built from TRUSTED sources: a valid DEGRADED record in each scope.
+```
+
+No other B1 or R142 expectation changes. `R142_01`–`R142_06` and `B1_01`–`B1_14` are re-run
+unchanged.
+
+### 6.7 The residual limit this repair does not close (§24)
+
+`LEGACY_STRUCTURALLY_VALID_CORRUPTION_LIMITATION=YES`. A legacy flat record carries no integrity
+tag. A corruption that turns one valid record into a *different* valid record — `scope_id` flipped
+from `agent-a` to `agent-b`, a share vector rewritten to another vector that still sums to ~100 — is
+indistinguishable from a record the producer meant to write. Nothing in this repair detects it, and
+nothing can: the information needed to tell them apart is absent from the format. What the repair
+does guarantee is narrower and checkable: a line that *fails* validation never supplies attribution,
+and a line that cannot be decoded is never mistaken for one that can.
+
+### 6.8 Deviations from this frozen section
+
+None.
