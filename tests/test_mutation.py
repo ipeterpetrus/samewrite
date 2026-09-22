@@ -791,8 +791,8 @@ CASES = [
 
     ("M_STRUCTURAL_REJECT_NOT_DAMAGE: penolakan struktural memotong epoch, bukan sekadar dicatat",
      [("optimize.py",
-       'NOT_A_LOSS = ("current-generation", "duplicate run_id", "not an object", "no shares")',
-       'NOT_A_LOSS = ("current-generation", "duplicate run_id", "not an object", "no shares", "unsupported schema_version", "shares sum to")')],
+       'NOT_A_LOSS = ("current-generation", "duplicate run_id", "not an object", "no shares",\n              "not our record_type")',
+       'NOT_A_LOSS = ("unsupported schema_version", "shares sum to")')],
      """
      rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="g")
              for i in range(6)]
@@ -1019,6 +1019,26 @@ CASES = [
      assert all(chr(65533) not in optimize.scope_of(r) for r in recs), "U+FFFD masuk sebagai scope"
      """),
 
+    ("M_FOREIGN_RECORD_TYPE_IS_DAMAGE: entri alat lain di berkas bersama bukan kehilangan kita",
+     [("optimize.py",
+       '        return False, ("unknown record_type" if claims_ours else "not our record_type")',
+       '        return False, "unknown record_type"')],
+     """
+     rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
+             for i in range(6)]
+     foreign = json.dumps({"record_type": "hermes_run", "ts": 100, "note": "bukan record kita"})
+     p = w(os.path.join(D, "foreign_type.jsonl"), [json.dumps(r) for r in rows] + [foreign])
+     recs, rej, _l, ep = optimize.load_history(p)
+     assert optimize.damage_summary(ep)["boundaries"] == 0, optimize.damage_summary(ep)
+     assert len(optimize.active_records(recs, ep)) == 6, "populasi rev ikut terpotong"
+     # kontrol: baris yang MENGAKU record kita dengan record_type asing TETAP kehilangan
+     ours = json.dumps({"record_type": "carry_note", "schema_version": 2, "run_id": "x",
+                        "shares": {"Bash": 100.0}})
+     p2 = w(os.path.join(D, "ours_type.jsonl"), [json.dumps(r) for r in rows] + [ours])
+     recs2, rej2, _l2, ep2 = optimize.load_history(p2)
+     assert optimize.damage_summary(ep2)["file_global"] == 1, optimize.damage_summary(ep2)
+     """),
+
     ("M_REJECTED_VALUE_ECHOED: isi baris yang ditolak tak boleh masuk output publik",
      [("optimize.py", '    if v is None or (isinstance(v, (int, float)) and not isinstance(v, bool)):\n'
        '        return repr(v)\n    return "of type " + type(v).__name__',
@@ -1093,8 +1113,8 @@ CASES = [
 
     ("M_GLOBAL_DAMAGE_NOT_CUT: kegagalan decode adalah kehilangan, bukan catatan kaki",
      [("optimize.py",
-       'NOT_A_LOSS = ("current-generation", "duplicate run_id", "not an object", "no shares")',
-       'NOT_A_LOSS = ("current-generation", "duplicate run_id", "not an object", "no shares", "not valid UTF-8")')],
+       'NOT_A_LOSS = ("current-generation", "duplicate run_id", "not an object", "no shares",\n              "not our record_type")',
+       'NOT_A_LOSS = ("not valid UTF-8",)')],
      """
      rows = [rec(100 + i * 604800, {"Bash": 30.0 + i * 3, "Read": 70.0 - i * 3}, scope="rev")
              for i in range(6)]
@@ -1177,6 +1197,30 @@ CASES = [
      cur = optimize.active_records(recs, ep)
      assert "degraded-one" not in [r.get("run_id") for r in cur], "record DEGRADED masuk epoch baru"
      assert len(cur) == 6, len(cur)
+     """),
+
+    ("M_DEGRADED_RETRY_CUTS_TWICE: satu boundary per run logis, bukan per salinan",
+     [("optimize.py", "                    if ident is None or ident not in opened:",
+       "                    if True:")],
+     """
+     def deg(seq, bash, run_id):
+         r = rec(100 + seq * 604800, {"Bash": bash, "Read": 100.0 - bash}, scope="a",
+                 run_id=run_id)
+         r["unreadable"] = 2
+         return json.dumps(r)
+     healthy = [json.dumps(rec(100 + (20 + i) * 604800,
+                               {"Bash": 48.0 + i * 3, "Read": 52.0 - i * 3}, scope="a"))
+                for i in range(6)]
+     p = w(os.path.join(D, "retrycut.jsonl"), [deg(0, 30.0, "X")] + healthy + [deg(0, 30.0, "X")])
+     recs, rej, _l, ep = optimize.load_history(p)
+     d = optimize.damage_summary(ep)
+     assert d["scope_local"] == {"a": 1}, d
+     assert len(optimize.active_records(recs, ep)) == 6, len(optimize.active_records(recs, ep))
+     # kontrol: kehilangan kedua dari run yang BENAR-BENAR lain tetap memotong
+     p2 = w(os.path.join(D, "realsecond.jsonl"),
+            [deg(0, 30.0, "X")] + healthy + [deg(30, 30.0, "Y")])
+     recs2, rej2, _l2, ep2 = optimize.load_history(p2)
+     assert optimize.damage_summary(ep2)["scope_local"] == {"a": 2}, optimize.damage_summary(ep2)
      """),
 
     ("M_DEGRADED_RETRY_NO_RECOVERY: retry tak boleh mencuci kehilangan yang dilaporkan kembarannya",

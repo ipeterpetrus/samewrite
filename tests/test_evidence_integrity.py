@@ -265,6 +265,8 @@ def trusted_boundaries():
         check(label + " — and no ghost scope is published", "ghost" in j["scope"]["known"], False)
 
     for label, line in (("a foreign JSON line", json.dumps({"note": "another tool's entry"})),
+                        ("another tool's record_type in a shared history",
+                         json.dumps({"record_type": "hermes_run", "ts": TS0, "note": "not ours"})),
                         ("a bare object that never claimed to be ours",
                          json.dumps({"note": "x", "shares": None})),
                         ("current-generation evidence refused by design",
@@ -362,6 +364,36 @@ def trusted_boundaries():
                       j["history"].get("quality"),
                       j["history"]["rejected"].get("duplicate run_id (retry)")) + dmg(j),
               ("CANDIDATE", 10, 1, 6, "COMPLETE", 1, 0, {"a": 1}))
+
+    # VD_12/VD_13: what a cross-family review of THIS repair found. A retry reports the same loss
+    # its twin already reported, and a deduplicated retry is bookkeeping by this reader's own rule.
+    # Letting a late copy open a SECOND boundary let "six healthy records, then one more copy of X"
+    # erase a recovered epoch — on repeat, forever: the fail-stuck shape this repair exists to
+    # remove, rebuilt out of its own recovery mechanism. (docs §6.10)
+    print("\nVD_12/VD_13 - one boundary per logical run, and still one per real loss")
+    healthy = ser(6, 20, "a", base=48.0)
+    rc, j, n = run([deg] + healthy + [deg])
+    check("VD_12 a late copy of the SAME degraded run does not cut again",
+          (j["status"], rc, n, j["scope"]["records_in_epoch"],
+           j["history"]["rejected"].get("duplicate run_id (retry)")) + dmg(j),
+          ("CANDIDATE", 10, 1, 6, 1, 0, {"a": 1}))
+    rc, j, n = run([deg] + healthy + [deg] + ser(6, 40, "a", base=66.0) + [deg])
+    check("VD_12 ...and repeating the pattern cannot hold the scope down forever",
+          (j["status"], j["scope"]["records_in_epoch"]) + dmg(j), ("CANDIDATE", 12, 0, {"a": 1}))
+    other = json.dumps(dict(json.loads(deg), run_id="ra-other", ts=TS0 + 30 * 604800))
+    rc, j, n = run([deg] + healthy + [other])
+    check("VD_13 a genuinely different second loss still cuts",
+          (j["status"], rc, n, j["scope"]["records_in_epoch"]) + dmg(j),
+          ("INSUFFICIENT_DATA", 20, 0, 0, 0, {"a": 2}))
+    anon = json.dumps({k: v for k, v in json.loads(deg).items() if k != "run_id"})
+    rc, j, n = run([anon, anon] + healthy)
+    check("VD_13 a degraded record with no run_id cannot be shown to be a retry",
+          (j["status"], j["scope"]["records_in_epoch"]) + dmg(j), ("CANDIDATE", 6, 0, {"a": 2}))
+    twin_b = json.dumps(dict(json.loads(deg), scope_id="b"))
+    rc, j, n = run([deg, twin_b] + healthy, extra=["--scope-id", "a"])
+    check("VD_13 the same run_id in another scope is that scope's own loss",
+          (j["status"], j["scope"]["records_in_epoch"]) + dmg(j),
+          ("CANDIDATE", 6, 0, {"a": 1, "b": 1}))
 
     # ---------------------------------------------------------------- file-global (§6.5)
     print("\nMSG - a file-global cut applies to every scope at that position, and only there")

@@ -399,3 +399,36 @@ TPRIV    a rejected line carrying synthetic secret- and path-shaped strings.
          is named by type ("unsupported schema_version of type str"). A real schema number is still
          named in full.
 ```
+
+Third addition, found while verifying §6 of the task ("a migration must not read as file damage")
+rather than reported by anyone:
+
+```text
+TSCOPE control: another tool's record_type in a shared history.
+        `{"record_type": "hermes_run", "ts": ..., "note": ...}` was classified
+        "unknown record_type" and counted as a LOSS, so a foreign entry cut the file. The
+        distinction `no shares` already draws one check further down now applies here too: a line
+        that ALSO carries our fields (schema_version / run_id / carry_bytes) with an unknown
+        record_type is a corrupted record of ours and stays a loss (TSCOPE_07); a line that carries
+        none of them is another tool's entry and is counted without a boundary.
+```
+
+### 6.10 What a cross-family review found in the trust repair itself
+
+| case | fixture (scope `a`) | expectation |
+|---|---|---|
+| **VD_12** | `DEGRADED X`, 6 clean, `DEGRADED X` again at EOF | one boundary, not two: active epoch 6, `CANDIDATE`, `scope_local == {a: 1}`, one counted retry |
+| **VD_12b** | the same pattern repeated (`DEG X`, 6 clean, `DEG X`, 6 clean, `DEG X`) | still one boundary; active epoch 12, `CANDIDATE` |
+| **VD_13** | `DEGRADED X`, 6 clean, `DEGRADED Y` (a different run) | two boundaries — a real second loss still cuts |
+| **VD_13b** | two `DEGRADED` records carrying no `run_id` at all | two boundaries: a record that cannot be shown to be a retry is its own observation |
+| **VD_13c** | `DEGRADED X` in scope `a` and `DEGRADED X` in scope `b` | `{a: 1, b: 1}` — the same id in another scope is that scope's own loss |
+
+The boundary was opened before deduplication, so a copy that was then discarded as
+`duplicate run_id (retry)` still moved the counter. Measured before the fix, the reviewer's own
+fixture gave `INSUFFICIENT_DATA`, `records_in_epoch=0`, `scope_local={"a": 2}` with six healthy
+records sitting between the two copies — and repeating `6 healthy + one more copy of X` held the
+scope down indefinitely: **the fail-stuck shape this repair exists to remove, rebuilt out of its own
+recovery mechanism.** A boundary is now opened at most once per `(scope, file-global epoch, run_id)`.
+A record with no `run_id` cannot be shown to be a retry and stays its own observation; across a
+file-global loss the identity differs, because there the reader cannot tell whether a repeated id is
+the same run at all.

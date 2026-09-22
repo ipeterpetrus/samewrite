@@ -249,7 +249,8 @@ def sweep_quality(live):
 #     tool's entry, and treating it as lost evidence would cut a history nothing happened to.
 # Listed this way round on purpose: a reason added to valid_record() later defaults to LOSS rather
 # than slipping through an allowlist nobody updated. (cross-family review, confirmation round)
-NOT_A_LOSS = ("current-generation", "duplicate run_id", "not an object", "no shares")
+NOT_A_LOSS = ("current-generation", "duplicate run_id", "not an object", "no shares",
+              "not our record_type")
 
 # The epoch a record belongs to: (file-global losses seen before it, losses seen before it that were
 # attributed to ITS scope). A private, in-memory annotation; nothing writes it back to a file.
@@ -417,16 +418,23 @@ def valid_record(o):
         return False, ("unsupported schema_version %s: current-generation (v1.4) evidence, "
                        "not read by this optimizer"
                        % safe_label(o["envelope"].get("schema_version")))
+    # Computed here and used twice: a rejection's damage class depends on whether the line claimed
+    # to be one of OUR records at all.
+    claims_ours = (o.get("record_type") == "carry_run" or "schema_version" in o
+                   or "run_id" in o or "carry_bytes" in o)
     if o.get("record_type") not in (None, "carry_run"):
-        return False, "unknown record_type"
+        # A record_type this reader cannot name, on a line that ALSO carries our fields, is a
+        # corrupted record of ours and therefore a loss. On a line that carries none of them it is
+        # another tool's entry in a shared history, and reading it as lost evidence would cut a
+        # history nothing happened to — the same distinction `no shares` already makes one check
+        # further down. (§6 of the trusted-boundary task: a migration must not read as damage.)
+        return False, ("unknown record_type" if claims_ours else "not our record_type")
     sv = o.get("schema_version", 0)
     if not isinstance(sv, int) or isinstance(sv, bool) or sv not in SCHEMA_SUPPORTED:
         # The reason string is public: it becomes a key of `history.rejected`. A rejected line's
         # own content therefore goes through safe_label() before it can be echoed there.
         return False, f"unsupported schema_version {safe_label(sv)}"
     sh = o.get("shares")
-    claims_ours = (o.get("record_type") == "carry_run" or "schema_version" in o
-                   or "run_id" in o or "carry_bytes" in o)
     if not isinstance(sh, dict):
         # Two different lines, and the damage classification depends on which one this is: a line
         # that claims to be one of OUR records is a corrupted record (a loss), a line that claims
@@ -471,6 +479,7 @@ def load_history(path):
     and is kept as it is."""
     recs, rejected = [], collections.Counter()
     cuts_file, cuts_scope = 0, collections.Counter()
+    opened = set()
     if not path or not os.path.exists(path):
         return recs, rejected, 0, {"file_global": 0, "scope_local": {}}
     lines = 0
@@ -517,7 +526,21 @@ def load_history(path):
                     # The record belongs to the epoch it closes, never to the one it opens: it is
                     # stamped first and the counter moves after it. A population that recovers is
                     # not founded on the observation that reported the loss.
-                    cuts_scope[scope_of(o)] += 1
+                    # ONE boundary per logical run, though. A retry reports the SAME loss its twin
+                    # already reported, and this reader's own rule calls a deduplicated retry
+                    # bookkeeping rather than a loss; letting a late copy open a second boundary
+                    # let `6 healthy records + one more copy of X` erase a recovered epoch, on
+                    # repeat, forever — the fail-stuck shape this repair exists to remove, rebuilt
+                    # out of its own recovery mechanism. (cross-family review of the trust repair)
+                    # A record with no run_id cannot be shown to be a retry and stays its own
+                    # observation; across a file-global loss the identity differs, because there
+                    # the reader cannot tell whether a repeated id is the same run at all.
+                    rid = o.get("run_id")
+                    ident = ((scope_of(o), cuts_file, rid) if isinstance(rid, str) and rid
+                             else None)
+                    if ident is None or ident not in opened:
+                        opened.add(ident)
+                        cuts_scope[scope_of(o)] += 1
                 continue
             rejected[why] += 1
             # EVERY loss a rejected line represents is file-global. A record that failed validation
