@@ -15,8 +15,9 @@ review before merge.
 
 ## 1. What was wrong
 
-- **The legacy optimizer promoted findings from evidence it never checked.** Six defects were
-  reproduced on `77e3677` before anything was repaired (`docs/V142_COUNTEREXAMPLES.md` §1–§2):
+- **The legacy optimizer promoted findings from evidence it never checked.** The six original
+  defects, R142_01–R142_06, were reproduced on `77e3677` before anything was repaired
+  (`docs/V142_COUNTEREXAMPLES.md` §1–§2):
   * a history built from bounded sweeps promoted a candidate, and `--accept-partial` changed
     nothing because it was never read;
   * one newer ineligible record anchored the analysis and stranded six eligible ones;
@@ -54,14 +55,16 @@ review before merge.
   `INTERNAL_ERROR`.
 - **One definition of a bounded sample.** `carry.bounded_paths()` selects the newest N sources
   once; the carry sweep and the listing scan receive the same selection.
-- **Physical loss opens a recoverable history epoch, not permanent poisoning.** A rejected line
-  cuts the history at its position. Evidence before the cut is never combined with evidence after
-  it, and enough clean later evidence promotes normally. The damage stays reported in
+- **Physical evidence loss opens a recoverable history epoch, not permanent poisoning.** A
+  rejected line classified as a loss cuts the history at its position. Rejections classified as
+  non-loss open no boundary: current-generation records refused by design, retry bookkeeping and
+  well-formed foreign entries. Evidence before a cut is never combined with evidence after it,
+  and enough clean later evidence promotes normally. The damage stays reported in
   `history.damage`.
-- **A rejected record is not trusted for its own scope.** A line that failed validation cuts
-  every scope (`file_global`). It can never name the population it damaged, and a line that is
-  not valid UTF-8 is a loss, not a label. `scope_id` itself is validated before a record is
-  accepted.
+- **A rejected record is not trusted for its own scope.** A rejected line that represents a loss
+  cuts every scope (`file_global`), because the line cannot be trusted to name the population it
+  damaged. A line that is not valid UTF-8 is a loss, not a label. `scope_id` itself is validated
+  before a record is accepted.
 - **A valid record whose own counters prove a loss opens a trusted scope-local boundary.** It
   belongs to the epoch it closes; other scopes are not cut.
 - **A `run_id` is an identity claim, not proof.** Two records are one run only when their scope,
@@ -159,9 +162,14 @@ These are tracked separately. Neither was introduced by 1.4.2, and neither is re
 
 - **Drop-in patch.** No skill body change, so no model-facing behaviour changes, and no model
   benchmark is re-run for this release.
-- **Evidence history.** Schema 4 is unchanged. For the same input, the records the producer
-  writes are byte-identical to 1.4.1's except for the writer-version field, which now reads
-  `1.4.2`. Legacy histories (schemas 0–2) are read by the stricter law above.
+- **Evidence history.** Schema 4's format is unchanged, and existing schema-4 histories remain
+  readable. Newly written records are **not** guaranteed to be byte-identical to 1.4.1's: the
+  repaired bounded selection (`--max-files`) can choose a different set of sources. For example,
+  a source whose mtime cannot be read no longer sends the whole selection back to discovery
+  order, so sessions, turns and shares can differ. On matched runs that selected the same
+  sources, the observed record differed only in the writer-version field, which now reads
+  `1.4.2`. That is an observation, not a guarantee. Legacy histories (schemas 0–2) are read by
+  the stricter law above.
 - **The optimizer can say no where 1.4.1 said yes.** A history containing bounded, lost,
   unattested or impossible evidence can now report `PARTIAL_EVIDENCE` or `INSUFFICIENT_DATA`
   instead of `CANDIDATE`. That is the repair, not a regression.
